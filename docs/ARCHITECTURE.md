@@ -47,8 +47,18 @@ graph TD
 - **知识库走 CNB 原生**：天然集成，@CodeBuddy/架构师对话中直接 RAG 检索；Embedding 官方目前仅支持 `hunyuan`。
 - **拒绝最小可行骨架**：直接搭完整可用的第一版，避免半成品污染。
 
-## 五、演进方向（预留）
+## 五、Issue 管理机制（版本化演进）
+
+Issue 不是同层平铺的散点，而是**同一模块能力的版本化演进线**。每个 Issue 声明头锚定到所属模块与目标版本，使「开发好开发、合并好合并、可灵活接着开发」。详见 [docs/ISSUE_MANAGEMENT.md](ISSUE_MANAGEMENT.md) 与模板 [docs/templates/issue-template.md](templates/issue-template.md)。
+
+- **模块（Module）**：版本管理的原子单位，独立维护语义化版本线 `vMAJOR.MINOR.PATCH`。
+- **Issue 声明头**：`module / type / target / version / update / depends_on`，建立层级关系。
+- **Issue 类型**：`init`（建模块 v0.1.0）/ `update`（MINOR 增强）/ `fix`（PATCH 修复）/ `standalone`（一次性）。
+- **接力卡**：载体采用「Issue 评论内嵌结构化卡片」，Issue 声明定版本锚点、评论接力卡传协作上下文。
+- **观测**：模块版本演进线即「能力成熟度看板」，供人类俯瞰。
+
+## 六、演进方向（预留）
 
 - 多角色人设逐步在 `.cnb/settings.yml` 补全（当前为扩展位）。
-- 引入 Issue/需求模板，让架构师输入更结构化。
 - 按需扩展知识库检索范围、可视化看板自动化。
+- 模块版本演进看板自动化汇总（接 Issue 声明头自动生成）。

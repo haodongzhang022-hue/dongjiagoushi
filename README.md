@@ -48,8 +48,10 @@
 ├── docs/
 │   ├── ARCHITECTURE.md                  # 顶层架构拓扑
 │   ├── ROADMAP.md                       # 工程实践路线图
+│   ├── ISSUE_MANAGEMENT.md              # Issue 声明与模块版本管理机制
 │   └── templates/
-│       └── architect-report.md          # 架构八步产物模板
+│       ├── architect-report.md          # 架构八步产物模板
+│       └── issue-template.md            # Issue 结构化声明模板
 └── README.md                            # 本文件
 ```
 
@@ -81,7 +83,8 @@ graph TD
 2. **一库多角色**：单仓共享架构/流水线/知识库，接力卡稳定传上下文，目标不偏差。
 3. **知识库 RAG**：`knowledge:update` 入库（`hunyuan` embedding），架构师读信息条理全面。
 4. **Code Wiki**：打 tag 自动生成 Wiki 并入库，可被 AI 问答引用。
-5. **安全护栏**：CP1/CP2/CP3 暂停确认 + 敏感信息红线 + 风险显式暴露。
+5. **Issue 版本管理**：每个 Issue 声明所属模块/类型/目标/版本/更新内容，形成模块能力演进线，可阶段性多次加强（见 [docs/ISSUE_MANAGEMENT.md](docs/ISSUE_MANAGEMENT.md)）。
+6. **安全护栏**：CP1/CP2/CP3 暂停确认 + 敏感信息红线 + 风险显式暴露。
 
 ---
 

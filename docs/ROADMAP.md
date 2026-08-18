@@ -14,10 +14,15 @@
 | M5 | 进度对齐（暂停点） | ✅ | CP1/CP2/CP3 护栏 |
 | M6 | 索引建立 | ✅ | docs/ 索引 + 产物索引 |
 | M7 | 真实场景跑通验证 | ⏳ | 用架构师 skill 跑一个真实架构需求 |
+| M8 | Issue 声明与模块版本管理机制 | ✅ | 声明头 + 类型表 + 版本线（见 docs/ISSUE_MANAGEMENT.md） |
 
 ## 架构八步模板
 
 见 [docs/templates/architect-report.md](templates/architect-report.md)，每次做真实架构设计时按此模板产出。
+
+## Issue 版本管理
+
+Issue 采用「声明头 + 模块版本线」管理：每个 Issue 声明所属模块/类型/目标/版本/更新内容，通过 `depends_on` 形成模块能力演进线，支持能力阶段性、多次被加强。详见 [docs/ISSUE_MANAGEMENT.md](ISSUE_MANAGEMENT.md) 与模板 [docs/templates/issue-template.md](templates/issue-template.md)。
 
 ## 下一阶段（V0.2 建议）
 
@@ -37,4 +42,6 @@
 | 顶层架构 | `docs/ARCHITECTURE.md` |
 | 路线图 | `docs/ROADMAP.md` |
 | 八步模板 | `docs/templates/architect-report.md` |
+| Issue 版本管理 | `docs/ISSUE_MANAGEMENT.md` |
+| Issue 声明模板 | `docs/templates/issue-template.md` |
 | 使用说明 | `README.md` |
