@@ -1,0 +1,56 @@
+# ============================================================
+# 架构师 Agent · 流水线配置（第一版）
+# 仓库：dongjiagoushi（架构师体系）
+#
+# 核心机制：
+#   - 官方 @CodeBuddy 化身「架构师」：由 .codebuddy/skills/architect/SKILL.md
+#     在对话中自动加载（零积分），无需本文件 npc:go 强依赖。
+#   - 本文件负责：知识库入库（knowledge:update）+ 事件触发兜底（npc:go）
+#     + Code Wiki 生成（codewiki，knowledge_enabled 自动入库）。
+# ============================================================
+
+# 知识库入库：将仓库 docs/ 等 Markdown 文档切片、分词、向量化写入仓库知识库
+# 配合 codewiki 的 knowledge_enabled: true，仓库被标记为知识库并激活 Wiki 展示。
+# embeddingModel 目前官方仅支持 hunyuan（中文效果好，架构文档/代码注释检索友好）。
+main:
+  push:
+    - name: build knowledge base
+      stages:
+        - name: knowledge update
+          type: knowledge:update
+          options:
+            include: "**/**.md"
+            chunkSize: 1500
+            embeddingModel: hunyuan   # 官方文档：目前仅支持 hunyuan
+            issueSyncEnabled: true    # 同步 Issue 数据，供 agent 检索需求上下文
+
+# NPC 任务兜底（Issue/PR 评论 @NPC 触发）
+# 主路线是官方 @CodeBuddy 自动加载 architect skill；
+# 此处保留 npc:go 兜底，供未来按 .cnb/settings.yml 定义自建 NPC 或平台触发时使用。
+.npc_task: &npc_task
+  - name: architect npc
+    stages:
+      - name: npc go
+        type: npc:go
+        options:
+          role: "架构·总师"   # 对应 .cnb/settings.yml 中的角色（兜底人设）
+          # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
+          # model: hy3    # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
+          # model: glm-5  # GLM 模型
+
+# 兜底事件（仓库级事件在此处理）
+$:
+  issue.comment@npc: *npc_task
+  pull_request.comment@npc: *npc_task
+
+  # Code Wiki：打 tag 时自动读取仓库代码 + docs/ 文档，生成项目 Wiki
+  # 生成后仓库首页出现 Wiki 入口，并自动入库知识库（knowledge_enabled: true，可被 AI 问答引用）
+  tag_push:
+    - name: generate codewiki
+      stages:
+        - name: codewiki
+          image: cnbcool/codewiki:latest
+          settings:
+            git_doc_dir: /${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/codewiki
+            use_codebuddy: 1      # 使用 CNB AI 接入点
+            knowledge_enabled: true   # 生成的 Wiki 自动入库仓库知识库
