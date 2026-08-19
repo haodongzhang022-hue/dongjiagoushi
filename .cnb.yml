@@ -9,9 +9,14 @@
 #     + Code Wiki 生成（codewiki，knowledge_enabled 自动入库）。
 # ============================================================
 
-# 知识库入库：将仓库 docs/ 等 Markdown 文档切片、分词、向量化写入仓库知识库
-# 配合 codewiki 的 knowledge_enabled: true，仓库被标记为知识库并激活 Wiki 展示。
-# embeddingModel 目前官方仅支持 hunyuan（中文效果好，架构文档/代码注释检索友好）。
+# ============================================================
+# 知识库入库（knowledge:update）
+# ------------------------------------------------------------
+# 作用：将仓库 Markdown 文档（README/AGENTS/docs/模板）切片、分词、
+#       向量化写入仓库知识库，供 @CodeBuddy/架构师对话 RAG 检索。
+# 触发：main 分支 push 时自动执行（含 PR 合入 main）。
+# embeddingModel 目前官方仅支持 hunyuan（中文效果好，架构文档检索友好）。
+# ============================================================
 main:
   push:
     - name: build knowledge base
@@ -19,10 +24,18 @@ main:
         - name: knowledge update
           type: knowledge:update
           options:
-            include: "**/**.md"
+            # 显式覆盖核心文档：根目录说明/协作规则 + docs 全部 md + 模板
+            include: "**/*.md"
+            # 排除无需索引的目录/文件（避免污染知识库检索结果）
+            exclude:
+              - "node_modules/**"
+              - "dist/**"
+              - "**/codewiki/**"   # CodeWiki 生成产物独立入库，避免与源码重复
             chunkSize: 1500
             embeddingModel: hunyuan   # 官方文档：目前仅支持 hunyuan
-            issueSyncEnabled: true    # 同步 Issue 数据，供 agent 检索需求上下文
+            issueSyncEnabled: true    # 同步 Issue 数据，供 agent 检索需求/决策上下文
+            forceRebuild: false       # 默认增量；如需全量重建知识库改为 true
+            ignoreProcessFailures: true  # 单个文档处理失败不阻断整体入库
 
 # NPC 任务兜底（Issue/PR 评论 @NPC 触发）
 # 主路线是官方 @CodeBuddy 自动加载 architect skill；
