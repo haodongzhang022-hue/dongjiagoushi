@@ -16,10 +16,11 @@
 | M7 | 真实场景跑通验证 | ⏳ | 用架构师 skill 跑一个真实架构需求 |
 | M8 | Issue 声明与模块版本管理机制 | ✅ | 声明头 + 类型表 + 版本线（见 docs/ISSUE_MANAGEMENT.md） |
 | M9 | 多角色召唤协议（配合机制） | ✅ | 接力卡 + 各角色输出契约 + 接力纪律（见 SKILL.md） |
-| M10 | 多角色协作真实跑通验证 | ⏳ | 用总师召唤产品/开发/评审/测试跑一次完整接力 |
+| M10 | 多角色协作真实跑通验证 | ✅ | 用总师召唤产品/开发/评审/测试跑一次完整接力（含回转/打断，见 `tests/test_relay_workflow.sh` T8） |
 | M11 | 知识库充实 | ⏳ | 架构文档/模板/声明头批量入库 + 索引入口 docs/KNOWLEDGE.md（见 Issue #6） |
 | M12 | 可视化看板自动化汇总 | ✅ | 基于 Issue 声明头自动生成 docs/DASHBOARD.md（见 scripts/generate-dashboard.py） |
-| M13 | 测试体系落地（护栏） | ✅ | .cnb.yml 加 test 阶段 + tests/test_architect_system.sh（静态断言）+ tests/test_functional_links.sh（真实功能链路）+ 验收清单（见 Issue #8） |
+| M13 | 测试体系落地（护栏） | ✅ | .cnb.yml 加 test 阶段 + tests/test_architect_system.sh（静态断言）+ tests/test_functional_links.sh（真实功能链路）+ tests/test_relay_workflow.sh（接力可复现）+ 验收清单（见 Issue #8） |
+| M14 | 协作触发强制化 + 回转/打断协议 | ✅ | 三层触发（显式[触发]/语义/rules固定）+ [回转]/[打断] 协议，T8 端到端可复现（见本批任务） |
 
 ## 架构八步模板
 
@@ -58,7 +59,8 @@ dashboard 模块（init）
 ## 下一阶段（V0.2 建议）
 
 1. **真实场景验证**：在仓库内或关联 Issue 中，用 architect skill 跑一个真实架构需求，验证八步流畅度。
-2. **多角色补全**：按需完善 PM/DEV/CR/QA 人设（当前为扩展位）。
+2. ✅ **多角色补全**：已在 `.cnb/settings.yml` 补全 PM/DEV/CR/QA 人设，并落地三层触发强制化 + 回转/打断协议（T8 可复现，见本批任务）。
+3. ✅ **协作触发与回转打断可复现**：`tests/test_relay_workflow.sh` 端到端复现接力卡传递/回转打回/中断续跑，纳入 `.cnb.yml` test 阶段信号灯。
 3. **知识库充实**：将架构文档、模板持续入库，供 agent 检索。
 4. ✅ **可视化看板自动化**：已落地 `scripts/generate-dashboard.py` → `docs/DASHBOARD.md`，并在 `.cnb.yml` 挂了 `issue.*` 自动刷新（见任务 D）。
 
@@ -82,5 +84,5 @@ dashboard 模块（init）
 | 可视化看板 | `docs/DASHBOARD.md` + `scripts/generate-dashboard.py` |
 | 使用说明 | `README.md` |
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
-| 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） |
+| 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） |
 | 验收清单 | `docs/templates/acceptance-checklist.md` |

@@ -145,6 +145,47 @@ assert_contains "T5 接力卡字段-接手角色" "docs/ISSUE_MANAGEMENT.md" "�
 assert_contains "T5 上下文传递(输入上下文)" "docs/ISSUE_MANAGEMENT.md" "输入上下文"
 
 # ------------------------------------------------------------
+# T6 触发强制化测试
+#   协作角色不是纸面说明，而是三层触发机制硬约束：
+#   显式[触发] / 语义触发 / rules固定触发；缺触发标记视为无效接力
+# ------------------------------------------------------------
+echo ""
+echo "▶ T6 触发强制化测试（显式[触发]/语义/rules固定，非纸面说明）"
+assert_contains "T6 显式触发标记[触发]" "$SKILL_FILE" "[触发:"
+assert_contains "T6 缺触发标记=无效接力" "$SKILL_FILE" "无效接力"
+assert_contains "T6 语义向量触发" "$SKILL_FILE" "语义向量触发"
+assert_contains "T6 语义命中切角色" "$SKILL_FILE" "语义信号"
+assert_contains "T6 rules固定触发" "$SKILL_FILE" "rules 固定触发"
+assert_contains "T6 触发写在铁律" "$SKILL_FILE" "触发强制化"
+assert_contains "T6 AGENTS rules固定触发" "$AGENTS_FILE" "触发强制化"
+assert_contains "T6 AGENTS 显性触发优先" "$AGENTS_FILE" "显性声明触发（最高优先）"
+assert_contains "T6 AGENTS 语义向量触发" "$AGENTS_FILE" "语义向量触发"
+assert_contains "T6 AGENTS rules兜底" "$AGENTS_FILE" "rules 固定触发（兜底）"
+assert_contains "T6 settings 产品触发" "$SETTINGS_FILE" "[触发:架构·产品]"
+assert_contains "T6 settings 开发触发" "$SETTINGS_FILE" "[触发:架构·开发]"
+assert_contains "T6 settings 评审触发" "$SETTINGS_FILE" "[触发:架构·评审]"
+assert_contains "T6 settings 测试触发" "$SETTINGS_FILE" "[触发:架构·测试]"
+
+# ------------------------------------------------------------
+# T7 回转（打回）/打断（中断续跑）协议测试
+#   接力不是单向直线，必须能打回重做、中断续跑
+# ------------------------------------------------------------
+echo ""
+echo "▶ T7 回转/打断协议测试（打回重做 + 中断续跑）"
+assert_contains "T7 回转协议" "$SKILL_FILE" "[回转]"
+assert_contains "T7 回转打回主动" "$SKILL_FILE" "主动打回"
+assert_contains "T7 回转退回到角色" "$SKILL_FILE" "退回:"
+assert_contains "T7 回转最多3次" "$SKILL_FILE" "最多 3 次"
+assert_contains "T7 打断协议" "$SKILL_FILE" "[打断]"
+assert_contains "T7 续跑点" "$SKILL_FILE" "续跑点"
+assert_contains "T7 不重做已完成" "$SKILL_FILE" "不重做已完成部分"
+assert_contains "T7 状态机供复现" "$SKILL_FILE" "状态机"
+assert_contains "T7 AGENTS 回转" "$AGENTS_FILE" "[回转]"
+assert_contains "T7 AGENTS 打断" "$AGENTS_FILE" "[打断]"
+assert_contains "T7 settings 评审打回" "$SETTINGS_FILE" "[回转] 退回:架构·开发"
+assert_contains "T7 settings 测试打回" "$SETTINGS_FILE" "🔴阻塞 必须打回"
+
+# ------------------------------------------------------------
 # 汇总（信号灯）
 # ------------------------------------------------------------
 echo ""

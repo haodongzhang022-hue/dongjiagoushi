@@ -30,6 +30,8 @@ main:
             bash tests/test_architect_system.sh
             echo "==== 真实功能链路测试（数据获取/看板呈现/RAG读取） ===="
             bash tests/test_functional_links.sh
+            echo "==== 接力链路可复现测试（接力卡/回转/打断/三层触发） ===="
+            bash tests/test_relay_workflow.sh
     - name: build knowledge base
       stages:
         - name: knowledge update
