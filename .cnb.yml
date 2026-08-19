@@ -23,8 +23,13 @@ main:
       stages:
         - name: test
           # 信号灯：功能/产物未达成预期即 fail → 阻塞合并，机器强制“没达成不让通过”
+          # 静态断言（产物/配置存在性）+ 真实功能链路测试（数据获取/看板呈现/RAG读取 真跑通）
           script: |
+            set -e
+            echo "==== 静态断言（产物完整性） ===="
             bash tests/test_architect_system.sh
+            echo "==== 真实功能链路测试（数据获取/看板呈现/RAG读取） ===="
+            bash tests/test_functional_links.sh
     - name: build knowledge base
       stages:
         - name: knowledge update

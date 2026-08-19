@@ -33,7 +33,7 @@
 | 架构八步模板 | `docs/templates/architect-report.md` | 八步产物产出模板 |
 | Issue 声明模板 | `docs/templates/issue-template.md` | 声明头 front-matter 规范 |
 | 验收清单 | `docs/templates/acceptance-checklist.md` | 测试信号灯 + 可勾选验收标准 |
-| 测试脚本 | `tests/test_architect_system.sh` | 五项关键链路机器断言（test 阶段） |
+| 测试脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（真实功能链路） | 五项关键链路 + 数据获取/看板呈现/RAG读取 真跑通（test 阶段） |
 | 协作规则 | `AGENTS.md` | 全局协作规则 + 安全护栏 |
 | 使用说明 | `README.md` | 快速开始 + 命令 |
 | 真实场景产物 | `docs/arch-scenarios/` | 架构八步跑通的产物留痕 |

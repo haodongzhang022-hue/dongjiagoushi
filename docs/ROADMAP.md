@@ -19,7 +19,7 @@
 | M10 | 多角色协作真实跑通验证 | ⏳ | 用总师召唤产品/开发/评审/测试跑一次完整接力 |
 | M11 | 知识库充实 | ⏳ | 架构文档/模板/声明头批量入库 + 索引入口 docs/KNOWLEDGE.md（见 Issue #6） |
 | M12 | 可视化看板自动化汇总 | ✅ | 基于 Issue 声明头自动生成 docs/DASHBOARD.md（见 scripts/generate-dashboard.py） |
-| M13 | 测试体系落地（护栏） | ✅ | .cnb.yml 加 test 阶段 + tests/test_architect_system.sh + 验收清单（见 Issue #8） |
+| M13 | 测试体系落地（护栏） | ✅ | .cnb.yml 加 test 阶段 + tests/test_architect_system.sh（静态断言）+ tests/test_functional_links.sh（真实功能链路）+ 验收清单（见 Issue #8） |
 
 ## 架构八步模板
 
@@ -82,5 +82,5 @@ dashboard 模块（init）
 | 可视化看板 | `docs/DASHBOARD.md` + `scripts/generate-dashboard.py` |
 | 使用说明 | `README.md` |
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
-| 测试信号灯/脚本 | `tests/test_architect_system.sh` |
+| 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） |
 | 验收清单 | `docs/templates/acceptance-checklist.md` |

@@ -45,7 +45,8 @@
 │       └── architect/
 │           └── SKILL.md                 # ⭐ 架构师方法论（官方 @CodeBuddy 自动加载）
 ├── tests/
-│   └── test_architect_system.sh         # ⭐ 测试信号灯（五项关键链路断言，test 阶段执行）
+│   ├── test_architect_system.sh         # ⭐ 测试信号灯（静态断言：五项关键链路，test 阶段执行）
+│   └── test_functional_links.sh         # ⭐ 真实功能链路测试（数据获取/看板呈现/RAG读取 真跑通）
 ├── AGENTS.md                            # 全局协作规则
 ├── docs/
 │   ├── ARCHITECTURE.md                  # 顶层架构拓扑
@@ -90,7 +91,7 @@ graph TD
 3. **知识库 RAG**：`knowledge:update` 入库（`hunyuan` embedding），架构师读信息条理全面。
 4. **Code Wiki**：打 tag 自动生成 Wiki 并入库，可被 AI 问答引用。
 5. **Issue 版本管理**：每个 Issue 声明所属模块/类型/目标/版本/更新内容，形成模块能力演进线，可阶段性多次加强（见 [docs/ISSUE_MANAGEMENT.md](docs/ISSUE_MANAGEMENT.md)）。
-6. **测试信号灯（护栏）**：`tests/test_architect_system.sh` 在 `.cnb.yml` 的 test 阶段自动执行，对 skill 触发链路/八步产物完整性/CP 护栏/知识库入库/多角色接力五项做机器断言——**功能未达成预期即红灯阻塞，不放行**（见 [docs/templates/acceptance-checklist.md](docs/templates/acceptance-checklist.md)）。
+6. **测试信号灯（护栏）**：`.cnb.yml` 的 test 阶段依次执行两个脚本——`tests/test_architect_system.sh`（静态断言：skill 触发/八步产物/CP 护栏/知识库配置/多角色接力）与 `tests/test_functional_links.sh`（**真实功能链路**：真实拉取 Issue 数据、真实生成看板、真实查询 RAG）——**功能未真正跑通即红灯阻塞，不放行**（见 [docs/templates/acceptance-checklist.md](docs/templates/acceptance-checklist.md)）。
 7. **角色命名风格化**：本体系所有可 `@` 触发的角色统一加「架构·」前缀（架构·总师/产品/开发/评审/测试），与其他团队 agent 区分不重名；`@` 输入「架构」即自动填充补全整套团队。`架构师` 保留为体系品牌与 Skill 化身身份。
 8. **安全护栏**：CP1/CP2/CP3 暂停确认 + 敏感信息红线 + 风险显式暴露。
 9. **可视化看板自动化**：基于 Issue 声明头自动汇总模块版本演进看板 + 里程碑表，人类俯瞰决策看 [docs/DASHBOARD.md](docs/DASHBOARD.md)（由 `scripts/generate-dashboard.py` 在 Issue 增改删时自动刷新）。
