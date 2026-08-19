@@ -17,6 +17,7 @@
 | M8 | Issue 声明与模块版本管理机制 | ✅ | 声明头 + 类型表 + 版本线（见 docs/ISSUE_MANAGEMENT.md） |
 | M9 | 多角色召唤协议（配合机制） | ✅ | 接力卡 + 各角色输出契约 + 接力纪律（见 SKILL.md） |
 | M10 | 多角色协作真实跑通验证 | ⏳ | 用总师召唤产品/开发/评审/测试跑一次完整接力 |
+| M11 | 知识库充实 | ⏳ | 架构文档/模板/声明头批量入库 + 索引入口 docs/KNOWLEDGE.md（见 Issue #6） |
 
 ## 架构八步模板
 
@@ -47,3 +48,4 @@ Issue 采用「声明头 + 模块版本线」管理：每个 Issue 声明所属�
 | Issue 版本管理 | `docs/ISSUE_MANAGEMENT.md` |
 | Issue 声明模板 | `docs/templates/issue-template.md` |
 | 使用说明 | `README.md` |
+| 知识库索引入口 | `docs/KNOWLEDGE.md` |
