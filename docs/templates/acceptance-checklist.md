@@ -74,11 +74,27 @@
 
 ---
 
+## 六、经验记忆库 + 语义向量触发测试
+
+| # | 验收项 | 方式 | 通过条件 |
+|---|--------|------|----------|
+| 6.1 | 统一向量格式 | [机器] | `src/memory/schema.py` 定义 `MemoryRecord/UnifiedSchema`（id/role/category/text/vector/meta/created_at） |
+| 6.2 | 语义向量触发引擎 | [机器] | `src/memory/triggers.py` 的 `SemanticTriggerEngine` 可对输入做向量检索并命中角色（真实向量，非关键词） |
+| 6.3 | 本地 LanceDB 后端 | [机器] | `src/memory/backends/lancedb_backend.py` 可持久化写入/检索/计数 |
+| 6.4 | 云端 CNB 知识库同格式适配 | [机器] | `src/memory/backends/cloud_backend.py` 以同格式导出 Markdown/JSONL，供 `knowledge:update` 入库 |
+| 6.5 | 双后端兼容（dual） | [机器] | `MemoryStore(backend="dual")` 本地+云端同格式双写 |
+| 6.6 | 持续积累经验 | [机器] | 多次协作交互写入记忆库，可被语义触发结合记忆库二次确认检索到 |
+| 6.7 | 功能测试可复现 | [机器] | `bash tests/test_memory_store.sh`（T9）退出码 0=🟢，1=🔴 |
+
+---
+
 ## 运行方式
 
 - **机器断言（静态）**：`bash tests/test_architect_system.sh`（退出码 0=🟢，1=🔴）
 - **机器断言（真实功能链路）**：`bash tests/test_functional_links.sh`（数据获取 / 看板呈现 / RAG 读取 三链路真跑通，退出码 0=🟢，1=🔴）
-- **CI 强制**：`.cnb.yml` 的 `test` 阶段依次调用上述两个脚本；任一失败则流水线红灯，阻塞合并。
+- **机器断言（接力链路可复现）**：`bash tests/test_relay_workflow.sh`（接力卡 / 回转 / 打断 / 三层触发，退出码 0=🟢，1=🔴）
+- **机器断言（经验记忆库 + 语义向量触发）**：`bash tests/test_memory_store.sh`（统一格式 + LanceDB/云端双兼容 + 持续积累 + 语义触发，退出码 0=🟢，1=🔴）
+- **CI 强制**：`.cnb.yml` 的 `test` 阶段依次调用上述四个脚本；任一失败则流水线红灯，阻塞合并。
 
 ## 自查（提交前）
 

@@ -32,6 +32,9 @@ main:
             bash tests/test_functional_links.sh
             echo "==== 接力链路可复现测试（接力卡/回转/打断/三层触发） ===="
             bash tests/test_relay_workflow.sh
+            echo "==== 经验记忆库+语义向量触发测试（memory，双后端兼容） ===="
+            pip install -q -r src/memory/requirements.txt 2>/dev/null || true
+            bash tests/test_memory_store.sh
     - name: build knowledge base
       stages:
         - name: knowledge update

@@ -21,6 +21,7 @@
 | M12 | 可视化看板自动化汇总 | ✅ | 基于 Issue 声明头自动生成 docs/DASHBOARD.md（见 scripts/generate-dashboard.py） |
 | M13 | 测试体系落地（护栏） | ✅ | .cnb.yml 加 test 阶段 + tests/test_architect_system.sh（静态断言）+ tests/test_functional_links.sh（真实功能链路）+ tests/test_relay_workflow.sh（接力可复现）+ 验收清单（见 Issue #8） |
 | M14 | 协作触发强制化 + 回转/打断协议 | ✅ | 三层触发（显式[触发]/语义/rules固定）+ [回转]/[打断] 协议，T8 端到端可复现（见本批任务） |
+| M15 | 经验记忆库 + 语义向量触发（专业可靠落地） | ✅ | `src/memory/` 记忆库模块：统一向量格式 + LanceDB/云端双后端兼容 + 持续积累经验 + 语义向量触发引擎（T9 可复现，见本批任务） |
 
 ## 架构八步模板
 
@@ -47,6 +48,9 @@ arch-skill 模块（update）
 multirole 模块（update）
     └── issue#5  type=update v0.2.0   depends_on:#8（多角色协作人设补全）
 
+memory 模块（init）
+    └── issue#5  type=init   v0.1.0   模块根节点（经验记忆库+语义向量触发：统一格式 + LanceDB/云端双兼容 + 持续积累经验）
+
 knowledge 模块（update）
     └── issue#6  type=update v0.2.0   depends_on:#8（知识库充实）
 
@@ -59,6 +63,7 @@ dashboard 模块（init）
 ## 下一阶段（V0.2 建议）
 
 1. **真实场景验证**：在仓库内或关联 Issue 中，用 architect skill 跑一个真实架构需求，验证八步流畅度。
+1. ✅ **经验记忆库 + 语义向量触发**：已落地 `src/memory/` —— 统一向量格式 + LanceDB 本地持久化 + 云端 CNB 知识库同格式适配 + 双写兼容 + 持续积累经验 + 语义向量触发引擎（T9 可复现）。语义向量触发从"prompt/关键词层面"升级为"真实向量检索"。
 2. ✅ **多角色补全**：已在 `.cnb/settings.yml` 补全 PM/DEV/CR/QA 人设，并落地三层触发强制化 + 回转/打断协议（T8 可复现，见本批任务）。
 3. ✅ **协作触发与回转打断可复现**：`tests/test_relay_workflow.sh` 端到端复现接力卡传递/回转打回/中断续跑，纳入 `.cnb.yml` test 阶段信号灯。
 3. **知识库充实**：将架构文档、模板持续入库，供 agent 检索。
@@ -84,5 +89,5 @@ dashboard 模块（init）
 | 可视化看板 | `docs/DASHBOARD.md` + `scripts/generate-dashboard.py` |
 | 使用说明 | `README.md` |
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
-| 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） |
+| 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容 可复现） |
 | 验收清单 | `docs/templates/acceptance-checklist.md` |
