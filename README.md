@@ -48,10 +48,13 @@
 ├── docs/
 │   ├── ARCHITECTURE.md                  # 顶层架构拓扑
 │   ├── ROADMAP.md                       # 工程实践路线图
+│   ├── DASHBOARD.md                     # 📊 可视化看板（自动化生成，勿手编）
 │   ├── ISSUE_MANAGEMENT.md              # Issue 声明与模块版本管理机制
 │   └── templates/
 │       ├── architect-report.md          # 架构八步产物模板
 │       └── issue-template.md            # Issue 结构化声明模板
+├── scripts/
+│   └── generate-dashboard.py            # 🚀 看板自动生成器
 └── README.md                            # 本文件
 ```
 
@@ -86,6 +89,7 @@ graph TD
 5. **Issue 版本管理**：每个 Issue 声明所属模块/类型/目标/版本/更新内容，形成模块能力演进线，可阶段性多次加强（见 [docs/ISSUE_MANAGEMENT.md](docs/ISSUE_MANAGEMENT.md)）。
 6. **角色命名风格化**：本体系所有可 `@` 触发的角色统一加「架构·」前缀（架构·总师/产品/开发/评审/测试），与其他团队 agent 区分不重名；`@` 输入「架构」即自动填充补全整套团队。`架构师` 保留为体系品牌与 Skill 化身身份。
 7. **安全护栏**：CP1/CP2/CP3 暂停确认 + 敏感信息红线 + 风险显式暴露。
+8. **可视化看板自动化**：基于 Issue 声明头自动汇总模块版本演进看板 + 里程碑表，人类俯瞰决策看 [docs/DASHBOARD.md](docs/DASHBOARD.md)（由 `scripts/generate-dashboard.py` 在 Issue 增改删时自动刷新）。
 
 ---
 
@@ -93,6 +97,7 @@ graph TD
 
 - 召唤架构师：`@CodeBuddy 调用 architect skill，<需求>`
 - 查看知识库状态：仓库「知识库」入口
+- 查看进度看板：`docs/DASHBOARD.md`（Issue 增改删时自动刷新，也可 `python3 scripts/generate-dashboard.py` 手动刷新）
 - 生成/更新 Wiki：打 tag（触发 `tag_push` → codewiki）
 
 详细请见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/ROADMAP.md](docs/ROADMAP.md)。

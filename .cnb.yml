@@ -51,10 +51,41 @@ main:
           # model: hy3    # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
           # model: glm-5  # GLM 模型
 
+# 看板自动化：基于 Issue 声明头自动刷新模块版本演进看板 + 里程碑表
+# 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md
+# 在 Issue 增改删、PR 评论等事件后自动刷新，人类俯瞰决策零人工成本。
+.dashboard_refresh: &dashboard_refresh
+  - name: refresh dashboard
+    stages:
+      - name: generate dashboard
+        script: |
+          set -e
+          echo "[dashboard] 拉取最新代码"
+          git fetch origin
+          git checkout "${CNB_DEFAULT_BRANCH:-main}"
+          git pull origin "${CNB_DEFAULT_BRANCH:-main}" --ff-only || true
+          echo "[dashboard] 生成看板"
+          python3 scripts/generate-dashboard.py
+          if [ -n "$(git status --porcelain docs/DASHBOARD.md)" ]; then
+            git config user.name "cnb-dashboard-bot"
+            git config user.email "cnb-dashboard-bot@cnb.cool"
+            git add docs/DASHBOARD.md
+            git commit -m "chore(dashboard): 自动刷新模块版本演进看板"
+            git push origin HEAD:"${CNB_DEFAULT_BRANCH:-main}"
+            echo "[dashboard] 已推送看板更新"
+          else
+            echo "[dashboard] 看板无变化，跳过提交"
+          fi
+
 # 兜底事件（仓库级事件在此处理）
 $:
   issue.comment@npc: *npc_task
   pull_request.comment@npc: *npc_task
+  # Issue 增/改/删/重开时自动刷新看板
+  issue.open: *dashboard_refresh
+  issue.update: *dashboard_refresh
+  issue.close: *dashboard_refresh
+  issue.reopen: *dashboard_refresh
 
   # Code Wiki：打 tag 时自动读取仓库代码 + docs/ 文档，生成项目 Wiki
   # 生成后仓库首页出现 Wiki 入口，并自动入库知识库（knowledge_enabled: true，可被 AI 问答引用）

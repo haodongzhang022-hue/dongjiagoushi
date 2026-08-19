@@ -30,6 +30,7 @@ graph TD
 | **观测/决策模块** | docs + Issue/PR 留痕 | 二级信息、看板、风险矩阵、索引 | 各步产物 | 决策摘要 | 各模块 | ✅ |
 | **安全护栏模块** | AGENTS.md + CP 暂停点 | CP1/CP2/CP3 人审批、敏感红线、风险显式暴露 | 流程状态 | 放行/拦截 | 流程编排 | ✅ |
 | **知识库模块** | `knowledge:update` + codewiki | RAG，让架构师读信息条理全面 | docs/Issue | 可检索知识 | 流程编排 | ✅ |
+| **看板模块** | `scripts/generate-dashboard.py` + `.cnb.yml` | 基于 Issue 声明头自动汇总模块版本演进看板 + 里程碑表 | Issue 声明头 | `docs/DASHBOARD.md` 二级信息 | 流程编排 | ✅ |
 
 ## 三、数据流向
 
@@ -73,6 +74,6 @@ Issue 不是同层平铺的散点，而是**同一模块能力的版本化演进
 
 ## 六、演进方向（预留）
 
-- 多角色人设逐步在 `.cnb/settings.yml` 补全（当前为扩展位）。
-- 按需扩展知识库检索范围、可视化看板自动化。
-- 模块版本演进看板自动化汇总（接 Issue 声明头自动生成）。
+- 多角色人设逐步在 `.cnb/settings.yml` 补全（当前为扩展位，见任务 B）。
+- 按需扩展知识库检索范围（见任务 C）。
+- ✅ 模块版本演进看板自动化汇总已落地：`scripts/generate-dashboard.py` → `docs/DASHBOARD.md`，由 `.cnb.yml` 在 Issue 增改删时自动刷新（见任务 D）。

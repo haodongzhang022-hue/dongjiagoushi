@@ -18,6 +18,7 @@
 | M9 | 多角色召唤协议（配合机制） | ✅ | 接力卡 + 各角色输出契约 + 接力纪律（见 SKILL.md） |
 | M10 | 多角色协作真实跑通验证 | ⏳ | 用总师召唤产品/开发/评审/测试跑一次完整接力 |
 | M11 | 知识库充实 | ⏳ | 架构文档/模板/声明头批量入库 + 索引入口 docs/KNOWLEDGE.md（见 Issue #6） |
+| M12 | 可视化看板自动化汇总 | ✅ | 基于 Issue 声明头自动生成 docs/DASHBOARD.md（见 scripts/generate-dashboard.py） |
 
 ## 架构八步模板
 
@@ -32,7 +33,11 @@ Issue 采用「声明头 + 模块版本线」管理：每个 Issue 声明所属�
 1. **真实场景验证**：在仓库内或关联 Issue 中，用 architect skill 跑一个真实架构需求，验证八步流畅度。
 2. **多角色补全**：按需完善 PM/DEV/CR/QA 人设（当前为扩展位）。
 3. **知识库充实**：将架构文档、模板持续入库，供 agent 检索。
-4. **可视化增强**：考虑引入进度看板/里程碑的自动化汇总。
+4. ✅ **可视化看板自动化**：已落地 `scripts/generate-dashboard.py` → `docs/DASHBOARD.md`，并在 `.cnb.yml` 挂了 `issue.*` 自动刷新（见任务 D）。
+
+## 可视化看板
+
+模块版本演进看板 + 里程碑表已自动化生成，人类俯瞰决策直接看 [docs/DASHBOARD.md](DASHBOARD.md)（由 `scripts/generate-dashboard.py` 在 Issue 增改删时自动刷新）。
 
 ## 索引
 
@@ -47,5 +52,6 @@ Issue 采用「声明头 + 模块版本线」管理：每个 Issue 声明所属�
 | 八步模板 | `docs/templates/architect-report.md` |
 | Issue 版本管理 | `docs/ISSUE_MANAGEMENT.md` |
 | Issue 声明模板 | `docs/templates/issue-template.md` |
+| 可视化看板 | `docs/DASHBOARD.md` + `scripts/generate-dashboard.py` |
 | 使用说明 | `README.md` |
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
