@@ -125,26 +125,41 @@ def fetch_issues():
 def parse_decl(body):
     """解析 Issue 正文中的声明头字段（支持中英文键）"""
     decl = OrderedDict()
-    # 字段别名：优先中英均支持
+    # 字段别名：优先中英均支持（含双版本 module_version / agent_version）
     aliases = {
         "module": ["module", "模块"],
+        "module_version": ["module_version", "模块版本", "mv", "模块版"],
+        "agent": ["agent", "角色", "agent_role"],
+        "agent_version": ["agent_version", "agent 版本", "角色版本", "av"],
         "type": ["type", "类型"],
         "target": ["target", "目标"],
         "version": ["version", "版本"],
         "update": ["update", "更新"],
         "depends_on": ["depends_on", "依赖"],
     }
-    pattern = re.compile(r"^\s*(module|模块|type|类型|target|目标|version|版本|update|更新|depends_on|依赖)\s*[:：]\s*(.+?)\s*$", re.IGNORECASE)
+    pattern = re.compile(
+        r"^\s*(module_version|module|模块版本|模块版|mv|agent_version|agent 版本|角色版本|av|agent_role|agent|角色|type|类型|target|目标|version|版本|update|更新|depends_on|依赖)\s*[:：]\s*(.+?)\s*$",
+        re.IGNORECASE,
+    )
     for line in body.splitlines():
         m = pattern.match(line)
         if not m:
             continue
-        key = m.group(1).lower()
+        key = m.group(1).lower().strip()
         value = m.group(2).strip()
-        for field, keys in aliases.items():
+        # 匹配字段：复合键优先（module_version 优先于 module，agent_version 优先于 agent/version）
+        field = None
+        for fld, keys in aliases.items():
             if key in keys:
-                decl[field] = value
+                field = fld
+                # module_version/agent_version 这类复合键优先；命中后继续尝试更优匹配
+                if key.startswith("module_version") or key.startswith("agent_version"):
+                    field = "module_version" if key.startswith("module_version") else "agent_version"
                 break
+        if field is None:
+            continue
+        # 去掉括号说明（如 "v0.2.0（增强）" → "v0.2.0"）
+        decl[field] = re.split(r"[（(]", value)[0].strip()
     return decl
 
 
@@ -165,8 +180,8 @@ def normalize_type(raw):
 
 
 def sort_key(decl):
-    """版本排序键：无版本号放最后"""
-    v = decl.get("version", "")
+    """版本排序键：按 module_version 排（无则退回 version，再退 agent_version）；无版本号放最后"""
+    v = decl.get("module_version") or decl.get("version") or decl.get("agent_version") or ""
     m = re.match(r"v?(\d+)\.(\d+)\.(\d+)", v)
     if m:
         return (0, int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -174,7 +189,7 @@ def sort_key(decl):
 
 
 def build_module_lines(issues, decls):
-    """按模块聚合版本演进线"""
+    """按模块聚合版本演进线（module_version 维度）"""
     by_module = defaultdict(list)
     for issue, decl in zip(issues, decls):
         if not decl:
@@ -187,6 +202,21 @@ def build_module_lines(issues, decls):
     for module in by_module:
         by_module[module].sort(key=lambda x: sort_key(x[1]))
     return OrderedDict(sorted(by_module.items()))
+
+
+def build_agent_lines(issues, decls):
+    """按 agent 角色聚合版本演进线（agent_version 维度）"""
+    by_agent = defaultdict(list)
+    for issue, decl in zip(issues, decls):
+        if not decl:
+            continue
+        agent = decl.get("agent", "").strip()
+        if not agent:
+            continue
+        by_agent[agent].append((issue, decl))
+    for agent in by_agent:
+        by_agent[agent].sort(key=lambda x: sort_key(x[1]))
+    return OrderedDict(sorted(by_agent.items()))
 
 
 def match_milestone(text):
@@ -208,14 +238,15 @@ def render():
     lines.append("# 📊 可视化 / 二级信息看板")
     lines.append("")
     lines.append("> 本文件由 `scripts/generate-dashboard.py` **自动生成**，用于人类俯瞰决策。")
-    lines.append("> 数据源：仓库各 Issue 声明头（module / type / version / target / update / depends_on）。")
+    lines.append("> 数据源：仓库各 Issue 声明头（module / module_version / agent / agent_version / type / target / update / depends_on）。")
+    lines.append("> 版本强制：非整体版本，而是【模块版本 + agent 版本】双维度独立升版、以较小迭代单位推进（详见 docs/ISSUE_MANAGEMENT.md）。")
     lines.append("> ⚠️ 请勿手动编辑本文件；刷新方式见文末「刷新指南」。")
     lines.append("")
     lines.append("---")
     lines.append("")
 
     # ===== 1. 模块版本演进看板 =====
-    lines.append("## 一、模块版本演进看板")
+    lines.append("## 一、模块版本演进看板（module_version）")
     lines.append("")
     lines.append("每个模块独立一条语义化版本线；看板显示「能力到哪版、当前待办是什么」。")
     lines.append("")
@@ -225,12 +256,12 @@ def render():
     for module, items in by_module.items():
         lines.append(f"### 模块 `{module}`")
         lines.append("")
-        lines.append("| Issue | type | 版本 | 目标 / 更新 | 状态 |")
-        lines.append("|-------|------|------|-------------|------|")
+        lines.append("| Issue | type | 模块版本 | 目标 / 更新 | 状态 |")
+        lines.append("|-------|------|---------|-------------|------|")
         for issue, decl in items:
             num = issue["number"]
             t = normalize_type(decl.get("type", "standalone"))
-            ver = decl.get("version", "—")
+            ver = decl.get("module_version") or decl.get("version") or "—"
             target = decl.get("target") or decl.get("update") or "—"
             target = (target or "").replace("|", "\\|")
             state = issue.get("state", "")
@@ -243,8 +274,37 @@ def render():
     lines.append("---")
     lines.append("")
 
+    # ===== 1b. Agent 角色版本演进看板 =====
+    lines.append("## 二、Agent 角色版本演进看板（agent_version）")
+    lines.append("")
+    lines.append("每个 agent 角色独立一条语义化版本线；看板显示「角色能力到哪版」。一个 Issue 只在一个最小迭代单位（单一模块 / 单一 agent）上升版。")
+    lines.append("")
+    by_agent = build_agent_lines(issues, decls)
+    if not by_agent:
+        lines.append("_暂无已声明 agent 的 Issue。_")
+    for agent, items in by_agent.items():
+        lines.append(f"### Agent `{agent}`")
+        lines.append("")
+        lines.append("| Issue | type | Agent版本 | 目标 / 更新 | 状态 |")
+        lines.append("|-------|------|----------|-------------|------|")
+        for issue, decl in items:
+            num = issue["number"]
+            t = normalize_type(decl.get("type", "standalone"))
+            ver = decl.get("agent_version") or "—"
+            target = decl.get("target") or decl.get("update") or "—"
+            target = (target or "").replace("|", "\\|")
+            state = issue.get("state", "")
+            state_icon = "🟢" if state == "open" else "⚪"
+            link = f"#{num}"
+            lines.append(f"| [{link}](https://{WEB_HOST}/{GROUP}/{REPO_NAME}/-/issues/{num}) | {TYPE_ICON.get(t, '')} {t} | {ver} | {target} | {state_icon} {state} |")
+        lines.append("")
+    if not by_agent:
+        lines.append("")
+    lines.append("---")
+    lines.append("")
+
     # ===== 2. 里程碑表 =====
-    lines.append("## 二、里程碑表（M0~M8）")
+    lines.append("## 三、里程碑表（M0~M8）")
     lines.append("")
     lines.append("> 里程碑状态需人工在 `docs/ROADMAP.md` 维护；此处根据已声明 Issue 的关键词自动标注落地线索。")
     lines.append("")
@@ -274,31 +334,35 @@ def render():
     lines.append("---")
     lines.append("")
 
-    # ===== 3. Issue 声明汇总表 =====
-    lines.append("## 三、Issue 声明汇总表")
+    # ===== 3. Issue 声明汇总表（双版本） =====
+    lines.append("## 四、Issue 声明汇总表（双版本）")
     lines.append("")
-    lines.append("| Issue | 模块 | type | 版本 | 目标 | 依赖 | 状态 |")
-    lines.append("|-------|------|------|------|------|------|------|")
+    lines.append("| Issue | 模块 | 模块版本 | agent | agent版本 | type | 目标 | 依赖 | 状态 |")
+    lines.append("|-------|------|---------|-------|----------|------|------|------|------|")
     declared_any = False
     for issue, decl in zip(issues, decls):
         num = issue["number"]
         if decl:
             declared_any = True
             module = decl.get("module", "—")
+            mv = decl.get("module_version") or decl.get("version") or "—"
+            agent = decl.get("agent", "—")
+            av = decl.get("agent_version", "—")
             t = normalize_type(decl.get("type", "standalone"))
-            ver = decl.get("version", "—")
             target = (decl.get("target") or "—").replace("|", "\\|")
             dep = decl.get("depends_on", "—")
         else:
             module = "—"
+            mv = "—"
+            agent = "—"
+            av = "—"
             t = "—"
-            ver = "—"
             target = "（未声明）"
             dep = "—"
         state = issue.get("state", "")
         state_icon = "🟢" if state == "open" else "⚪"
         link = f"https://{WEB_HOST}/{GROUP}/{REPO_NAME}/-/issues/{num}"
-        lines.append(f"| [#{num}]({link}) | `{module}` | {t} | {ver} | {target} | {dep} | {state_icon} {state} |")
+        lines.append(f"| [#{num}]({link}) | `{module}` | {mv} | `{agent}` | {av} | {t} | {target} | {dep} | {state_icon} {state} |")
     if not declared_any:
         pass
     lines.append("")
@@ -306,7 +370,7 @@ def render():
     lines.append("")
 
     # ===== 4. 待办 / 阻塞点扫描 =====
-    lines.append("## 四、待办 / 阻塞点扫描")
+    lines.append("## 五、待办 / 阻塞点扫描")
     lines.append("")
     open_issues = [i for i in issues if i.get("state") == "open"]
     lines.append(f"当前 open Issue：**{len(open_issues)}** / 总 {len(issues)}。")
@@ -324,8 +388,37 @@ def render():
     lines.append("---")
     lines.append("")
 
-    # ===== 5. 刷新指南 =====
-    lines.append("## 五、刷新指南")
+    # ===== 5. 版本合规 / 迭代冲突扫描（版本强制核查） =====
+    lines.append("## 六、版本合规 / 迭代冲突扫描（版本强制核查）")
+    lines.append("")
+    lines.append("核查每张 Issue 是否满足「版本强制 + 双维度独立 + 较小迭代单位」：")
+    lines.append("- 未写明 `module_version`（模块维度）的 Issue；")
+    lines.append("- 涉及 agent 能力却未写明 `agent_version`（agent 维度）的 Issue；")
+    lines.append("- 疑似「跨维度/跨模块强推整体版本」、或依赖了未声明 Issue 的高合并冲突风险项。")
+    lines.append("")
+    no_mv = []
+    no_av = []
+    for issue, decl in zip(issues, decls):
+        if not decl:
+            continue
+        num = issue["number"]
+        t = normalize_type(decl.get("type", "standalone"))
+        if t == "standalone":
+            continue
+        if not (decl.get("module_version") or decl.get("version")):
+            no_mv.append(num)
+        if decl.get("agent") and not decl.get("agent_version"):
+            no_av.append(num)
+    lines.append("| 核查项 | 缺省 Issue | 影响 |")
+    lines.append("|--------|-----------|------|")
+    lines.append(f"| 模块版本缺失（应写 `module_version`） | {', '.join('#' + n for n in no_mv) if no_mv else '✅ 无'} | 看板无法显示模块版本线，无法版本管理 |")
+    lines.append(f"| agent 能力缺失 `agent_version` | {', '.join('#' + n for n in no_av) if no_av else '✅ 无'} | agent 维度版本线缺失，无法追踪角色能力 |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # ===== 6. 刷新指南 =====
+    lines.append("## 七、刷新指南")
     lines.append("")
     lines.append("```bash")
     lines.append("python3 scripts/generate-dashboard.py   # 重新生成 docs/DASHBOARD.md")

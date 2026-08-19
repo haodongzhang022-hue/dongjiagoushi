@@ -33,7 +33,7 @@
 - **架构·总师**：走「架构八步」，输出结构化架构与决策。
 - **协作角色**：需要时按接力卡召唤（架构·产品/架构·开发/架构·评审/架构·测试），同库内传消息。
 - **接力机制**：任务书 + 接力卡传递上下文，目标不偏差；中断可续跑、可留痕。接力卡载体为 **Issue 评论内嵌结构化卡片**。
-- **Issue 声明与版本管理**：每个 Issue 顶部声明 `module/type/target/version/update/depends_on`，形成模块版本演进线（`init` 建模块 → `update`/`fix` 迭代加强），非平铺散点。详见 `docs/ISSUE_MANAGEMENT.md`。
+- **Issue 声明与双版本管理（版本强制）**：每个 Issue 顶部声明 `module/module_version/type/target/update/depends_on`，涉及 agent 能力时须再加 `agent/agent_version`。**版本强制写明，且不是整体版本**，而是**模块版本 + agent 版本两个独立维度**，各自以**较小的迭代单位**独立升版（`init` 建根 → `update`/`fix` 迭代加强），避免"局部迭代强推整体版本导致合并冲突失效"。非平铺散点。详见 `docs/ISSUE_MANAGEMENT.md`。
 - **留痕**：每一步必须真实执行并在 Issue/PR/提交/CI 留下可核验记录，禁止假装执行。
 
 ### 触发强制化（仓库级固定 rules，最高优先级）
@@ -74,7 +74,7 @@
 .codebuddy/skills/architect/SKILL.md  # ⭐ 架构师方法论（官方 @CodeBuddy 自动加载）
 AGENTS.md                             # 本文件：全局协作规则
 docs/                                 # 架构文档（索引 / 路线图 / 八步模板 / Issue 版本管理）
-  ├── ISSUE_MANAGEMENT.md             # Issue 声明与模块版本管理机制
+  ├── ISSUE_MANAGEMENT.md             # Issue 声明与模块/Agent 双版本管理机制
   └── templates/issue-template.md     # Issue 结构化声明模板
 README.md                             # 使用说明
 ```
