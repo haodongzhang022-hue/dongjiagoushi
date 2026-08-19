@@ -38,20 +38,31 @@
 ```
 .
 ├── .cnb/
-│   └── settings.yml                     # 角色骨架：架构师为主 + PM/DEV/CR/QA 扩展位
+│   └── settings.yml                     # 角色骨架：架构师为主 + PM/DEV/CR/QA 完整可执行人设（含三层触发 + 回转/打断协议）
 ├── .cnb.yml                             # 流水线：知识库入库 + npc:go 兜底 + codewiki
 ├── .codebuddy/
 │   └── skills/
 │       └── architect/
 │           └── SKILL.md                 # ⭐ 架构师方法论（官方 @CodeBuddy 自动加载）
+├── tests/
+│   ├── test_architect_system.sh         # ⭐ 测试信号灯（静态断言：五项关键链路，test 阶段执行）
+│   ├── test_functional_links.sh         # ⭐ 真实功能链路测试（数据获取/看板呈现/RAG读取 真跑通）
+│   ├── test_relay_workflow.sh           # ⭐ 接力链路可复现测试（T8 端到端：接力卡/回转/打断/三层触发）
+│   └── test_memory_store.sh             # ⭐ 经验记忆库+语义向量触发+双后端兼容测试（T9）
+├── src/
+│   └── memory/                          # ⭐ 经验记忆库 + 语义向量触发引擎（LanceDB/云端双兼容 + 持续积累经验）
 ├── AGENTS.md                            # 全局协作规则
 ├── docs/
 │   ├── ARCHITECTURE.md                  # 顶层架构拓扑
 │   ├── ROADMAP.md                       # 工程实践路线图
+│   ├── DASHBOARD.md                     # 📊 可视化看板（自动化生成，勿手编）
 │   ├── ISSUE_MANAGEMENT.md              # Issue 声明与模块版本管理机制
 │   └── templates/
 │       ├── architect-report.md          # 架构八步产物模板
-│       └── issue-template.md            # Issue 结构化声明模板
+│       ├── issue-template.md            # Issue 结构化声明模板
+│       └── acceptance-checklist.md      # 测试验收清单（信号灯）
+├── scripts/
+│   └── generate-dashboard.py            # 🚀 看板自动生成器
 └── README.md                            # 本文件
 ```
 
@@ -84,8 +95,12 @@ graph TD
 3. **知识库 RAG**：`knowledge:update` 入库（`hunyuan` embedding），架构师读信息条理全面。
 4. **Code Wiki**：打 tag 自动生成 Wiki 并入库，可被 AI 问答引用。
 5. **Issue 版本管理**：每个 Issue 声明所属模块/类型/目标/版本/更新内容，形成模块能力演进线，可阶段性多次加强（见 [docs/ISSUE_MANAGEMENT.md](docs/ISSUE_MANAGEMENT.md)）。
-6. **角色命名风格化**：本体系所有可 `@` 触发的角色统一加「架构·」前缀（架构·总师/产品/开发/评审/测试），与其他团队 agent 区分不重名；`@` 输入「架构」即自动填充补全整套团队。`架构师` 保留为体系品牌与 Skill 化身身份。
-7. **安全护栏**：CP1/CP2/CP3 暂停确认 + 敏感信息红线 + 风险显式暴露。
+6. **测试信号灯（护栏）**：`.cnb.yml` 的 test 阶段依次执行四个脚本——`tests/test_architect_system.sh`（静态断言：skill 触发/八步产物/CP 护栏/知识库配置/多角色接力/触发强制化/回转打断）、`tests/test_functional_links.sh`（**真实功能链路**：真实拉取 Issue 数据、真实生成看板、真实查询 RAG）、`tests/test_relay_workflow.sh`（**接力链路可复现**：接力卡传递/回转打回/中断续跑/三层触发）与 `tests/test_memory_store.sh`（**经验记忆库+语义向量触发**：真实向量检索触发 + LanceDB/云端双兼容 + 持续积累经验）——**功能未真正跑通即红灯阻塞，不放行**（见 [docs/templates/acceptance-checklist.md](docs/templates/acceptance-checklist.md)）。
+6b. **协作触发强制化 + 回转/打断协议**：协作角色由三层机制强制触发（显式 `[触发]` 声明 / 语义向量命中 / `AGENTS.md` rules 固定兜底），非纸面说明；接力可 `[回转]` 打回重做、`[打断]` 中断续跑（T8 可复现）。详见 `AGENTS.md`/`SKILL.md`/`settings.yml`。
+6c. **经验记忆库 + 语义向量触发（专业可靠）**：语义向量触发从 prompt/关键词层面升级为**真实向量检索**——`src/memory/` 提供统一向量格式 + LanceDB 本地持久化 + 云端 CNB 知识库同格式适配（双后端兼容）+ 持续积累经验 + 语义向量触发引擎（T9 可复现）。详见 [docs/MEMORY.md](docs/MEMORY.md)。
+7. **角色命名风格化**：本体系所有可 `@` 触发的角色统一加「架构·」前缀（架构·总师/产品/开发/评审/测试），与其他团队 agent 区分不重名；`@` 输入「架构」即自动填充补全整套团队。`架构师` 保留为体系品牌与 Skill 化身身份。
+8. **安全护栏**：CP1/CP2/CP3 暂停确认 + 敏感信息红线 + 风险显式暴露。
+9. **可视化看板自动化**：基于 Issue 声明头自动汇总模块版本演进看板 + 里程碑表，人类俯瞰决策看 [docs/DASHBOARD.md](docs/DASHBOARD.md)（由 `scripts/generate-dashboard.py` 在 Issue 增改删时自动刷新）。
 
 ---
 
@@ -93,6 +108,7 @@ graph TD
 
 - 召唤架构师：`@CodeBuddy 调用 architect skill，<需求>`
 - 查看知识库状态：仓库「知识库」入口
+- 查看进度看板：`docs/DASHBOARD.md`（Issue 增改删时自动刷新，也可 `python3 scripts/generate-dashboard.py` 手动刷新）
 - 生成/更新 Wiki：打 tag（触发 `tag_push` → codewiki）
 
 详细请见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/ROADMAP.md](docs/ROADMAP.md)。

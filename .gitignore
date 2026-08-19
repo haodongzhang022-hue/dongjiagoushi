@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# 经验记忆库运行时产物（本地 LanceDB + 云端导出）
+.memory/
+.memory-cloud/
+
+# 测试临时
+*.log
