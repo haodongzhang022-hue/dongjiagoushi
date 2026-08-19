@@ -21,6 +21,7 @@
 | 知识库 RAG | `knowledge:update` + codewiki | 架构师读信息条理全面，可直接检索 |
 | Issue 版本管理 | Issue 声明头 + 版本线 | 模块能力可阶段性多次加强（init/update/fix/standalone） |
 | 安全护栏 | AGENTS.md + CP1/CP2/CP3 | 人审批放行、敏感信息红线、风险显式暴露 |
+| 测试信号灯 | tests + .cnb.yml test 阶段 | 功能未达成预期即红灯阻塞，机器强制不放行 |
 
 ## 三、文档地图（都在哪）
 
@@ -31,6 +32,8 @@
 | Issue 版本管理 | `docs/ISSUE_MANAGEMENT.md` | 声明头 + 模块版本线机制 |
 | 架构八步模板 | `docs/templates/architect-report.md` | 八步产物产出模板 |
 | Issue 声明模板 | `docs/templates/issue-template.md` | 声明头 front-matter 规范 |
+| 验收清单 | `docs/templates/acceptance-checklist.md` | 测试信号灯 + 可勾选验收标准 |
+| 测试脚本 | `tests/test_architect_system.sh` | 五项关键链路机器断言（test 阶段） |
 | 协作规则 | `AGENTS.md` | 全局协作规则 + 安全护栏 |
 | 使用说明 | `README.md` | 快速开始 + 命令 |
 | 真实场景产物 | `docs/arch-scenarios/` | 架构八步跑通的产物留痕 |
@@ -45,7 +48,7 @@
 ## 五、当前进度（能力成熟度）
 
 - **模块 version 线**：详见各模块 Issue 声明头（`module/type/version/update/depends_on`）。
-- **路线图**：M0-M8 已完成；M7/M10 真实场景验证、多角色补全、知识库充实为后续重点。
+- **路线图**：M0-M8、M12（测试体系）已完成；M7/M10 真实场景验证、多角色补全、知识库充实为后续重点。
 - **待办**：真实场景跑通验证、多角色人设补全、可视化看板自动化。
 
 ---

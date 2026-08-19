@@ -19,6 +19,7 @@
 | M10 | 多角色协作真实跑通验证 | ⏳ | 用总师召唤产品/开发/评审/测试跑一次完整接力 |
 | M11 | 知识库充实 | ⏳ | 架构文档/模板/声明头批量入库 + 索引入口 docs/KNOWLEDGE.md（见 Issue #6） |
 | M12 | 可视化看板自动化汇总 | ✅ | 基于 Issue 声明头自动生成 docs/DASHBOARD.md（见 scripts/generate-dashboard.py） |
+| M13 | 测试体系落地（护栏） | ✅ | .cnb.yml 加 test 阶段 + tests/test_architect_system.sh + 验收清单（见 Issue #8） |
 
 ## 架构八步模板
 
@@ -27,6 +28,32 @@
 ## Issue 版本管理
 
 Issue 采用「声明头 + 模块版本线」管理：每个 Issue 声明所属模块/类型/目标/版本/更新内容，通过 `depends_on` 形成模块能力演进线，支持能力阶段性、多次被加强。详见 [docs/ISSUE_MANAGEMENT.md](ISSUE_MANAGEMENT.md) 与模板 [docs/templates/issue-template.md](templates/issue-template.md)。
+
+## 模块版本演进线（未完成模块登记 · 版本线闭环）
+
+> 依据 `docs/ISSUE_MANAGEMENT.md` 的声明头机制登记。每个模块一条版本线，`depends_on` 串联前后置关系。
+> **测试（testing）为护栏模块，放最前**：没有测试信号灯，后续模块无法客观验证"到底做没做对"。
+
+```
+模块版本演进线（V0.2 规划）
+
+testing 模块（护栏，init）
+    └── issue#8  type=init   v0.1.0   模块根节点（测试体系落地：.cnb.yml 加 test 阶段 + 验收清单）
+
+arch-skill 模块（update）
+    ├── issue#4  type=update v0.2.0   depends_on:#8（真实场景跑通验证，走八步）
+
+multirole 模块（update）
+    └── issue#5  type=update v0.2.0   depends_on:#8（多角色协作人设补全）
+
+knowledge 模块（update）
+    └── issue#6  type=update v0.2.0   depends_on:#8（知识库充实）
+
+dashboard 模块（init）
+    └── issue#7  type=init   v0.1.0   depends_on:#8（可视化/二级信息看板自动化）
+```
+
+> 依赖关系：`#4/#5/#6/#7` 均 depends_on 测试护栏 `#8`。测试（#8）落地后，其余模块按此标准验收。
 
 ## 下一阶段（V0.2 建议）
 
@@ -55,3 +82,5 @@ Issue 采用「声明头 + 模块版本线」管理：每个 Issue 声明所属�
 | 可视化看板 | `docs/DASHBOARD.md` + `scripts/generate-dashboard.py` |
 | 使用说明 | `README.md` |
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
+| 测试信号灯/脚本 | `tests/test_architect_system.sh` |
+| 验收清单 | `docs/templates/acceptance-checklist.md` |

@@ -19,6 +19,12 @@
 # ============================================================
 main:
   push:
+    - name: architecture system acceptance test
+      stages:
+        - name: test
+          # 信号灯：功能/产物未达成预期即 fail → 阻塞合并，机器强制“没达成不让通过”
+          script: |
+            bash tests/test_architect_system.sh
     - name: build knowledge base
       stages:
         - name: knowledge update
