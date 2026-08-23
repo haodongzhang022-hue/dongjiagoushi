@@ -67,7 +67,7 @@
 │   ├── run.py                           # 本地入口：--role / --pipeline / --resume
 │   ├── team.yaml                        # 团队角色 + 流水线定义
 │   ├── orchestrator.py                  # 编排引擎（需求→交付）
-│   ├── roles/                           # 8 个角色模块（产品/总师/小组长/开发/评审/对齐/找工具/测试）
+│   ├── roles/                           # 9 个角色模块（产品/总师/经理/小组长/开发/评审/对齐/找工具/测试）
 │   └── llm/                             # 多模型后端抽象（OpenAI 兼容/CLI 兜底占位）
 └── README.md                            # 本文件
 ```
@@ -107,7 +107,7 @@ graph TD
 7. **角色命名风格化**：本体系所有可 `@` 触发的角色统一加「架构·」前缀（架构·总师/产品/开发/评审/测试），与其他团队 agent 区分不重名；`@` 输入「架构」即自动填充补全整套团队。`架构师` 保留为体系品牌与 Skill 化身身份。
 8. **安全护栏**：CP1/CP2/CP3 暂停确认 + 敏感信息红线 + 风险显式暴露。
 9. **可视化看板自动化**：基于 Issue 声明头自动汇总模块版本演进看板 + 里程碑表，人类俯瞰决策看 [docs/DASHBOARD.md](docs/DASHBOARD.md)（由 `scripts/generate-dashboard.py` 在 Issue 增改删时自动刷新）。
-10. **本地 Agent 团队**：在无 `@` 的本地环境用 CLI 补齐云端触发能力，形成「产品→架构→分工→协同→测试→交付」团队闭环。详见 [local-agent/README.md](local-agent/README.md) 与 [docs/LOCAL_AGENT.md](docs/LOCAL_AGENT.md)。
+10. **本地 Agent 团队**：在无 `@` 的本地环境用 CLI 补齐云端触发能力，形成「**产品沟通→架构设计→经理调度→协同→测试→交付**」三核心协作闭环（产品沟通为开始 / 架构师为设计核心 / 经理为分配调度核心）。详见 [local-agent/README.md](local-agent/README.md) 与 [docs/LOCAL_AGENT.md](docs/LOCAL_AGENT.md) 与 [docs/FRAMEWORK_SHELL.md](docs/FRAMEWORK_SHELL.md)。
     ```bash
     cd local-agent && pip install -r requirements.txt
     python3 run.py --pipeline full --req "做一个订单系统"   # 一键团队流水线到交付

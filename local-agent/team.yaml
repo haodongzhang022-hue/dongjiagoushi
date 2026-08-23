@@ -18,6 +18,11 @@ roles:
     step: "架构设计 / 确认版本 / 校验正确性/合理性/成本/周期"
     trigger_words: ["架构", "设计", "方案", "版本", "校验", "成本", "周期"]
     slogan: "架构八步，一步不省。"
+  - name: "架构·经理"
+    module: "roles.manager"
+    step: "分配调度核心 / 任务拆解 / 角色分配 / 进度跟踪"
+    trigger_words: ["分配", "调度", "派活", "派任务", "经理", "排期"]
+    slogan: "分配调度核心——谁来做、何时做完、怎么分配，经理拍板。"
   - name: "架构·小组长"
     module: "roles.team_lead"
     step: "子任务拆解 / 协调推进"
@@ -54,12 +59,12 @@ roles:
 # revert_to: 下游打回时回退到的步骤名；interrupt 支持续跑。
 pipeline:
   name: "full"
-  description: "用户提交请求 → 产品→架构→分工→协同→测试→交付"
+  description: "用户提交请求 → 产品沟通→架构设计→经理调度→协同→测试→交付"
   steps:
-    - { step: "clarify",   role: "架构·产品",  action: "澄清需求/翻译意图/拆需求" }
-    - { step: "architect", role: "架构·总师",  action: "架构设计/确认版本/校验正确性合理性成本周期" }
-    - { step: "plan",      role: "架构·产品",  action: "按架构分工排班/定任务依赖与排期" }
-    - { step: "lead",      role: "架构·小组长", action: "拆子任务/协调推进" }
+    - { step: "clarify",   role: "架构·产品",  action: "沟通对接/澄清需求/翻译意图/拆需求" }
+    - { step: "architect", role: "架构·总师",  action: "架构设计核心/确认版本/校验正确性合理性成本周期" }
+    - { step: "plan",      role: "架构·经理",  action: "分配调度核心/把架构方案拆解并分配角色/定依赖排期/进度跟踪" }
+    - { step: "lead",      role: "架构·小组长", action: "子任务细化/协调推进" }
     - { step: "find_tools", role: "架构·找工具", action: "检索工具/依赖清单" }
     - { step: "develop",   role: "架构·开发",  action: "实现/自测" }
     - { step: "review",    role: "架构·评审",  action: "五维评审/复评", revert_to: "develop" }

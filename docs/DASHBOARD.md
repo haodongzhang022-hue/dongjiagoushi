@@ -107,6 +107,7 @@
 
 | Issue | 模块 | 模块版本 | agent | agent版本 | type | 目标 | 依赖 | 状态 |
 |-------|------|---------|-------|----------|------|------|------|------|
+| [#18](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/18) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16) | `local-agent` | v0.1.0 | `架构·总师 / 架构·产品 / 架构·开发 / 架构·评审 / 架构·测试` | v0.1.0 | init | 补齐本地 Agent 能力——无 @ 环境下用 CLI 承载云端触发，形成「需求→产品→架构→分工→协同→测试→交付」团队闭环 | #4 #15 | 🟢 open |
 | [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12) | `memory` | v0.1.0 | `—` | — | init | 将「经验记忆库 + 语义向量触发引擎」确立为独立模块，登记模块版本线 v0.1.0 根节点，纳入看板与版本管理闭环 | #8 | 🟢 open |
 | [#11](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/11) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
@@ -121,10 +122,11 @@
 
 ## 五、待办 / 阻塞点扫描
 
-当前 open Issue：**9** / 总 9。
+当前 open Issue：**10** / 总 10。
 
 | Issue | 标题 | 模块 | 阻塞线索 |
 |-------|------|------|----------|
+| [#18](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/18) | 当前准备开发成一个体系，不只是一个agent就算完成本项目了 | `—` | — |
 | [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16) | 支持本地agent和框架的明确 | `local-agent` | — |
 | [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12) | 任务 F｜经验记忆库「孤儿模块」版本线补全（module: memory / init / v0.1.0） | `memory` | — |
 | [#11](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/11) | 本项目几个issue已经提交了，你审核整合一下，看看还有没有问题 | `—` | — |
