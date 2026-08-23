@@ -84,8 +84,10 @@ Issue 不是同层散点，而是挂在「模块根 issue」和「agent 角色�
 ```
 模块「arch-skill」版本线                 agent「架构·总师」版本线
     ├── #4  type=update mv0.2.0             ├── #5  type=update av0.3.0
-    ├── #9  type=fix    mv0.2.1             └── #11 type=fix    av0.3.1
-    └── #12 type=update mv0.3.0
+    ├── #EX-1 type=fix  mv0.2.1             └── #EX-2 type=fix  av0.3.1
+    └── #EX-3 type=update mv0.3.0
+
+（上表 #4/#5 为真实 Issue，其余 `#EX-*` 均为示意编号，非真实 Issue）
 
 #4 只动 arch-skill 模块 → 只升 module_version=mv0.2.0，不写 agent/agent_version；
 #5 只动 架构·总师 agent → 只升 agent_version=av0.3.0，不写 module_version。

@@ -49,8 +49,10 @@ depends_on:     <父模块 issue 或前置 issue 编号>  # 选填：建立 Issu
 ```
 模块「arch-skill」版本演进线             agent「架构·总师」版本演进线
     ├── #4  type=update mv0.2.0             ├── #5  type=update av0.3.0  (架构·总师人设补强)
-    ├── #9  type=fix    mv0.2.1             └── #11 type=fix    av0.3.1  (总师输出契约微调)
-    └── #12 type=update mv0.3.0
+    ├── #EX-1 type=fix  mv0.2.1             └── #EX-2 type=fix  av0.3.1  (总师输出契约微调)
+    └── #EX-3 type=update mv0.3.0
+
+（上表 #4/#5 为真实 Issue，其余 `#EX-*` 均为示意编号，非真实 Issue）
 
 说明：#4 只升 module_version（mv0.2.0），不涉及 agent 能力 → 不写 agent/agent_version；
      #5 只升 agent_version（架构·总师 av0.3.0），不涉及模块代码 → 不写 module_version。
