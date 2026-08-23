@@ -41,7 +41,7 @@
 | **双写兼容（dual）** | 本地 + 云端同格式同时写入，满足"双兼容" |
 | **语义向量触发引擎** | 输入 → 向量化 → 与角色语义原型做余弦相似度 → 命中最高者触发角色（真实向量检索，非关键词） |
 | **持续积累经验** | 每次协作交互（接力/回转/触发）写入记忆库，语义触发随积累增强，可检索回溯 |
-| **可插拔 embedding** | 默认离线哈希向量（零依赖、CI 可复现）；预留 `EmbeddingProvider` 接口，可接真实模型（Hunyuan / sentence-transformers），保持同维度无缝替换 |
+| **可插拔 embedding** | 默认离线哈希向量（零依赖、CI 可复现）；**已接入真实语义模型**（sentence-transformers，`get_embedder("sentence")`），输出维度与哈希一致、可无缝替换，未安装时自动回退哈希兜底 |
 
 ## 三、目录结构
 
@@ -53,9 +53,10 @@ src/memory/
 ├── triggers.py                # SemanticTriggerEngine（显式[触发]+语义向量触发+结合记忆库二次确认）
 ├── cli.py                     # 命令行入口
 ├── requirements.txt           # 依赖（lancedb/numpy）
-└── backends/
+├── backends/
     ├── __init__.py
-    ├── embedding.py           # EmbeddingProvider 接口 + HashEmbedding 默认实现
+    ├── embedding.py           # EmbeddingProvider 接口 + get_embedder 工厂（hash/sentence）
+    ├── sentence_embedding.py  # ⭐ 真实语义 embedding（sentence-transformers，随机投影对齐维度 + 哈希回退）
     ├── lancedb_backend.py     # LanceDBBackend（本地持久化向量库）
     └── cloud_backend.py       # CloudBackend（云端 CNB 知识库同格式适配）
 ```
@@ -136,4 +137,6 @@ bash tests/test_memory_store.sh
 - **同一套 MemoryRecord 格式**：两端存储的是同一种记录，只是引擎不同；`dual` 后端可双写对齐。
 
 > 说明：默认向量为离线哈希向量（零依赖、CI 可复现、语义弱区分度），适合触发原型与双后端对齐验证；
-> 生产环境请挂接真实 embedding 模型（实现 `EmbeddingProvider` 并保持维度一致）。
+> **生产环境请挂接真实 embedding 模型**——已内置 `get_embedder("sentence")`（sentence-transformers），
+> 安装 `pip install -r src/memory/requirements.txt` 后即可启用，输出维度与哈希一致、无缝替换；
+> 未安装时自动回退哈希，CI / 离线不崩。

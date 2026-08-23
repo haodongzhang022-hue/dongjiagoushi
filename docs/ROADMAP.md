@@ -23,6 +23,7 @@
 | M14 | 协作触发强制化 + 回转/打断协议 | ✅ | 三层触发（显式[触发]/语义/rules固定）+ [回转]/[打断] 协议，T8 端到端可复现（见本批任务） |
 | M15 | 经验记忆库 + 语义向量触发（专业可靠落地） | ✅ | `src/memory/` 记忆库模块：统一向量格式 + LanceDB/云端双后端兼容 + 持续积累经验 + 语义向量触发引擎（T9 可复现，见本批任务） |
 | M16 | Issue 双版本管理机制（模块版本 + agent 版本） | ✅ | 版本强制写明，非整体版本，双维度独立升版、以较小迭代单位推进（见 docs/ISSUE_MANAGEMENT.md + 看板） |
+| M17 | 框架自升级闭环 + 智能化升级（memory 真实 embedding + 文档一致性 + 看板健康度） | ⏳ | framework 模块版本线 + FRAMEWORK_UPGRADE.md + upgrade 类型 + memory 真实 embedding + test_doc_consistency + 看板框架健康度（见本批任务 / PR） |
 
 ## 架构八步模板
 
@@ -42,6 +43,9 @@ Issue 采用「声明头 + 模块/Agent 双版本线」管理：每个 Issue 声
 
 testing 模块（护栏，init）
     └── issue#8  type=init   module_version=v0.1.0   （测试体系：.cnb.yml 加 test 阶段 + 验收清单）
+
+framework 模块（自升级，init）
+    └── issue#11 type=upgrade module_version=v0.1.0  （框架自升级闭环：FRAMEWORK_UPGRADE.md + upgrade 类型 + 真实embedding + 文档一致性 + 看板健康度）
 
 arch-skill 模块（update）
     └── issue#4  type=update module_version=v0.2.0   depends_on:#8（真实场景跑通验证，走八步）
@@ -64,6 +68,7 @@ dashboard 模块（init）
 
 ## 下一阶段（V0.2 建议）
 
+0. **框架自升级闭环**（本批已落地，`framework` 模块 v0.1.0）：把"框架自身"纳入版本治理 —— FRAMEWORK_UPGRADE.md 定义何时触发升级 + upgrade 类型 + framework 版本线；memory 接真实 embedding（sentence-transformers，未装回退哈希）；新增文档-实现一致性测试（test_doc_consistency）；看板加框架健康度维度。
 1. **真实场景验证**：在仓库内或关联 Issue 中，用 architect skill 跑一个真实架构需求，验证八步流畅度。
 1. ✅ **经验记忆库 + 语义向量触发**：已落地 `src/memory/` —— 统一向量格式 + LanceDB 本地持久化 + 云端 CNB 知识库同格式适配 + 双写兼容 + 持续积累经验 + 语义向量触发引擎（T9 可复现）。语义向量触发从"prompt/关键词层面"升级为"真实向量检索"。
 2. ✅ **多角色补全**：已在 `.cnb/settings.yml` 补全 PM/DEV/CR/QA 人设，并落地三层触发强制化 + 回转/打断协议（T8 可复现，见本批任务）。
@@ -91,5 +96,6 @@ dashboard 模块（init）
 | 可视化看板 | `docs/DASHBOARD.md` + `scripts/generate-dashboard.py` |
 | 使用说明 | `README.md` |
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
-| 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容 可复现） |
+| 框架自升级闭环 | `docs/FRAMEWORK_UPGRADE.md` |
+| 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容 可复现） + `tests/test_doc_consistency.sh`（文档-实现一致性 防漂移） |
 | 验收清单 | `docs/templates/acceptance-checklist.md` |

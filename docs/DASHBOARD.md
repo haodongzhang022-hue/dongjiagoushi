@@ -137,6 +137,35 @@
 
 ---
 
+## 六、框架健康度（framework 自升级维度）
+
+> 框架整体 = AGENTS.md + .cnb.yml + SKILL.md + settings.yml + docs/ + src/memory/。
+> 本维度把「框架自身」纳入版本演进，展示各模块/角色版本线 + 测试信号灯 + 待办升级项，供人类俯瞰框架健康（详见 docs/FRAMEWORK_UPGRADE.md）。
+
+### 6.1 模块与角色版本线覆盖
+
+| 维度 | 已覆盖版本线 | 说明 |
+|------|-------------|------|
+| 模块版本线 | `arch-skill`, `dashboard`, `knowledge`, `memory`, `multirole`, `testing` | 各模块独立演进（module_version） |
+| agent 版本线 | `—`, `架构·开发/架构·产品/架构·评审/架构·测试`, `架构·总师` | 各角色独立演进（agent_version） |
+| 框架自升级线 | `framework` | 跨模块/方法论/测试红线整体升级（type=upgrade，见 FRAMEWORK_UPGRADE.md） |
+
+### 6.2 测试信号灯
+
+| 测试脚本 | 覆盖 | 状态(本地需自行运行) |
+|---------|------|--------------------|
+| test_architect_system.sh | 产物完整性/八步/CP护栏/触发强制化/回转打断 | ✅ 存在 |
+| test_functional_links.sh | 真实功能链路（数据获取/看板/RAG） | ✅ 存在 |
+| test_relay_workflow.sh | 接力/回转/打断 可复现 | ✅ 存在 |
+| test_memory_store.sh | 记忆库+语义向量触发+双后端兼容 | ✅ 存在 |
+| test_doc_consistency.sh | 文档-实现一致性（防漂移） | ✅ 存在 |
+
+### 6.3 待办框架升级项
+
+_当前无 open 的 framework 升级项。_
+
+---
+
 ## 七、刷新指南
 
 ```bash

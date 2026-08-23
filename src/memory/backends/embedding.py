@@ -34,11 +34,20 @@ class HashEmbedding(EmbeddingProvider):
 
 
 def get_embedder(kind: str = "hash") -> EmbeddingProvider:
-    """按名称返回向量化提供方。当前支持 hash；可扩展真实模型。"""
+    """按名称返回向量化提供方。
+
+    支持：
+      - hash / offline / default  离线哈希向量（零依赖、CI 可复现）
+      - sentence / real / model   真实语义 embedding（sentence-transformers，
+                                  未安装时自动回退哈希兜底，维度与哈希一致可无缝替换）
+    """
     kind = (kind or "hash").lower()
     if kind in ("hash", "offline", "default"):
         return HashEmbedding()
+    if kind in ("sentence", "real", "model", "auto"):
+        # 真实语义模型：自动选 sentence-transformers，未安装则回退 hash
+        from .sentence_embedding import SentenceEmbedding
+        return SentenceEmbedding()
     raise ValueError(
-        f"未知 embedding 提供方: {kind}。当前支持 'hash'；"
-        f"接入真实模型请实现 EmbeddingProvider 并在此注册。"
+        f"未知 embedding 提供方: {kind}。支持 'hash' / 'sentence'(真实模型，自动回退)。"
     )

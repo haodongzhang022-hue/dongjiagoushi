@@ -35,6 +35,8 @@ main:
             echo "==== 经验记忆库+语义向量触发测试（memory，双后端兼容） ===="
             pip install -q -r src/memory/requirements.txt 2>/dev/null || true
             bash tests/test_memory_store.sh
+            echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
+            bash tests/test_doc_consistency.sh
     - name: build knowledge base
       stages:
         - name: knowledge update

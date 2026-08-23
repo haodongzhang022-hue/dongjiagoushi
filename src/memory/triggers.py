@@ -31,9 +31,9 @@ EXPLICIT_RE = re.compile(r"\[触发[:：]\s*(架构·[^\]]+?)\]")
 class SemanticTriggerEngine:
     """语义向量触发引擎。"""
 
-    def __init__(self, embedder=None, threshold: float = 0.10):
+    def __init__(self, embedder=None, threshold: float = 0.10, embed_kind: str = "hash"):
         from .backends.embedding import get_embedder
-        self.embedder = embedder or get_embedder("hash")
+        self.embedder = embedder or get_embedder(embed_kind)
         # 阈值：离线哈希向量相似度整体偏低，采用较低阈值并支持显式触发兜底
         self.threshold = threshold
 

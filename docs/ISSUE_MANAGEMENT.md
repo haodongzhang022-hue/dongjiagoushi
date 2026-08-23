@@ -43,7 +43,7 @@
 
 | 维度 | 字段 | 作用对象 | 独立演进 |
 |------|------|----------|----------|
-| 模块版本 | `module_version` | 模块（`arch-skill`/`multirole`/`knowledge`/`dashboard`/`testing`/`pipeline`/`issue-mgmt`…） | ✅ 每次升一个模块 |
+| 模块版本 | `module_version` | 模块（`arch-skill`/`multirole`/`knowledge`/`dashboard`/`testing`/`pipeline`/`issue-mgmt`/`framework`…） | ✅ 每次升一个模块 |
 | agent 版本 | `agent_version` | agent 角色（`架构·总师`/`架构·产品`/`架构·开发`/`架构·评审`/`架构·测试`…） | ✅ 每次升一个角色 |
 
 一个 Issue 可以：
@@ -76,6 +76,7 @@ depends_on:     <父模块 issue / 前置 issue 编号>
 | `update` | 能力增强 / 阶段性迭代 | `MINOR` 升级（`v0.2.0`） | ✅ |
 | `fix` | 缺陷修复 / 小改 | `PATCH` 升级（`v0.2.1`） | ✅ |
 | `standalone` | 一次性任务 | 不改变能力 | ❌ |
+| `upgrade` | **框架级自升级**（跨模块/方法论/治理/测试红线） | `MINOR` 升级（`v0.2.0`） | ✅（纳入 `framework` 模块版本线，见 docs/FRAMEWORK_UPGRADE.md） |
 
 ### 4. Issue 关系层级（双版本演进线）
 

@@ -40,7 +40,7 @@ def cmd_add(args):
 
 
 def cmd_trigger(args):
-    eng = SemanticTriggerEngine(threshold=args.threshold)
+    eng = SemanticTriggerEngine(threshold=args.threshold, embed_kind=args.embed_kind)
     store = None
     if args.with_memory:
         store = _build_store(args)
@@ -91,6 +91,9 @@ def main(argv=None):
     sp_tr = sub.add_parser("trigger")
     sp_tr.add_argument("--text", required=True)
     sp_tr.add_argument("--threshold", type=float, default=0.10)
+    sp_tr.add_argument("--embed-kind", default="hash",
+                       choices=["hash", "sentence", "real", "auto"],
+                       help="向量化方式：hash=离线哈希（默认）；sentence=真实模型(未装回退hash)")
     sp_tr.add_argument("--with-memory", action="store_true")
     sp_tr.add_argument("--top-k", type=int, default=3)
     add_backend_args(sp_tr)
