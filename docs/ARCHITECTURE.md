@@ -32,6 +32,7 @@ graph TD
 | **知识库模块** | `knowledge:update` + codewiki | RAG，让架构师读信息条理全面 | docs/Issue | 可检索知识 | 流程编排 | ✅ |
 | **经验记忆库+语义触发模块** | `src/memory/` | 统一向量格式 + LanceDB/云端双后端兼容 + 持续积累经验 + 语义向量触发引擎（真实向量检索，非关键词） | 协作交互/输入 | 可检索记忆 + 角色语义触发 | 流程编排 | ✅ |
 | **看板模块** | `scripts/generate-dashboard.py` + `.cnb.yml` | 基于 Issue 声明头自动汇总模块版本演进看板 + 里程碑表 | Issue 声明头 | `docs/DASHBOARD.md` 二级信息 | 流程编排 | ✅ |
+| **本地 Agent 模块** | `local-agent/` | 无 @ 环境下的 CLI 入口替代云端触发 + 团队流水线编排到交付 | 命令行/需求 | 交付报告 + 接力卡 | 无 | ✅ |
 
 ## 三、数据流向
 

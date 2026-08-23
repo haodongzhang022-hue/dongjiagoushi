@@ -1,0 +1,68 @@
+# ============================================================
+# 本地 Agent 团队 · 团队角色与流水线配置
+# 仓库：dongjiagoushi（架构师体系）
+# 作用：定义本地 Agent 团队的角色清单 + 流水线步骤顺序。
+#       角色人设与 .cnb/settings.yml / .codebuddy/skills/architect 同源。
+# 命名规范：所有角色统一「架构·」前缀命名空间。
+# ============================================================
+
+# 团队角色清单（与云端 settings.yml 对齐 + 本地扩展角色）
+roles:
+  - name: "架构·产品"
+    module: "roles.product"
+    step: "需求澄清 / 翻译意图 / 拆分需求 / 分工排班"
+    trigger_words: ["需求", "澄清", "用户故事", "拆分", "排班", "分工"]
+    slogan: "需求澄清与拆分——先问清楚再动手。"
+  - name: "架构·总师"
+    module: "roles.architect"
+    step: "架构设计 / 确认版本 / 校验正确性/合理性/成本/周期"
+    trigger_words: ["架构", "设计", "方案", "版本", "校验", "成本", "周期"]
+    slogan: "架构八步，一步不省。"
+  - name: "架构·小组长"
+    module: "roles.team_lead"
+    step: "子任务拆解 / 协调推进"
+    trigger_words: ["拆任务", "子任务", "协调", "排期"]
+    slogan: "把任务拆到可执行，盯着推进不跑偏。"
+  - name: "架构·开发"
+    module: "roles.developer"
+    step: "实现 / 自测 / 提交 PR"
+    trigger_words: ["实现", "写代码", "开发", "PR", "自测"]
+    slogan: "需求驱动开发——从方案到可运行。"
+  - name: "架构·评审"
+    module: "roles.reviewer"
+    step: "五维评审 / 复评"
+    trigger_words: ["评审", "审查", "走查", "质量", "复评"]
+    slogan: "全方位质量守护——从语法到架构，不留死角。"
+  - name: "架构·对齐"
+    module: "roles.version_keeper"
+    step: "版本对齐 / 一致性校验"
+    trigger_words: ["版本", "对齐", "一致", "依赖"]
+    slogan: "版本线对齐，防止漂移与冲突。"
+  - name: "架构·找工具"
+    module: "roles.tool_finder"
+    step: "工具 / 依赖 / 库检索"
+    trigger_words: ["工具", "依赖", "库", "检索", "找"]
+    slogan: "按需检索工具与依赖，不重复造轮子。"
+  - name: "架构·测试"
+    module: "roles.tester"
+    step: "测试矩阵 / 信号灯"
+    trigger_words: ["测试", "验收", "联调", "信号灯", "阻塞"]
+    slogan: "联调·性能·安全·E2E——信号灯亮起才放行。"
+
+# 团队流水线（用户提交请求后自动编排到交付）
+# steps 按序执行；每步输出写入接力卡供下一步消费。
+# revert_to: 下游打回时回退到的步骤名；interrupt 支持续跑。
+pipeline:
+  name: "full"
+  description: "用户提交请求 → 产品→架构→分工→协同→测试→交付"
+  steps:
+    - { step: "clarify",   role: "架构·产品",  action: "澄清需求/翻译意图/拆需求" }
+    - { step: "architect", role: "架构·总师",  action: "架构设计/确认版本/校验正确性合理性成本周期" }
+    - { step: "plan",      role: "架构·产品",  action: "按架构分工排班/定任务依赖与排期" }
+    - { step: "lead",      role: "架构·小组长", action: "拆子任务/协调推进" }
+    - { step: "find_tools", role: "架构·找工具", action: "检索工具/依赖清单" }
+    - { step: "develop",   role: "架构·开发",  action: "实现/自测" }
+    - { step: "review",    role: "架构·评审",  action: "五维评审/复评", revert_to: "develop" }
+    - { step: "align",     role: "架构·对齐",  action: "版本对齐/一致性校验", revert_to: "develop" }
+    - { step: "test",      role: "架构·测试",  action: "测试矩阵/信号灯", revert_to: "develop" }
+    - { step: "deliver",   role: "编排引擎",    action: "汇总交付报告" }

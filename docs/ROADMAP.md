@@ -23,7 +23,8 @@
 | M14 | 协作触发强制化 + 回转/打断协议 | ✅ | 三层触发（显式[触发]/语义/rules固定）+ [回转]/[打断] 协议，T8 端到端可复现（见本批任务） |
 | M15 | 经验记忆库 + 语义向量触发（专业可靠落地） | ✅ | `src/memory/` 记忆库模块：统一向量格式 + LanceDB/云端双后端兼容 + 持续积累经验 + 语义向量触发引擎（T9 可复现，见本批任务） |
 | M16 | Issue 双版本管理机制（模块版本 + agent 版本） | ✅ | 版本强制写明，非整体版本，双维度独立升版、以较小迭代单位推进（见 docs/ISSUE_MANAGEMENT.md + 看板） |
-| M17 | 框架自升级闭环 + 智能化升级（memory 真实 embedding + 文档一致性 + 看板健康度） | ⏳ | framework 模块版本线 + FRAMEWORK_UPGRADE.md + upgrade 类型 + memory 真实 embedding + test_doc_consistency + 看板框架健康度（见本批任务 / PR） |
+| M17 | 本地 Agent 团队（无 @ 能力补齐 + 需求到交付自动编排） | ✅ | `local-agent/`：CLI 入口替代 @ + 8 角色团队 + 编排引擎 + 接力卡 + 多模型后端抽象（见 docs/LOCAL_AGENT.md，Issue #16） |
+| M18 | 框架自升级闭环 + 智能化升级（memory 真实 embedding + 文档一致性 + 看板健康度） | ✅ | framework 模块版本线 + FRAMEWORK_UPGRADE.md + upgrade 类型 + memory 真实 embedding + test_doc_consistency + 看板框架健康度（见本批任务 / PR） |
 
 ## 架构八步模板
 
