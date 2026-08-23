@@ -61,8 +61,8 @@ class LanceDBBackend:
         for rec in records:
             r = rec if isinstance(rec, MemoryRecord) else MemoryRecord(**rec)
             if not r.vector:
-                from .embedding import HashEmbedding
-                r.vector = HashEmbedding().embed(r.text)
+                from .embedding import get_embedder
+                r.vector = get_embedder().embed(r.text)
             d = r.to_dict()
             if isinstance(d.get("meta"), dict):
                 d["meta"] = json.dumps(d["meta"], ensure_ascii=False)

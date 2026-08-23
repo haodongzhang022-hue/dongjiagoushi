@@ -2,3 +2,9 @@
 # 本地 LanceDB 后端必需；云端后端无需额外依赖（复用 CNB 知识库）。
 lancedb>=0.37
 numpy>=1.26
+
+# ── 真实语义 embedding（可选，生产推荐）────────────────────────
+# 未安装时自动回退到离线哈希向量（hash），CI/离线环境不崩、零额外负担。
+# 安装后语义触发/记忆检索的区分度显著增强（"智能是否合适"的关键）。
+# 用法：get_embedder("sentence") 或 SemanticTriggerEngine(embed_kind="sentence")
+sentence-transformers>=2.6

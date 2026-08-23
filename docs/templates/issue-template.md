@@ -9,13 +9,13 @@
 ## ① 声明头（必填 front-matter）
 
 > ⚠️ **版本强制写明**：版本不是"整体版本"，而是**两个独立维度**，各自以**较小的迭代单位**独立推进——
-> - **模块版本 `module_version`**：本次改动所属**模块**（`arch-skill` / `multirole` / `knowledge` / `dashboard` / `testing` / `pipeline` / `issue-mgmt`…）达到的语义化版本；
+> - **模块版本 `module_version`**：本次改动所属**模块**（`arch-skill` / `multirole` / `knowledge` / `dashboard` / `testing` / `pipeline` / `issue-mgmt` / `framework`…）达到的语义化版本；
 > - **agent 版本 `agent_version`**：本次改动涉及**某个 agent 角色**（`架构·总师` / `架构·产品` / `架构·开发` / `架构·评审` / `架构·测试`…）达到的语义化版本。
 >
 > 一个 Issue 可能**同时影响模块与 agent**，两维度都要按实际改动写明、各升各的、可只升其一。这样做是为了避免"局部迭代却强推整体版本"导致的并发合并冲突、合并失效——每个 Issue 只在一个**最小迭代单位**（单一模块 / 单一 agent）上前进，合并面收敛、冲突可控。
 
 ```yaml
-module:         <模块ID>                       # 必填：声明所属模块，如 arch-skill / multirole / knowledge
+module:         <模块ID>                       # 必填：声明所属模块，如 arch-skill / multirole / knowledge / framework
 module_version: <目标模块版本>                  # 必填：本 issue 落地后【模块】达到的版本（init 为 v0.1.0）
 agent:          <角色ID>                       # 选填：本次改动涉及的 agent 角色（如 架构·总师）；不涉及 agent 能力可省
 agent_version:  <目标 agent 角色版本>           # 若填了 agent 则必填：本 issue 落地后【该 agent 角色】达到的版本
@@ -41,6 +41,7 @@ depends_on:     <父模块 issue 或前置 issue 编号>  # 选填：建立 Issu
 | `update` | 能力增强 / 阶段性迭代 | `MINOR` 升级（`v0.2.0`） | ✅ 是（继承所属模块/agent 版本线） | 给某模块补能力、迭代 |
 | `fix` | 缺陷修复 / 小改 | `PATCH` 升级（`v0.2.1`） | ✅ 是（继承所属模块/agent 版本线） | 修 bug、微调 |
 | `standalone` | 一次性任务 | 不改变能力，无需版本 | ❌ 否 | 临时调研、纯文档整理 |
+| `upgrade` | **框架级自升级**（跨模块/方法论/治理/测试红线） | `MINOR` 升级（如 `v0.2.0`） | ✅ 是（纳入 `framework` 模块版本线） | 框架自审查发现薄弱点、跨模块能力整体升级（见 docs/FRAMEWORK_UPGRADE.md） |
 
 ---
 
@@ -75,4 +76,5 @@ depends_on:     <父模块 issue 或前置 issue 编号>  # 选填：建立 Issu
 - [ ] `type` 正确；`update`/`fix` 已写 `depends_on` 指向父模块 issue
 - [ ] `module_version` 与所属模块版本线一致；`agent_version` 与所属 agent 角色版本线一致
 - [ ] **双版本各自独立升版**，未强推"整体版本号"，改动局限在最小迭代单位（单一模块 / 单一 agent）
+- [ ] 若为**框架级升级**（跨模块/方法论/治理/测试红线）：`module: framework` + `type: upgrade`，并按 docs/FRAMEWORK_UPGRADE.md 附「框架自升级评估表」
 - [ ] 正文含验收标准与边界，可被下游（架构师/开发）稳定读取

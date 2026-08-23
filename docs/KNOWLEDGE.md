@@ -29,13 +29,14 @@
 | 文档 | 位置 | 内容 |
 |------|------|------|
 | 顶层架构拓扑 | `docs/ARCHITECTURE.md` | 模块清单、数据流向、关键取舍 |
-| 经验记忆库+语义触发 | `docs/MEMORY.md` + `src/memory/` | 统一向量格式 + LanceDB/云端双兼容 + 持续积累经验 + 语义向量触发引擎 |
+| 经验记忆库+语义触发 | `docs/MEMORY.md` + `src/memory/` | 统一向量格式 + LanceDB/云端双兼容 + 持续积累经验 + 语义向量触发引擎（真实向量检索 + 可插拔真实 embedding） |
+| 框架自升级闭环 | `docs/FRAMEWORK_UPGRADE.md` | 框架整体纳入版本演进：何时触发升级 + upgrade 类型 + framework 版本线 |
 | 工程实践路线图 | `docs/ROADMAP.md` | 里程碑 M0-M10、下一阶段建议 |
 | Issue 版本管理 | `docs/ISSUE_MANAGEMENT.md` | 声明头 + **模块/Agent 双版本线**（module_version + agent_version） |
 | 架构八步模板 | `docs/templates/architect-report.md` | 八步产物产出模板 |
 | Issue 声明模板 | `docs/templates/issue-template.md` | 声明头 front-matter 规范 |
 | 验收清单 | `docs/templates/acceptance-checklist.md` | 测试信号灯 + 可勾选验收标准 |
-| 测试脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（真实功能链路） + `tests/test_relay_workflow.sh`（接力链路可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容） | 五项关键链路 + 数据获取/看板呈现/RAG读取 + 接力/回转/打断 + 记忆库/语义触发 真跑通（test 阶段） |
+| 测试脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（真实功能链路） + `tests/test_relay_workflow.sh`（接力链路可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容） + `tests/test_doc_consistency.sh`（文档-实现一致性防漂移） | 五项关键链路 + 数据获取/看板呈现/RAG读取 + 接力/回转/打断 + 记忆库/语义触发 + 文档漂移检测 真跑通（test 阶段） |
 | 协作规则 | `AGENTS.md` | 全局协作规则 + 安全护栏 |
 | 使用说明 | `README.md` | 快速开始 + 命令 |
 | 真实场景产物 | `docs/arch-scenarios/` | 架构八步跑通的产物留痕 |
@@ -69,6 +70,7 @@ $ cnb knowledge-base query --query "架构师框架的核心设计理念是什�
 ## 五、当前进度（能力成熟度）
 
 - **模块/Agent 双版本线**：详见各模块/agent 的 Issue 声明头（`module/module_version/agent/agent_version/type/update/depends_on`）。版本强制，非整体版本，双维度独立升版。
+- **框架自升级**：`framework` 模块纳入版本治理，跨模块/方法论/测试红线升级走 `type=upgrade`（见 docs/FRAMEWORK_UPGRADE.md）。
 - **路线图**：M0-M16 已完成（含测试体系、多角色补全、触发强制化+回转/打断、记忆库+语义向量触发、双版本管理、看板自动化）；M7/M11 真实场景验证与知识库充实为当前推进重点。
 - **待办**：真实场景跑通验证（#4 CP2 待补充信息）、知识库随 PR#10 合并后自动重跑入库。
 

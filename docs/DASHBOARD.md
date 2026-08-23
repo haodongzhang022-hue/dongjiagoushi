@@ -29,6 +29,12 @@
 |-------|------|---------|-------------|------|
 | [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6) | 🔺 update | v0.2.0 | 把 docs/、模板、关键决策文档入库 + 打 tag 触发 codewiki，让 @CodeBuddy/架构师对话能直接 RAG 检索到架构上下文。 | 🟢 open |
 
+### 模块 `memory`
+
+| Issue | type | 模块版本 | 目标 / 更新 | 状态 |
+|-------|------|---------|-------------|------|
+| [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12) | 🆕 init | v0.1.0 | 将「经验记忆库 + 语义向量触发引擎」确立为独立模块，登记模块版本线 v0.1.0 根节点，纳入看板与版本管理闭环 | 🟢 open |
+
 ### 模块 `multirole`
 
 | Issue | type | 模块版本 | 目标 / 更新 | 状态 |
@@ -46,6 +52,12 @@
 ## 二、Agent 角色版本演进看板（agent_version）
 
 每个 agent 角色独立一条语义化版本线；看板显示「角色能力到哪版」。一个 Issue 只在一个最小迭代单位（单一模块 / 单一 agent）上升版。
+
+### Agent `—`
+
+| Issue | type | Agent版本 | 目标 / 更新 | 状态 |
+|-------|------|----------|-------------|------|
+| [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12) | 🆕 init | — | 将「经验记忆库 + 语义向量触发引擎」确立为独立模块，登记模块版本线 v0.1.0 根节点，纳入看板与版本管理闭环 | 🟢 open |
 
 ### Agent `架构·开发/架构·产品/架构·评审/架构·测试`
 
@@ -75,7 +87,7 @@
 | M5 | 进度对齐（暂停点） | CP1/CP2/CP3 护栏 | 状态 `CP1/CP2/CP3 护栏` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
 | M6 | 索引建立 | docs/ 索引 + 产物索引 | 状态 `docs/ 索引 + 产物索引` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
 | M7 | 真实场景跑通验证 | 用 architect skill 跑真实需求 | 状态 `用架构师 skill 跑一个真实架构需求` · 线索 [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
-| M8 | Issue 声明与模块版本管理机制 | 声明头 + 类型表 + 版本线 | 状态 `声明头 + 类型表 + 版本线（见 docs/ISSUE_MANAGEMENT.md）` · 线索 [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7), [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
+| M8 | Issue 声明与模块版本管理机制 | 声明头 + 类型表 + 版本线 | 状态 `声明头 + 类型表 + 版本线（见 docs/ISSUE_MANAGEMENT.md）` · 线索 [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12), [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7), [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
 
 ---
 
@@ -83,6 +95,8 @@
 
 | Issue | 模块 | 模块版本 | agent | agent版本 | type | 目标 | 依赖 | 状态 |
 |-------|------|---------|-------|----------|------|------|------|------|
+| [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12) | `memory` | v0.1.0 | `—` | — | init | 将「经验记忆库 + 语义向量触发引擎」确立为独立模块，登记模块版本线 v0.1.0 根节点，纳入看板与版本管理闭环 | #8 | 🟢 open |
+| [#11](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/11) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8) | `testing` | v0.1.0 | `—` | — | init | 建立测试体系，明确"信号灯"——只有功能真正达成预期才放行，否则不能过。建议覆盖： | 无 | 🟢 open |
 | [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7) | `dashboard` | v0.1.0 | `—` | — | init | 基于每个 Issue 的声明头 | #8 | 🟢 open |
 | [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6) | `knowledge` | v0.2.0 | `—` | — | update | 把 docs/、模板、关键决策文档入库 + 打 tag 触发 codewiki，让 @CodeBuddy/架构师对话能直接 RAG 检索到架构上下文。 | #8 | 🟢 open |
@@ -94,10 +108,12 @@
 
 ## 五、待办 / 阻塞点扫描
 
-当前 open Issue：**6** / 总 6。
+当前 open Issue：**8** / 总 8。
 
 | Issue | 标题 | 模块 | 阻塞线索 |
 |-------|------|------|----------|
+| [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12) | 任务 F｜经验记忆库「孤儿模块」版本线补全（module: memory / init / v0.1.0） | `memory` | — |
+| [#11](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/11) | 本项目几个issue已经提交了，你审核整合一下，看看还有没有问题 | `—` | — |
 | [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8) | 任务 E｜测试体系落地（你强调的：功能正常才能过测试，没达成不让通过） | `testing` | ⏸ 暂停点 |
 | [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7) | 任务 D｜可视化 / 二级信息看板自动化（人类俯瞰决策） | `dashboard` | — |
 | [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6) | 任务 C｜知识库充实（让架构师"读信息条理全面"） | `knowledge` | — |
@@ -118,6 +134,35 @@
 |--------|-----------|------|
 | 模块版本缺失（应写 `module_version`） | ✅ 无 | 看板无法显示模块版本线，无法版本管理 |
 | agent 能力缺失 `agent_version` | ✅ 无 | agent 维度版本线缺失，无法追踪角色能力 |
+
+---
+
+## 六、框架健康度（framework 自升级维度）
+
+> 框架整体 = AGENTS.md + .cnb.yml + SKILL.md + settings.yml + docs/ + src/memory/。
+> 本维度把「框架自身」纳入版本演进，展示各模块/角色版本线 + 测试信号灯 + 待办升级项，供人类俯瞰框架健康（详见 docs/FRAMEWORK_UPGRADE.md）。
+
+### 6.1 模块与角色版本线覆盖
+
+| 维度 | 已覆盖版本线 | 说明 |
+|------|-------------|------|
+| 模块版本线 | `arch-skill`, `dashboard`, `knowledge`, `memory`, `multirole`, `testing` | 各模块独立演进（module_version） |
+| agent 版本线 | `—`, `架构·开发/架构·产品/架构·评审/架构·测试`, `架构·总师` | 各角色独立演进（agent_version） |
+| 框架自升级线 | `framework` | 跨模块/方法论/测试红线整体升级（type=upgrade，见 FRAMEWORK_UPGRADE.md） |
+
+### 6.2 测试信号灯
+
+| 测试脚本 | 覆盖 | 状态(本地需自行运行) |
+|---------|------|--------------------|
+| test_architect_system.sh | 产物完整性/八步/CP护栏/触发强制化/回转打断 | ✅ 存在 |
+| test_functional_links.sh | 真实功能链路（数据获取/看板/RAG） | ✅ 存在 |
+| test_relay_workflow.sh | 接力/回转/打断 可复现 | ✅ 存在 |
+| test_memory_store.sh | 记忆库+语义向量触发+双后端兼容 | ✅ 存在 |
+| test_doc_consistency.sh | 文档-实现一致性（防漂移） | ✅ 存在 |
+
+### 6.3 待办框架升级项
+
+_当前无 open 的 framework 升级项。_
 
 ---
 
