@@ -110,6 +110,135 @@ SCHEMA_DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_stats_metric ON stats(metric)",
+    # ---- 7. 实体注册表（协作运作机制 · ① 实体解耦 + loc:// 位置寻址）----
+    """
+    CREATE TABLE IF NOT EXISTS entities (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        etype         TEXT NOT NULL,            -- req|task|agent|skill|mem|space|archive
+        namespace     TEXT DEFAULT '',          -- 归属空间
+        entity_id     TEXT NOT NULL,            -- 对象 id（空间内唯一）
+        loc           TEXT NOT NULL,            -- loc:// 规范地址（唯一索引）
+        parent_loc    TEXT DEFAULT '',          -- 父实体地址（层级归属）
+        acl_key       TEXT DEFAULT '',          -- 权限键（''=公开）
+        payload       TEXT DEFAULT '{}',        -- 实体内容（JSON）
+        version       INTEGER DEFAULT 1,        -- 当前版本号
+        owner         TEXT DEFAULT '',          -- 当前持有者（可移交）
+        status        TEXT DEFAULT 'active',    -- active/archived/merged
+        created_at    TEXT,
+        updated_at    TEXT,
+        UNIQUE(loc)
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_loc ON entities(loc)",
+    "CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(etype)",
+    # ---- 8. 层级空间（协作运作机制 · ② 父子树 / 共享空间）----
+    """
+    CREATE TABLE IF NOT EXISTS spaces (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        space_id      TEXT NOT NULL,            -- 空间 id
+        parent_id     TEXT DEFAULT '',          -- 父空间 id（''=根）
+        name          TEXT DEFAULT '',
+        kind          TEXT DEFAULT 'group',     -- root/group/team/area
+        loc           TEXT NOT NULL,
+        owner         TEXT DEFAULT '',
+        created_at    TEXT,
+        UNIQUE(space_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_spaces_parent ON spaces(parent_id)",
+    # ---- 9. 权限空间（协作运作机制 · ③ ACL 访问控制）----
+    """
+    CREATE TABLE IF NOT EXISTS acl (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal    TEXT NOT NULL,             -- agent_id 或 group/space 名
+        ptype        TEXT DEFAULT 'agent',      -- agent|group|role|public
+        loc_pattern  TEXT NOT NULL,             -- 位置匹配模式 loc://task.g1/*
+        access       TEXT DEFAULT 'r',          -- r|w|rw|none
+        created_at   TEXT,
+        UNIQUE(principal, loc_pattern)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_acl_principal ON acl(principal)",
+    "CREATE INDEX IF NOT EXISTS idx_acl_pattern ON acl(loc_pattern)",
+    # ---- 10. 版本实体（协作运作机制 · ④ 版本整合，冲突检测）----
+    """
+    CREATE TABLE IF NOT EXISTS versions (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_loc    TEXT NOT NULL,
+        vno           INTEGER NOT NULL,         -- 1..n
+        payload       TEXT DEFAULT '{}',
+        author        TEXT DEFAULT '',
+        branch        TEXT DEFAULT 'main',
+        parent_vno    INTEGER DEFAULT 0,        -- 基于哪一版（冲突检测关键）
+        status        TEXT DEFAULT 'open',      -- open/merged/conflict/discarded
+        created_at    TEXT,
+        UNIQUE(entity_loc, vno)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_versions_loc ON versions(entity_loc)",
+    "CREATE INDEX IF NOT EXISTS idx_versions_branch ON versions(branch)",
+    # ---- 11. 小组整合提交（协作运作机制 · ⑤ 小组提交）----
+    """
+    CREATE TABLE IF NOT EXISTS commits (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        commit_id     TEXT NOT NULL,            -- commit-<uuid>
+        group_loc     TEXT DEFAULT '',          -- 提交的小组/空间
+        scope         TEXT DEFAULT '',          -- 最小模块粒度
+        entity_locs   TEXT DEFAULT '[]',        -- 实体地址清单
+        base_versions TEXT DEFAULT '[]',        -- 各实体父版本
+        status        TEXT DEFAULT 'open',      -- open/merged/conflict
+        submitter     TEXT DEFAULT '',
+        created_at    TEXT,
+        UNIQUE(commit_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_commits_group ON commits(group_loc)",
+    "CREATE INDEX IF NOT EXISTS idx_commits_status ON commits(status)",
+    # ---- 12. 需求（协作运作机制 · 一等实体，与任务/agent 解耦）----
+    """
+    CREATE TABLE IF NOT EXISTS requirements (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        req_id       TEXT NOT NULL,
+        title        TEXT DEFAULT '',
+        space        TEXT DEFAULT '',
+        detail       TEXT DEFAULT '{}',
+        status       TEXT DEFAULT 'open',       -- open/refined/assigned/closed
+        parent_req   TEXT DEFAULT '',           -- 需求父子拆分
+        owner        TEXT DEFAULT '',
+        created_at   TEXT,
+        UNIQUE(req_id)
+    )
+    """,
+    # ---- 13. skill（协作运作机制 · 一等实体，与 agent 解耦可共享）----
+    """
+    CREATE TABLE IF NOT EXISTS skills (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        skill_id     TEXT NOT NULL,
+        name         TEXT DEFAULT '',
+        space        TEXT DEFAULT '',
+        desc         TEXT DEFAULT '',
+        playbook     TEXT DEFAULT '',
+        version      INTEGER DEFAULT 1,
+        owner        TEXT DEFAULT '',
+        created_at   TEXT,
+        UNIQUE(skill_id)
+    )
+    """,
+    # ---- 14. 记忆（协作运作机制 · 一等实体，按空间共享受 ACL 管控）----
+    """
+    CREATE TABLE IF NOT EXISTS memory (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        mem_id       TEXT NOT NULL,
+        space        TEXT DEFAULT '',
+        kind         TEXT DEFAULT 'context',    -- context/decision/log/learned
+        content      TEXT DEFAULT '',
+        owner        TEXT DEFAULT '',
+        version      INTEGER DEFAULT 1,
+        created_at   TEXT,
+        UNIQUE(mem_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_memory_space ON memory(space)",
 ]
 
 

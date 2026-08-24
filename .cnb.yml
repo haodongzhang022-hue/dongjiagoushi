@@ -42,6 +42,8 @@ main:
             bash local-agent/tests/test_scale.sh
             echo "==== 数据管理层测试（data：数据库承载/内容存档/进度统计/消息管线/任务存储/数据管理员/2500并发） ===="
             bash local-agent/tests/test_data_layer.sh
+            echo "==== 协作运作机制测试（collab：实体解耦+loc寻址+移交/层级空间/ACL权限/版本冲突检测/小组提交整合） ===="
+            bash local-agent/tests/test_collab.sh
             echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
             bash tests/test_doc_consistency.sh
     - name: build knowledge base
