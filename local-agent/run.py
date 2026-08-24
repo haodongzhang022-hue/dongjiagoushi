@@ -34,6 +34,9 @@ import orchestrator
 import relay
 from roles import list_roles
 
+# 规模伸缩层（架构升级核心）
+from scale import engine, spec, profile, plugin
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -43,20 +46,54 @@ def main():
     parser.add_argument("--role", help="触发单个角色，如 架构·总师")
     parser.add_argument("--req", help="用户需求/请求")
     parser.add_argument("--backend", default=None, help="模型后端：openai_compat / cli_fallback")
-    parser.add_argument("--list-roles", action="store_true", help="列出团队角色")
+    parser.add_argument("--list-roles", action="store_true", help="列出团队角色（含插件）")
     parser.add_argument("--resume", action="store_true", help="从接力卡续跑")
     parser.add_argument("--clear", action="store_true", help="清空接力卡")
+    # ---- 架构升级新增入口 ----
+    parser.add_argument("--scale", action="store_true", help="运行规模化流水线（scale 引擎）")
+    parser.add_argument("--spec", default=None,
+                        help='团队规模声明 JSON，如 \'{"team_size": 2500, "levels": 3, "mode": "harness"}\'')
+    parser.add_argument("--profile", default=None, help="前置流程模板：default/company/harness/acquisition/support")
+    parser.add_argument("--list-profiles", action="store_true", help="列出前置流程模板")
+    parser.add_argument("--concurrency", type=int, default=None, help="覆盖并发度（压测）")
     args = parser.parse_args()
 
+    if args.list_profiles:
+        print("前置流程模板（不同位置不同流程）：")
+        for p in profile.list_profiles():
+            print(f"  - {p}: {profile.describe(p)}")
+        return 0
+
     if args.list_roles:
-        print("团队角色：")
-        for r in list_roles():
+        # 合并内置 + 插件角色（灵活增减）
+        reg = plugin.merged_registry()
+        print(f"团队角色（共 {len(reg)} 个，含插件）：")
+        for r in reg:
             print(f"  - {r}")
         return 0
 
     if args.clear:
         relay.clear()
         print("已清空接力卡")
+        return 0
+
+    if args.scale:
+        # 规模化流水线：声明团队大小/分工层级/并发度 + 前置流程区分
+        spec_obj = {}
+        if args.spec:
+            spec_obj = spec.parse(args.spec)
+        if args.profile:
+            spec_obj["profile"] = args.profile
+        if not args.req:
+            parser.error("--scale 需要 --req 需求文本")
+        report = engine.run_scaled(
+            args.req,
+            spec_obj=spec_obj,
+            concurrency_override=args.concurrency,
+            verbose=True,
+        )
+        print("\n===== 规模化交付报告 =====")
+        print(engine.to_json(report))
         return 0
 
     if args.resume:
@@ -71,7 +108,7 @@ def main():
         return 0
 
     if not args.req:
-        parser.error("--req 必填（除非使用 --list-roles/--resume/--clear）")
+        parser.error("--req 必填（除非使用 --list-roles/--list-profiles/--resume/--clear）")
 
     if args.pipeline:
         report = orchestrator.run_pipeline(args.req, backend=args.backend)

@@ -38,6 +38,8 @@ main:
             echo "==== 本地 Agent 团队测试（local-agent：CLI入口/编排/接力/续跑） ===="
             pip install -q -r local-agent/requirements.txt 2>/dev/null || true
             bash local-agent/tests/test_local_agent.sh
+            echo "==== 规模伸缩层测试（scale：规模声明/前置流程/角色插件/消息总线/状态分片/并发池） ===="
+            bash local-agent/tests/test_scale.sh
             echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
             bash tests/test_doc_consistency.sh
     - name: build knowledge base
