@@ -39,6 +39,7 @@ graph TD
 | **市场分层模块** | `roles/market.py` + settings | 销售/客服/数据/渠道/工具 通用基建 | 获客/服务诉求 | 获客产物 | 无 | ✅ |
 | **跨平台适配模块** | `docs/PLATFORM_ADAPTERS.md` | cnb.cool / deepseek harness / MCP 蜂群适配方案 | 宿主触发 | 统一活动规则适配 | DAG/接力协议 | ✅ |
 | **规模伸缩层模块** | `local-agent/scale/` | 可伸缩蜂群协作平台：规模声明 + 前置流程区分 + 角色插件 + 消息总线 + 状态分片 + 并发池 | `--spec/--profile/--scale` | 规模化交付报告 | 无 | ✅ |
+| **数据管理层模块** | `local-agent/data/` | 数据库承载：内容存档/进度统计/消息管线/任务存储，支撑 2500 并发信息互通 | DB_BACKEND（SQLite 默认/PG） | 数据底座/统计报告 | scale 引擎 | ✅ |
 
 ## 三、数据流向
 

@@ -79,6 +79,17 @@
 - **禁止代替用户确认、禁止未获确认就放行、禁止假装已确认。**
 - 严禁在评论/产物中输出 Token、密码、密钥等敏感信息。
 
+## 数据管理规则（数据管理员 agent 统一负责）
+
+为承载 **最大 2500 并发 agent** 的信息互通与持久化，数据管理**写成规则、由「架构·数据管理员」agent 统一负责**，落于 `local-agent/data/` 数据库层（内容存档/进度统计/消息管线/任务存储）。详见 `docs/DATA_ARCHITECTURE.md`。
+
+- **数据先行**：每个 agent / 任务 / 消息在进入业务前，先由数据管理员登记入库。
+- **统一口径**：所有指标统计以 `stats` / `progress` 为准，禁止各 agent 自造口径。
+- **可回溯留痕**：协作产出必须写 `archives`，进度变化必须写 `progress`，禁止无痕产出。
+- **消息可回放**：消息管线（`messages`）可重放，供审计复盘，不吞异常。
+- **唯一负责**：数据写入 / 校验 / 统计 / 归档由「架构·数据管理员」统一执行，人类 / 总师只通过 `progress_report` / `task_overview` / `snapshot_stats` 二级信息俯瞰。
+- **后端可伸缩**：默认 SQLite 零依赖；生产 / 2500 级切 PostgreSQL（`DB_BACKEND`），同一套表结构与接口无缝迁移。
+
 ## 知识库
 
 - 云端走 CNB 原生仓库知识库（`knowledge:update` + codewiki `knowledge_enabled: true`）。

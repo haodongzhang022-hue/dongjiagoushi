@@ -40,6 +40,8 @@ main:
             bash local-agent/tests/test_local_agent.sh
             echo "==== 规模伸缩层测试（scale：规模声明/前置流程/角色插件/消息总线/状态分片/并发池） ===="
             bash local-agent/tests/test_scale.sh
+            echo "==== 数据管理层测试（data：数据库承载/内容存档/进度统计/消息管线/任务存储/数据管理员/2500并发） ===="
+            bash local-agent/tests/test_data_layer.sh
             echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
             bash tests/test_doc_consistency.sh
     - name: build knowledge base
