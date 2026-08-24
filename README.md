@@ -98,9 +98,19 @@
 │   │   └── closure.py                   #   收尾闭环统一编排（会诊未收敛→前置→人类 全自动）
 │   ├── sentinel/                        # 🆕🚀 防无效努力 · 目标收敛监控（量化距离 → 判定 → 打断/上报）
 │   │   ├── store.py                     #   目标进度尺(goal_meters) + 监控动作(sentinel_actions) 数据访问
-│   │   ├── detect.py                    #   无效努力判定（停滞/横跳/重复错误）
+│   │   ├── detect.py                    #   无效努力判定（停滞/横跳/重复错误/进度上限停滞 progress_cap_stall）
 │   │   ├── engine.py                    #   处置协议（track → 1级打断重规划 / 2级上报局部调整）
 │   │   └── peer_guard.py                #   E2 同岗协作组（cohort）收敛监控
+│   ├── dispatcher/                      # 🆕🚀 调度中枢 · 事件驱动自动化调度（见 docs/DISPATCHER.md）
+│   │   ├── source.py                    #   事件源监听 + 外部适配器插槽（本仓库+外部，通用解决）
+│   │   ├── rules.py                     #   触发规则引擎（岗位/审核/驳回/遗漏，自动优先/规则优先）
+│   │   ├── queue.py                     #   Action 队列（自动放行+人工审核闸门，不卡进程）
+│   │   ├── guard.py                     #   防无效护栏（去重/频限/进度上限，联动哨兵）
+│   │   ├── router.py                    #   路由派发器（按 gid 精准定位负责 agent）
+│   │   ├── reject.py                    #   驳回迭代表（驳回非终点，按 gid 回派改进重提）
+│   │   ├── engine.py                    #   统一调度引擎（scan / --watch 持续守护）
+│   │   ├── webui.py                     #   Web 可视化面板（事件流/路由/拦截/驳回/哨兵/进度尺）
+│   │   └── cli.py                       #   CLI：scan / watch / web / overview / reject
 │   ├── roles.d/                         # 🆕 角色插件目录（放一个 .py 即自动加载新角色）
 │   │   └── analyst.py                   #   插件角色示例（架构·数据分析师）
 │   ├── roles/                           # 25 个角色模块（秘书/产品/总师/总师助理/经理/小组长/开发/评审/对齐/找工具/测试/数据管理员/监控哨兵 + 市场层5 + 公司化三战线7）

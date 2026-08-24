@@ -5,3 +5,7 @@ agent_*.json
 prescale_records.json
 # 规模测试运行产生的分片状态卡（运行时产物，不纳入版本库）
 *_1.json
+# 上位机状态机测试卡（host-engine 运行时产物，不入库）
+dev_*.json
+prod_*.json
+test_*.json

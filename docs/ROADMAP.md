@@ -36,6 +36,7 @@
 | M27 | 规模伸缩层 · 并发池 + 统一调度引擎 | ✅ | `local-agent/scale/{pool,engine}.py`：真并行波次 + 2500 级并发模拟 + `--scale` CLI 入口（见 Issue #20） |
 | M28 | 规模伸缩层 · 测试与文档 | ✅ | `local-agent/tests/test_scale.sh` 7 组测试 + 主测试/本地测试全绿 + `docs/FRAMEWORK_V3.md`（见 Issue #20） |
 | M29 | 上位机 · 定时器 + 状态机工程能力引擎 | ✅ | `local-agent/engine/`：状态机（合法转移表+强制校验+留痕）+ 定时器（周期/超时/心跳巡检）+ 上位机整合（HostEngine）+ `test_engine.sh` 7 组测试 + `docs/HOST_ENGINE.md`（见 Issue #26） |
+| M30 | 调度中枢 · 事件驱动自动化调度层（dispatcher） | ✅ | `local-agent/dispatcher/`：事件源监听（本仓库+外部适配器插槽）+ 触发规则引擎 + Action 队列（自动优先+人工审核闸门，不卡进程）+ 防无效护栏（去重/频限/进度上限）+ 驳回迭代闭环（rejections 表按 gid 回派改进重提）+ sentinel 进度上限判定强化 + Web 可视化面板 + `test_dispatcher.sh` 8 组测试 + `docs/DISPATCHER.md`（见 Issue #26） |
 
 ## 架构八步模板
 
@@ -110,5 +111,6 @@ dashboard 模块（init）
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
 | 框架自升级闭环 | `docs/FRAMEWORK_UPGRADE.md` |
 | 上位机定时器+状态机引擎 | `local-agent/engine/`（state_machine/timer/host/cli）+ `local-agent/tests/test_engine.sh` + `docs/HOST_ENGINE.md` |
+| 调度中枢·事件驱动自动化调度 | `local-agent/dispatcher/`（source/rules/queue/router/guard/reject/webui/engine/cli）+ `local-agent/tests/test_dispatcher.sh` + `docs/DISPATCHER.md` |
 | 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容 可复现） + `tests/test_doc_consistency.sh`（文档-实现一致性 防漂移） |
 | 验收清单 | `docs/templates/acceptance-checklist.md` |
