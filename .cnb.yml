@@ -48,6 +48,8 @@ main:
             bash local-agent/tests/test_collab.sh
             echo "==== 监控哨兵测试（sentinel：目标收敛监控/无效努力判定/打断重规划/上报局部调整） ===="
             bash local-agent/tests/test_sentinel.sh
+            echo "==== 外部事件源接入测试（external-source：多终端协同+秘钥/IP白名单+Webhook+上位机辅助） ===="
+            bash local-agent/tests/test_external_source.sh
             echo "==== 调度中枢测试（dispatcher：事件驱动自动化调度/规则引擎/Action队列/防无效护栏/驳回迭代闭环/进度上限/Web面板） ===="
             bash local-agent/tests/test_dispatcher.sh
             echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="

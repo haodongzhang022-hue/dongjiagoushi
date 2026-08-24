@@ -28,10 +28,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data import db, schema
 from dispatcher import queue as queue_mod
 from dispatcher import reject as reject_mod
+from dispatcher import security as sec_mod
 
 
 def _overview_payload():
-    """聚合面板所需全部二级信息（事件流/队列/驳回/哨兵/统计）。"""
+    """聚合面板所需全部二级信息（事件流/队列/驳回/哨兵/统计/外部源/安全认证）。"""
     schema.init_schema()
     dispatch_rows = db.query("SELECT * FROM dispatch ORDER BY id DESC LIMIT 200")
     queue_rows = queue_mod.queued(limit=200)
@@ -50,6 +51,9 @@ def _overview_payload():
         "goal_meters": [dict(r) for r in meters],
         "queue_overview": queue_mod.overview(),
         "rejection_overview": reject_mod.overview(),
+        "external_sources": sec_mod.list_sources(),
+        "auth_overview": sec_mod.overview(),
+        "auth_audit": sec_mod.audit(limit=100),
         "now": datetime.utcnow().isoformat(),
     }
 
@@ -108,6 +112,14 @@ tr:nth-child(even){background:#151a22;}
 </div>
 
 <div class="section card">
+<h2>🔌 外部事件源（多终端 · 本地电脑/手机/虚拟机/沙盒/上位机）</h2>
+<p class="dim">每个外部源独立 key + IP 白名单；本地上位机辅助角色预设。</p>
+{table_extsrc}
+<p class="dim">认证审计（安全拦截俯瞰）：</p>
+{table_extauth}
+</div>
+
+<div class="section card">
 <h2>📏 目标进度尺（量化距离 / 最大完成度）</h2>
 {table_meters}
 </div>
@@ -118,6 +130,16 @@ tr:nth-child(even){background:#151a22;}
 
 def _badge(status):
     return f'<span class="badge st">{html.escape(str(status))}</span>'
+
+
+def _mask_key(key):
+    """秘钥打码（安全红线：面板不落明文）。"""
+    if not key:
+        return ""
+    if len(key) <= 4:
+        return "*" * len(key)
+    return key[:2] + "*" * (len(key) - 4) + key[-2:]
+
 
 
 def _render_table(headers, rows, rowmap=None):
@@ -185,6 +207,24 @@ def render_html(payload):
                        f"{round(ratio*100,1)}%", r.get("note", "")])
     t_meters = _render_table(["任务", "agent", "已达/目标", "完成度", "说明"], m_rows)
 
+    # 外部事件源（多终端）
+    e_rows = []
+    for r in q["external_sources"]:
+        e_rows.append([_badge("启用" if r["enabled"] else "停用"), r["name"],
+                       r["kind"], ",".join(r["ip_whitelist"]) or "(deny-all)",
+                       _mask_key(r["api_key"])])
+    t_extsrc = _render_table(
+        ["状态", "源名", "类型", "IP 白名单", "秘钥(打码)"], e_rows)
+
+    # 外部源认证审计（安全拦截）
+    a_rows = []
+    for r in q["auth_audit"]:
+        a_rows.append([_badge("✅" if r["result"] == "allow" else "⛔"),
+                       r["source_name"], r["client_ip"], r["result"],
+                       r["reason"], r["created_at"] or ""])
+    t_extauth = _render_table(
+        ["结果", "源名", "来源 IP", "result", "拦截原因", "时间"], a_rows)
+
     qo = q["queue_overview"]
     ro = q["rejection_overview"]
     q_keys = "".join(f"<td>{_badge(k)}</td>" for k in qo)
@@ -199,6 +239,8 @@ def render_html(payload):
             .replace("{table_dispatch}", t_dispatch)
             .replace("{table_sentinel}", t_sentinel)
             .replace("{table_meters}", t_meters)
+            .replace("{table_extsrc}", t_extsrc)
+            .replace("{table_extauth}", t_extauth)
             .replace("{queue_stat_cells}", q_keys or "<td>-</td>")
             .replace("{queue_stat_vals}", q_vals or "<td>-</td>")
             .replace("{reject_stat_cells}", r_keys or "<td>-</td>")
@@ -220,6 +262,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        # 多源 Webhook 事件接入：POST /webhook/<source_name>（安全：key + IP 白名单）
+        if self.path.startswith("/webhook/"):
+            from . import webhook as webhook_mod
+            code, body = webhook_mod.handle_webhook(self, self.path)
+            data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         # 人工审核闸门放行：POST /release/<event_id>
         path = self.path
         if path.startswith("/release/"):

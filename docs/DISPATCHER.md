@@ -6,6 +6,8 @@
 > 到对应 agent，并在 Web 面板上实时俯瞰。
 >
 > 对应 ISSUE #26；可执行载体 `local-agent/dispatcher/` + `local-agent/tests/test_dispatcher.sh`。
+>
+> **外部事件源接入（多终端协同 + 秘钥/IP 白名单 + 本地上位机辅助）见 [EXTERNAL_SOURCE.md](EXTERNAL_SOURCE.md)**。
 
 ---
 
@@ -55,7 +57,11 @@
 | `dispatcher/reject.py` | 驳回迭代表（**驳回非终点**，按 gid 回派改进重提） | 驳回标记 | rejections 记录 + 迭代回派 |
 | `dispatcher/engine.py` | 统一调度引擎（单次扫描 / --watch 持续守护 / drain） | 事件流 | 扫描/派发/驳回回派摘要 |
 | `dispatcher/webui.py` | **Web 可视化面板**（零前端依赖） | dispatch/rejections/sentinel | 实时 HTML 俯瞰 |
-| `dispatcher/cli.py` | 命令行入口（scan / watch / web / overview / reject） | 参数 | 报告/面板 |
+| `dispatcher/cli.py` | 命令行入口（scan / watch / web / overview / reject / ext / webhook / host） | 参数 | 报告/面板 |
+| `dispatcher/security.py` | 外部源安全（秘钥 + IP 白名单 + 认证审计） | 外部源请求 | 认证放行/拦截（留痕） |
+| `dispatcher/webhook.py` | 多源 Webhook 接收端（POST /webhook/<source>） | 外部终端推送 | 安全注入 dispatcher |
+| `dispatcher/sources.py` | 多源适配器注册 + 本地电脑适配器 | 多终端源 | 规范化事件 |
+| `dispatcher/host_helper.py` | 本地上位机辅助角色（预设功能，之后接入） | 本地动作 | 上报/俯瞰/拉取/确认 |
 
 ---
 
