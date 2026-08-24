@@ -1,0 +1,151 @@
+# ============================================================
+# 本地 Agent 团队 · 团队角色与流水线配置
+# 仓库：dongjiagoushi（架构师体系）
+# 作用：定义本地 Agent 团队的角色清单 + 流水线（DAG 工作流）定义。
+#       角色人设与 .cnb/settings.yml / .codebuddy/skills/architect 同源。
+# 命名规范：所有角色统一「架构·」前缀命名空间；市场获客层为「市场·」前缀（同体系扩展）。
+# 调度引擎：DAG（有向无环图），支持并行波次 + 分形扩展（见 graph.py / fractal.py）。
+# ============================================================
+
+# 团队角色清单（与云端 settings.yml 对齐 + 本地扩展角色）
+roles:
+  # ---- 入口层（默认第一联系人）----
+  - name: "架构·秘书"
+    module: "roles.secretary"
+    step: "默认入口 / 诉求接收 / 意图翻译 / 路由到对应角色"
+    trigger_words: ["秘书", "入口", "接待", "先看看", "默认"]
+    slogan: "默认入口——先接住诉求，翻译意图，路由到对的人。"
+
+  # ---- 需求转化 / 设计 ----
+  - name: "架构·产品"
+    module: "roles.product"
+    step: "需求澄清 / 翻译意图 / 拆分需求 / 分工排班"
+    trigger_words: ["需求", "澄清", "用户故事", "拆分", "排班", "分工"]
+    slogan: "需求澄清与拆分——先问清楚再动手。"
+  - name: "架构·总师"
+    module: "roles.architect"
+    step: "架构设计 / 确认版本 / 校验正确性/合理性/成本/周期"
+    trigger_words: ["架构", "设计", "方案", "版本", "校验", "成本", "周期"]
+    slogan: "架构八步，一步不省。"
+
+  # ---- 调度 / 协同 ----
+  - name: "架构·经理"
+    module: "roles.manager"
+    step: "分配调度核心 / 任务拆解 / 角色分配 / 进度跟踪"
+    trigger_words: ["分配", "调度", "派活", "派任务", "经理", "排期"]
+    slogan: "分配调度核心——谁来做、何时做完、怎么分配，经理拍板。"
+  - name: "架构·小组长"
+    module: "roles.team_lead"
+    step: "子任务拆解 / 协调推进 / 分形小组整合"
+    trigger_words: ["拆任务", "子任务", "协调", "排期", "整合"]
+    slogan: "把任务拆到可执行，盯着推进不跑偏；多小组交付在此整合。"
+
+  # ---- 实现 / 质量 ----
+  - name: "架构·开发"
+    module: "roles.developer"
+    step: "实现 / 自测 / 提交 PR（支持分形多小组并行）"
+    trigger_words: ["实现", "写代码", "开发", "PR", "自测"]
+    slogan: "需求驱动开发——从方案到可运行。可扩展多小组并行。"
+  - name: "架构·评审"
+    module: "roles.reviewer"
+    step: "五维评审 / 复评"
+    trigger_words: ["评审", "审查", "走查", "质量", "复评"]
+    slogan: "全方位质量守护——从语法到架构，不留死角。"
+  - name: "架构·对齐"
+    module: "roles.version_keeper"
+    step: "版本对齐 / 一致性校验"
+    trigger_words: ["版本", "对齐", "一致", "依赖"]
+    slogan: "版本线对齐，防止漂移与冲突。"
+  - name: "架构·找工具"
+    module: "roles.tool_finder"
+    step: "工具 / 依赖 / 库检索"
+    trigger_words: ["工具", "依赖", "库", "检索", "找"]
+    slogan: "按需检索工具与依赖，不重复造轮子。"
+  - name: "架构·测试"
+    module: "roles.tester"
+    step: "测试矩阵 / 信号灯"
+    trigger_words: ["测试", "验收", "联调", "信号灯", "阻塞"]
+    slogan: "联调·性能·安全·E2E——信号灯亮起才放行。"
+
+  # ---- 市场获客分层（通用基建，服务对外获客 + 对内需求）----
+  - name: "市场·销售"
+    module: "roles.market"
+    class: "SalesRole"
+    step: "线索跟进 / 方案报价 / 成单推进"
+    trigger_words: ["销售", "成单", "报价", "线索", "获客", "商机"]
+    slogan: "线索到成单——方案报价、跟进推进。"
+  - name: "市场·客服"
+    module: "roles.market"
+    class: "SupportRole"
+    step: "响应 / 售后 / 问题分级 / 升级"
+    trigger_words: ["客服", "响应", "售后", "咨询", "投诉"]
+    slogan: "快速响应，分级处理，该升级的显式升级。"
+  - name: "市场·数据"
+    module: "roles.market"
+    class: "DataRole"
+    step: "数据采集 / 分析 / 指标看板（通用基建）"
+    trigger_words: ["数据", "线索分析", "漏斗", "指标", "埋点"]
+    slogan: "沉淀通用数据基建，驱动获客决策。"
+  - name: "市场·渠道"
+    module: "roles.market"
+    class: "ChannelRole"
+    step: "渠道清单 / 投放策略 / 渠道效果（通用基建）"
+    trigger_words: ["渠道", "投放", "推广", "触达", "ROI"]
+    slogan: "渠道基建沉淀，预算花在刀刃上。"
+  - name: "市场·工具"
+    module: "roles.market"
+    class: "ToolingRole"
+    step: "工具清单 / 选型建议 / 自动化（横切基建）"
+    trigger_words: ["工具", "获客工具", "自动化", "基建", "选型"]
+    slogan: "横切工具基建，为各层复用不造轮子。"
+
+# ============================================================
+# 团队流水线（DAG 工作流，替代旧直线 pipeline）
+# ============================================================
+# 关键改进（对齐用户诉求）：
+#   1. 从"直线"升级为"有向无环图(DAG)"：依赖满足即并行，不再傻等上一环全完成。
+#   2. 提前分工：架构·总师一给出架构方案，架构·经理即可开始任务分配/分工，
+#      不必等开发完成——下游开发/评审/测试可与经理的分工并行推进。
+#   3. 分形扩展：开发任务按规模拆为多个小组并行（fractal），小组长整合测试后统一向上交付。
+#   4. 市场获客作为独立入口（默认经 架构·秘书 路由），通用基建（销售/客服/数据/渠道/工具）可复用。
+# ============================================================
+pipeline:
+  name: "full"
+  description: "用户提交诉求 → [秘书路由] → 产品/架构/经理调度 → 分形协同开发 → 测试 → 交付"
+  entry: "架构·秘书"   # 默认入口
+  # 新式 DAG 定义（推荐）：节点 + depends_on
+  dag:
+    nodes:
+      # --- 入口 ---
+      - { id: "secretary",  role: "架构·秘书",  action: "默认入口/诉求接收/意图翻译/路由", depends_on: [] }
+      # --- 需求转化（个人/内部需求默认走产品）---
+      - { id: "clarify",    role: "架构·产品",  action: "需求澄清/翻译意图/拆需求", depends_on: ["secretary"] }
+      # --- 架构设计核心 ---
+      - { id: "architect",  role: "架构·总师",  action: "架构设计核心/确认版本/校验正确性合理性成本周期", depends_on: ["clarify"] }
+      # --- 分配调度核心：架构一明确即可提前分工（不必等开发完成）---
+      - { id: "plan",       role: "架构·经理",  action: "任务拆解/角色分配/调度编排/进度跟踪/分形分组", depends_on: ["architect"] }
+      # --- 协同：plan 之后这些环节可并行（提前启动，不需串行等彼此）---
+      - { id: "lead",       role: "架构·小组长", action: "子任务细化/协调推进/分形小组整合", depends_on: ["plan"] }
+      - { id: "find_tools", role: "架构·找工具", action: "检索工具/依赖清单", depends_on: ["plan"] }
+      - { id: "align",      role: "架构·对齐",  action: "版本对齐/一致性校验", depends_on: ["plan"] }
+      # --- 实现：可分形多小组并行（分形扩展见 fractal.py）---
+      - { id: "develop",    role: "架构·开发",  action: "实现/自测（可分形多小组并行）", depends_on: ["lead"], fractal: { enabled: true, max_per_team: 4 } }
+      # --- 质量守护 ---
+      - { id: "review",     role: "架构·评审",  action: "五维评审/复评", depends_on: ["develop"] }
+      - { id: "test",       role: "架构·测试",  action: "测试矩阵/信号灯", depends_on: ["review", "align"] }
+      # --- 交付 ---
+      - { id: "deliver",    role: "编排引擎",    action: "汇总交付报告", depends_on: ["test"] }
+
+  # 旧式线性 steps（保留兼容：不配 --dag 时回退，便于老测试/老调用）
+  steps:
+    - { step: "secretary",  role: "架构·秘书",  action: "默认入口/诉求接收/路由" }
+    - { step: "clarify",    role: "架构·产品",  action: "沟通对接/澄清需求/翻译意图/拆需求" }
+    - { step: "architect",  role: "架构·总师",  action: "架构设计核心/确认版本/校验正确性合理性成本周期" }
+    - { step: "plan",       role: "架构·经理",  action: "分配调度核心/把架构方案拆解并分配角色/定依赖排期/进度跟踪" }
+    - { step: "lead",       role: "架构·小组长", action: "子任务细化/协调推进" }
+    - { step: "find_tools", role: "架构·找工具", action: "检索工具/依赖清单" }
+    - { step: "develop",    role: "架构·开发",  action: "实现/自测" }
+    - { step: "review",     role: "架构·评审",  action: "五维评审/复评", revert_to: "develop" }
+    - { step: "align",      role: "架构·对齐",  action: "版本对齐/一致性校验", revert_to: "develop" }
+    - { step: "test",       role: "架构·测试",  action: "测试矩阵/信号灯", revert_to: "develop" }
+    - { step: "deliver",    role: "编排引擎",    action: "汇总交付报告" }

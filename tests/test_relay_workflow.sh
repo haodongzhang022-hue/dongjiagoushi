@@ -213,6 +213,24 @@ assert_contains "AGENTS rules固定触发" "$(cat "$AGENTS_FILE")" "rules 固定
 assert_contains "settings 产品/开发/评审/测试均有[触发]" "$(cat "$SETTINGS_FILE")" "[触发:架构·测试]"
 
 # ============================================================
+# 场景G · 分配调度核心（架构·经理）真实落地
+#    验证「产品沟通→架构设计→经理调度」链路中经理作为分配调度核心已落地
+# ============================================================
+TEAM_YAML="local-agent/team.yaml"
+MANAGER_PY="local-agent/roles/manager.py"
+echo ""
+echo "▶ 场景G · 分配调度核心（架构·经理）真实落地"
+assert_contains "settings 已定义 架构·经理 分配调度核心" "$(cat "$SETTINGS_FILE")" "架构·经理"
+assert_contains "settings 经理含[触发]显式标记" "$(cat "$SETTINGS_FILE")" "[触发:架构·经理]"
+assert_contains "settings 经理语义触发词" "$(cat "$SETTINGS_FILE")" "派活"
+assert_contains "team.yaml 已注册 架构·经理 角色" "$(cat "$TEAM_YAML")" "架构·经理"
+assert_contains "team.yaml 经理=分配调度核心" "$(cat "$TEAM_YAML")" "分配调度核心"
+assert_contains "流水线含 架构·经理 调度步骤" "$(cat "$TEAM_YAML")" "架构·经理"
+assert_contains "roles/manager.py 角色模块存在" "$(cat "$MANAGER_PY")" "架构·经理"
+assert_contains "manager.py 输出契约含任务分配" "$(cat "$MANAGER_PY")" "任务拆解清单"
+assert_contains "roles/__init__.py 已注册经理" "$(cat local-agent/roles/__init__.py)" "架构·经理"
+
+# ============================================================
 # 汇总（信号灯）
 # ============================================================
 echo ""
