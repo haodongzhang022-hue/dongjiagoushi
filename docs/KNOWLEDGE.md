@@ -31,6 +31,7 @@
 | 顶层架构拓扑 | `docs/ARCHITECTURE.md` | 模块清单、数据流向、关键取舍 |
 | 经验记忆库+语义触发 | `docs/MEMORY.md` + `src/memory/` | 统一向量格式 + LanceDB/云端双兼容 + 持续积累经验 + 语义向量触发引擎（真实向量检索 + 可插拔真实 embedding） |
 | 框架自升级闭环 | `docs/FRAMEWORK_UPGRADE.md` | 框架整体纳入版本演进：何时触发升级 + upgrade 类型 + framework 版本线 |
+| 上位机定时器+状态机引擎 | `docs/HOST_ENGINE.md` + `local-agent/engine/` | 机器角色状态机（合法转移+强制校验）+ 定时器（周期/超时/心跳）+ 上位机统一管理 |
 | 工程实践路线图 | `docs/ROADMAP.md` | 里程碑 M0-M10、下一阶段建议 |
 | Issue 版本管理 | `docs/ISSUE_MANAGEMENT.md` | 声明头 + **模块/Agent 双版本线**（module_version + agent_version） |
 | 架构八步模板 | `docs/templates/architect-report.md` | 八步产物产出模板 |

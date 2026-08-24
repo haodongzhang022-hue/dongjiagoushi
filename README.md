@@ -77,6 +77,11 @@
 │   │   ├── store.py                     #   按 agent 分片的状态存储（替代单文件接力卡）
 │   │   ├── pool.py                      #   并发执行池（真并行波次，支持大规模并发模拟）
 │   │   └── engine.py                    #   统一调度引擎（整合以上，规模化流水线）
+│   ├── engine/                         # 🆕🚀 上位机 · 定时器+状态机工程能力引擎（见 docs/HOST_ENGINE.md）
+│   │   ├── state_machine.py            #   状态机：合法转移表 + 强制校验 + 留痕（机器角色生命周期）
+│   │   ├── timer.py                    #   定时器：周期/一次性任务 + 超时检测 + 心跳巡检
+│   │   ├── host.py                     #   上位机运行内核（统一管理各机器角色状态与时序）
+│   │   └── cli.py                      #   CLI：demo / transitions / state
 │   ├── data/                            # 🆕🚀 数据管理层（数据库承载：内容存档/进度统计/消息管线/任务存储）
 │   │   ├── __init__.py                  #   统一入口（db/schema/repository/admin）
 │   │   ├── db.py                        #   数据库连接层 + 后端抽象（SQLite 默认零依赖 / PostgreSQL 可选）
