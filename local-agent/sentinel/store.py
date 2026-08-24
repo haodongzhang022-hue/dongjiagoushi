@@ -78,6 +78,56 @@ def meters_for_task(task_id, limit=100):
     return [dict(r) for r in rows]
 
 
+def meters_for_group(group_id, limit=100):
+    """某小组（group_id）下全部成员的目标刻度（供小组长监督本组收敛）。"""
+    rows = db.query(
+        """
+        SELECT m.* FROM goal_meters m
+        JOIN agents a ON a.agent_id = m.agent_id
+        WHERE a.group_id = ? ORDER BY m.id ASC LIMIT ?
+        """,
+        (group_id, limit),
+    )
+    return [dict(r) for r in rows]
+
+
+def group_meter_summary(group_id):
+    """小组进度尺监督视图（二级信息，供小组长俯瞰）：本组成员每个任务的最近刻度/距离/增量。"""
+    rows = db.query(
+        """
+        SELECT m.task_id, m.agent_id, m.target, m.goal_total, m.current,
+               m.distance, m.delta, m.note, m.ts
+        FROM goal_meters m
+        JOIN agents a ON a.agent_id = m.agent_id
+        WHERE a.group_id = ?
+        ORDER BY m.task_id, m.id
+        """,
+        (group_id,),
+    )
+    # 每个任务取最近一条刻度
+    latest = {}
+    for r in rows:
+        d = dict(r)
+        latest.setdefault((d["task_id"], d["agent_id"]), d)
+    out = []
+    for key in sorted(latest):
+        m = latest[key]
+        dist = float(m["distance"])
+        out.append({
+            "task_id": m["task_id"],
+            "agent_id": m["agent_id"],
+            "target": m["target"],
+            "goal_total": float(m["goal_total"]),
+            "current": float(m["current"]),
+            "distance": dist,
+            "progress_ratio": round((1 - dist / float(m["goal_total"])) if m["goal_total"] else 0.0, 4),
+            "delta": float(m["delta"]),
+            "note": m["note"],
+            "ts": m["ts"],
+        })
+    return {"group_id": group_id, "meters": out, "count": len(out)}
+
+
 def count_meters():
     row = db.query_one("SELECT COUNT(*) AS n FROM goal_meters")
     return row["n"] if row else 0

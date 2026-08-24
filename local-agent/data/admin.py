@@ -155,3 +155,150 @@ def task_overview():
         "done": repo.count_tasks(status="done"),
         "blocked": repo.count_tasks(status="blocked"),
     }
+
+
+# ================= 全局唯一编号（gid · 精准定位/二次触发同一实体） =================
+
+def registry_get(etype, biz_key):
+    """查某业务 key 已登记的全局唯一 gid（未登记返回 None）。"""
+    return repo.registry_get(etype, biz_key)
+
+
+def registry_set(etype, biz_key, gid):
+    """登记某业务 key 的全局唯一 gid（幂等）。"""
+    repo.registry_set(etype, biz_key, gid)
+    record_event("data_admin", "gid_registered",
+                 {"etype": etype, "biz_key": biz_key, "gid": gid})
+    return gid
+
+
+def registry_lookup(gid):
+    """按全局唯一 gid 反查其类型/业务 key（精准定位某实体）。"""
+    return repo.registry_lookup_by_gid(gid)
+
+
+def register_gid(etype, biz_key):
+    """为业务 key 登记/取回同一个全局唯一 gid（二次触发拿同一 ID）。
+
+    返回 (gid, is_new)。
+    """
+    exist = repo.registry_get(etype, biz_key)
+    if exist:
+        return exist, False
+    from gid import gen
+    gid = gen(etype)
+    repo.registry_set(etype, biz_key, gid)
+    record_event("data_admin", "gid_registered",
+                 {"etype": etype, "biz_key": biz_key, "gid": gid})
+    return gid, True
+
+
+# ================= 功能域任务池（pool · 按任务负载动态扩展 agent） =================
+
+def upsert_pool(pool_id, domain, parent_pool="", capacity=0, load=0.0, status="active"):
+    repo.upsert_pool(pool_id, domain, parent_pool, capacity, load, status)
+    record_event("data_admin", "pool_upserted",
+                 {"pool_id": pool_id, "domain": domain, "capacity": capacity})
+    return pool_id
+
+
+def get_pool(pool_id):
+    return repo.get_pool(pool_id)
+
+
+def list_pools(domain=None, status=None):
+    return repo.list_pools(domain, status)
+
+
+def resize_pool(pool_id, capacity):
+    """按任务负载动态调整某池并发容量（扩容/缩容）。"""
+    repo.update_pool_capacity(pool_id, capacity)
+    record_event("data_admin", "pool_resized",
+                 {"pool_id": pool_id, "capacity": capacity})
+    return capacity
+
+
+def pool_overview():
+    """功能域任务池全貌（二级信息）。"""
+    pools = repo.list_pools()
+    return {
+        "total_pools": len(pools),
+        "total_capacity": sum(p["capacity"] for p in pools),
+        "total_load": sum(p["load"] for p in pools),
+        "pools": pools,
+    }
+
+
+# ================= 任务拆分 / 加派（小组长整合） =================
+
+def add_split(parent_task, branch_task, agent_id, reason="", submitter="", status="open"):
+    """登记一次任务拆分/加派（大任务拆分支 / 开发中途申报加派）。"""
+    from gid import gen
+    split_id = gen("split")
+    repo.add_split(split_id, parent_task, branch_task, agent_id, reason, submitter, status)
+    record_event(submitter or "data_admin", "task_split",
+                 {"split_id": split_id, "parent": parent_task,
+                  "branch": branch_task, "agent": agent_id, "reason": reason},
+                 parent_task)
+    return split_id
+
+
+def splits_of(parent_task, status="open"):
+    return repo.split_of(parent_task, status)
+
+
+def aggregate_split(split_id):
+    """小组长把某拆分分支的产出汇总整合（标记已聚合）。"""
+    repo.set_split_status(split_id, "aggregated")
+    record_event("架构·小组长", "split_aggregated", {"split_id": split_id})
+    return split_id
+
+
+def split_overview(status="open"):
+    """任务拆分/加派全貌（二级信息）。"""
+    return repo.list_splits(status)
+
+
+# ================= 任务 PR/Issue 映射（1-3 PR，各按独立 Issue） =================
+
+def add_task_pr(task_id, agent_id, seq=1, kind="new", issue_id="", status="open"):
+    """为一个任务提交登记一个 PR（每个任务可 1-3 个 PR）。"""
+    from gid import gen
+    pr_id = gen("pr")
+    if not issue_id:
+        issue_id = gen("issue")
+    repo.add_task_pr(pr_id, task_id, agent_id, issue_id, seq, kind, status)
+    record_event(agent_id, "pr_submitted",
+                 {"pr_id": pr_id, "task_id": task_id, "seq": seq,
+                  "issue_id": issue_id, "kind": kind},
+                 task_id)
+    return pr_id, issue_id
+
+
+def prs_for_task(task_id, status=None):
+    return repo.prs_for_task(task_id, status)
+
+
+def prs_for_agent(agent_id, status=None):
+    return repo.prs_for_agent(agent_id, status)
+
+
+def pr_count_for_task(task_id, status=None):
+    return repo.pr_count_for_task(task_id, status)
+
+
+def amend_task_pr(task_id, agent_id, seq):
+    """对某任务已有 PR 的修改再提交（kind=amend，不新增独立 Issue）。"""
+    prs = repo.prs_for_task(task_id)
+    target = next((p for p in prs if p["seq"] == seq), None)
+    if target is None:
+        raise KeyError(f"任务 {task_id} 无第 {seq} 个 PR 可修改")
+    repo.add_task_pr(gen_pr(), task_id, agent_id, target["issue_id"], seq, "amend", "open")
+    record_event(agent_id, "pr_amended",
+                 {"task_id": task_id, "seq": seq, "pr_id": target["pr_id"]}, task_id)
+    return target
+
+
+def gen_pr():
+    from gid import gen
+    return gen("pr")

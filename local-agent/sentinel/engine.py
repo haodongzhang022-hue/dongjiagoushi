@@ -122,3 +122,17 @@ def health_report():
         "interrupts": store.count_actions(level=1),
         "escalations": store.count_actions(level=2),
     }
+
+
+# ---------------- 小组长监督（进度尺 · 小组视角） ----------------
+def group_oversight(group_id):
+    """小组长监督本组收敛：汇总本组成员每个任务的目标进度尺（二级信息）。
+
+    用户诉求："进度的尺 小组长也应该能监督"。
+    """
+    return store.group_meter_summary(group_id)
+
+
+def group_meters(group_id):
+    """本组全部目标刻度（原始序列，供细粒度判定）。"""
+    return store.meters_for_group(group_id)

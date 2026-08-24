@@ -53,11 +53,12 @@
 
 | 模块 | 职责 | 输入 | 输出 |
 |------|------|------|------|
-| `sentinel/store.py` | 目标进度尺 + 监控动作的数据访问 | 刻度参数 | 刻度/距离/delta + 动作留痕 |
+| `sentinel/store.py` | 目标进度尺 + 监控动作的数据访问 + **小组监督视图** | 刻度参数 | 刻度/距离/delta + 动作留痕 + group_oversight |
 | `sentinel/detect.py` | 无效努力机器判定 | 距离序列 | 判定结果(命中/级别/原因) |
-| `sentinel/engine.py` | 哨兵统一处置协议 | 刻度请求 | track + interrupt/escalate + 健康报告 |
+| `sentinel/engine.py` | 哨兵统一处置协议 + **小组长监督(group_oversight)** | 刻度请求 | track + interrupt/escalate + 健康报告 + 组监督 |
 | `roles/sentinel.py` | 架构·监控哨兵角色 | 任务/接力卡 | 量化监管 + 处置契约 |
 | `local-agent/tests/test_sentinel.sh` | 机制功能测试 | — | 信号灯 |
+| `local-agent/gid.py` / `ops.py` / `pool/` | 全局唯一ID + 任务池 + 拆分/PR | 任务 | gid稳定寻址 + 弹性并发 + 拆分整合 |
 
 ---
 
@@ -137,7 +138,29 @@ goal_meters:
 
 ---
 
-## 六、一句话总结
+## 六、小组长监督（进度尺 · 小组视角）
+
+用户诉求：「进度的尺 小组长也应该能监督」。
+
+进度尺（`goal_meters`）按**小组(group_id)** 归集（agents 表 group_id 关联），
+架构·小组长可用 `sentinel.engine.group_oversight(group_id)` 获取**本组成员**每个任务
+到目标的收敛视图（二级信息）：
+
+```
+group_oversight('g-登录组') → {
+  group_id, count,
+  meters: [ { task_id, agent_id, target, goal_total, current,
+              distance, progress_ratio, delta, note, ts } ... ]
+}
+```
+
+- **小组长监督**与**哨兵机器判定**互补：哨兵负责机器判定 + 处置协议（打断/上报），
+  小组长负责从**组视角俯瞰**本组成员是否在收敛、及时协调调度；
+- 若小组长发现本组某成员迟迟不收敛（distance 不降 / delta 不改善），可联动哨兵介入。
+
+---
+
+## 七、一句话总结
 
 **目标进度尺量化「到北极星还剩多远」，机器判定「是否真的在收敛」，
 命中即按剩余距离打断重规划、二度即上报架构师助理评估局部调整**——
