@@ -22,6 +22,18 @@ import time
 
 from . import broker, store, pool, spec, profile, plugin
 
+# 数据底座（数据架构升级）：规模流水线的信息互通/内容存档/进度/任务 落到数据库承载
+DATA_ENABLED = True
+try:
+    from ..data import admin as data_admin
+    from ..data import db as data_db
+except Exception:  # noqa: BLE001
+    try:
+        from data import admin as data_admin
+        from data import db as data_db
+    except Exception:  # noqa: BLE001
+        DATA_ENABLED = False
+
 
 def preflight(spec_obj):
     """前置检查：校验规模声明 + 前置路由 + 资源评估。
@@ -76,6 +88,41 @@ def run_scaled(req, spec_obj=None, concurrency_override=None, verbose=True):
     if verbose:
         print(f"[scale] 已建 {len(cards)} 张分片状态卡 (state cards)")
 
+    # 3b. 数据底座：把规模流水线的 agent 档案/任务登记进数据库（内容存档/信息互通）
+    if DATA_ENABLED:
+        try:
+            data_admin.init()
+            data_admin.archive(
+                f"scale_run_{int(time.time()*1000)}",
+                "milestone",
+                f"规模流水线 {req}",
+                {"team_size": s["team_size"], "levels": s["levels"],
+                 "profile": route["profile"], "backend": data_db.backend()},
+                "scale-engine",
+            )
+            data_admin.record_event("data_admin", "scale_launch",
+                                    {"team_size": s["team_size"], "concurrency": s["concurrency"]})
+            for i in range(s["team_size"]):
+                data_admin.register_agent(
+                    f"agent_{i}", role="agent",
+                    group_id=f"g{i % max(1, s['levels'])}",
+                    status="in_progress",
+                    spec={"req": req},
+                )
+                data_admin.deliver(
+                    f"agent_{i}", "team.round1",
+                    {"req": req, "assignee": f"agent_{i}"},
+                )
+                data_admin.assign_task(
+                    f"scale_task_{i}",
+                    f"规模流水线子任务 {i}",
+                    assignee=f"agent_{i}",
+                    status="in_progress",
+                )
+        except Exception as e:  # noqa: BLE001
+            if verbose:
+                print(f"[scale] ⚠ 数据底座写入跳过: {e}")
+
     # 4. 生成团队拓扑（分工层级）
     topo = spec.build_topology(s)
     leaf = spec.leaf_count(topo)
@@ -100,6 +147,25 @@ def run_scaled(req, spec_obj=None, concurrency_override=None, verbose=True):
     wres = pool.run_concurrent(tasks, max_workers=s["concurrency"])
     broker_stats = broker.stats()
 
+    # 数据底座：消费消息 + 记录进度事件 + 生成聚合指标快照（进度统计/看板）
+    data_report = None
+    if DATA_ENABLED:
+        try:
+            for i in range(s["team_size"]):
+                cid = f"agent_{i}"
+                data_admin.consume(cid)                 # 消费消息管线
+                data_admin.record_event(cid, "processed", {"done": True})
+                data_admin.update_task(f"scale_task_{i}", "done")
+            stats = data_admin.snapshot_stats()
+            data_report = {
+                "backend": data_db.backend(),
+                "agents": data_admin.progress_report()["agents"],
+                "stats": stats,
+            }
+        except Exception as e:  # noqa: BLE001
+            if verbose:
+                print(f"[scale] ⚠ 数据底座统计跳过: {e}")
+
     report = {
         "req": req,
         "scaled": True,
@@ -114,6 +180,7 @@ def run_scaled(req, spec_obj=None, concurrency_override=None, verbose=True):
             "errors": wres["errors"],
         },
         "broker_stats": broker_stats,
+        "data": data_report,       # 数据底座（数据库承载）报告
         "elapsed_sec": round(time.time() - t0, 3),
     }
     if verbose:

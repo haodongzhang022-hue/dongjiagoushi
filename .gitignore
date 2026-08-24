@@ -8,3 +8,7 @@ __pycache__/
 
 # 测试临时
 *.log
+
+# 数据层运行时数据库（本地 sqlite 库，不进版本库）
+local-agent/data/runtime.db*
+local-agent/data/__pycache__/
