@@ -189,7 +189,39 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
 
 
 def _estimate_tasks(req):
-    """占位：根据需求文本长度粗略估算任务数（真实值应由架构·经理拆解输出）。"""
+    """估算子任务数（供分形多小组触发，真实值应由架构·经理拆解输出）。
+
+    启发式优先级：
+      1. 显式编号条目：匹配 `数字`、`数字.`、`数字、`、`数字)`（如 "1任务 2任务..."）——
+         最能反映用户枚举的子需求数，据此估算任务数；
+      2. 顿号/分号/逗号分隔的短条目数；
+      3. 兜底：按需求文本长度估算。
+    保证至少返回 1，上限 12（防止一次性拆出过多小组）。
+    """
+    import re
+
+    # ① 显式编号条目：提取所有数字编号（形如 1、2、… 或 1. 2. / 1) 2) 等）
+    numbered = re.findall(r'(?:^|[\s，,、。.;；)])(\d{1,2})\s*[\.、)）]?\s*(?=[^\d])', req)
+    if numbered:
+        try:
+            nums = sorted(int(x) for x in numbered)
+            # 取最大连续编号区间作为子需求数（容忍 1 位误差）
+            # 常见写法 "1... 2... 3..." → 编号集合近似连续
+            uniq = list(dict.fromkeys(nums))
+            max_n = max(uniq)
+            if max_n >= 2:  # 有明确多条目
+                n = min(max(max_n, len(uniq)), 12)
+                return n
+        except ValueError:
+            pass
+
+    # ② 顿号/逗号/分号分隔的短条目数（用于 "A、B、C" 这类枚举）
+    parts = [p for p in re.split(r'[、，,；;\n]', req) if p.strip()]
+    if len(parts) >= 3:
+        n = min(len(parts), 12)
+        return n
+
+    # ③ 兜底：按需求文本长度粗略估算
     base = max(1, len(req) // 40)
     return min(base, 12)
 
