@@ -15,6 +15,7 @@ from .version_keeper import VersionKeeperRole
 from .tool_finder import ToolFinderRole
 from .tester import TesterRole
 from .data_admin import DataAdminRole
+from .sentinel import SentinelRole
 from .secretary import SecretaryRole
 from .market import (
     SalesRole,
@@ -40,6 +41,7 @@ ROLE_REGISTRY = {
     "架构·找工具": ToolFinderRole,
     "架构·测试": TesterRole,
     "架构·数据管理员": DataAdminRole,
+    "架构·监控哨兵": SentinelRole,
     # ---- 市场获客分层（通用基建）----
     "市场·销售": SalesRole,
     "市场·客服": SupportRole,

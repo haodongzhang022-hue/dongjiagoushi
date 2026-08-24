@@ -239,6 +239,40 @@ SCHEMA_DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_memory_space ON memory(space)",
+    # ---- 15. 目标进度尺（防无效努力 · 量化距离到目标的刻度，供监控哨兵判定收敛/停滞）----
+    """
+    CREATE TABLE IF NOT EXISTS goal_meters (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        meter_id      TEXT NOT NULL,            -- 目标刻度 id（如 g-<task_id>）
+        task_id       TEXT DEFAULT '',          -- 关联任务
+        agent_id      TEXT DEFAULT '',          -- 正在推进该目标的角色
+        target        TEXT DEFAULT '',          -- 目标描述（验收标准 / 北极星）
+        goal_total    REAL DEFAULT 0,           -- 目标总量（0..goal_total，距离=goal_total-current）
+        current       REAL DEFAULT 0,           -- 当前已达量（向目标收敛的进度刻度）
+        distance      REAL DEFAULT 0,           -- 距目标距离 = goal_total - current（越小越近）
+        delta         REAL DEFAULT 0,           -- 本次相对上次的进展（正=推进，0=停滞，负=回退/横跳）
+        note          TEXT DEFAULT '',          -- 说明（做了什么）
+        ts            TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_goal_task ON goal_meters(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_goal_agent ON goal_meters(agent_id)",
+    # ---- 16. 监控哨兵动作（防无效努力 · 打断/重规划/上报/调整 留痕）----
+    """
+    CREATE TABLE IF NOT EXISTS sentinel_actions (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        action_id     TEXT NOT NULL,            -- 动作 id（interrupt-<uuid> / escalate-<uuid>）
+        task_id       TEXT DEFAULT '',
+        agent_id      TEXT DEFAULT '',          -- 被打断的角色
+        level         INTEGER DEFAULT 1,        -- 触发级别：1=打断+重规划 / 2=上报架构师助理讨论局部调整
+        reason        TEXT DEFAULT '',          -- 触发原因（stagnation/oscillation/repeated_error）
+        detail        TEXT DEFAULT '{}',        -- 检测详情（距离序列 / 判定参数）
+        action        TEXT DEFAULT '',          -- 处置动作描述
+        ts            TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sentinel_task ON sentinel_actions(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sentinel_level ON sentinel_actions(level)",
 ]
 
 

@@ -85,13 +85,17 @@
 │   ├── data/                            # 🆕🚀 数据管理层（数据库承载：内容存档/进度统计/消息管线/任务存储）
 │   │   ├── __init__.py                  #   统一入口（db/schema/repository/admin）
 │   │   ├── db.py                        #   数据库连接层 + 后端抽象（SQLite 默认零依赖 / PostgreSQL 可选）
-│   │   ├── schema.py                    #   6 张数据表 DDL（agents/messages/tasks/progress/archives/stats）
+│   │   ├── schema.py                    #   16 张数据表 DDL（六表 + collab 八表 + 监控哨兵两表）
 │   │   ├── repository.py                #   各表统一 CRUD（屏蔽后端差异）
 │   │   ├── admin.py                     #   ⭐ 数据管理员职责执行（内容存档/进度统计/消息管线/任务存储）
 │   │   └── cli.py                       #   命令行入口
+│   ├── sentinel/                        # 🆕🚀 防无效努力 · 目标收敛监控（量化距离 → 判定 → 打断/上报）
+│   │   ├── store.py                     #   目标进度尺(goal_meters) + 监控动作(sentinel_actions) 数据访问
+│   │   ├── detect.py                    #   无效努力判定（停滞/横跳/重复错误）
+│   │   └── engine.py                    #   处置协议（track → 1级打断重规划 / 2级上报局部调整）
 │   ├── roles.d/                         # 🆕 角色插件目录（放一个 .py 即自动加载新角色）
 │   │   └── analyst.py                   #   插件角色示例（架构·数据分析师）
-│   ├── roles/                           # 16 个角色模块（秘书/产品/总师/经理/小组长/开发/评审/对齐/找工具/测试/数据管理员 + 市场5角色）
+│   ├── roles/                           # 17 个角色模块（秘书/产品/总师/经理/小组长/开发/评审/对齐/找工具/测试/数据管理员/监控哨兵 + 市场5角色）
 │   └── llm/                             # 多模型后端抽象（OpenAI 兼容/CLI 兜底占位）
 ├── docs/
 │   └── FRAMEWORK_V2.md                  # 🆕 体系五维增强架构设计（DAG/分形/市场分层/入口路由/多宿主）
