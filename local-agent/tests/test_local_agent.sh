@@ -39,10 +39,10 @@ fi
 # 续跑
 t "从接力卡续跑 --resume" "$RUN --resume --backend cli_fallback"
 
-# 校验角色注册表完整性（16 个角色：入口层秘书 + 需求/设计 + 调度/协同 + 实现/质量 + 数据管理员 + 市场获客分层）
+# 校验角色注册表完整性（17 个角色：入口层秘书 + 需求/设计 + 调度/协同 + 实现/质量 + 数据管理员 + 监控哨兵 + 市场获客分层）
 count=$(python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; print(len(list_roles()))")
-if [ "$count" = "16" ]; then
-  echo "  ✅ 角色注册表 16 个角色齐全（含 架构·秘书 默认入口 + 架构·经理 分配调度核心 + 架构·数据管理员 + 市场层 5 角色）"; pass=$((pass+1))
+if [ "$count" = "17" ]; then
+  echo "  ✅ 角色注册表 17 个角色齐全（含 架构·秘书 默认入口 + 架构·经理 分配调度核心 + 架构·数据管理员 + 架构·监控哨兵 + 市场层 5 角色）"; pass=$((pass+1))
 else
   echo "  ❌ 角色数量异常: $count"; fail=$((fail+1))
 fi
