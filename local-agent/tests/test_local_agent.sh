@@ -39,13 +39,49 @@ fi
 # 续跑
 t "从接力卡续跑 --resume" "$RUN --resume --backend cli_fallback"
 
-# 校验角色注册表完整性（9 个角色：新增 架构·经理 分配调度核心）
+# 校验角色注册表完整性（15 个角色：入口层秘书 + 需求/设计 + 调度/协同 + 实现/质量 + 市场获客分层）
 count=$(python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; print(len(list_roles()))")
-if [ "$count" = "9" ]; then
-  echo "  ✅ 角色注册表 9 个角色齐全（含 架构·经理 分配调度核心）"; pass=$((pass+1))
+if [ "$count" = "15" ]; then
+  echo "  ✅ 角色注册表 15 个角色齐全（含 架构·秘书 默认入口 + 架构·经理 分配调度核心 + 市场层 5 角色）"; pass=$((pass+1))
 else
   echo "  ❌ 角色数量异常: $count"; fail=$((fail+1))
 fi
+
+# 校验默认入口 架构·秘书 已注册
+python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; assert '架构·秘书' in list_roles()" && {
+  echo "  ✅ 默认入口 架构·秘书 已注册"; pass=$((pass+1)); } || { echo "  ❌ 架构·秘书 未注册"; fail=$((fail+1)); }
+
+# 校验市场获客分层角色已注册（销售/客服/数据/渠道/工具）
+for mr in 市场·销售 市场·客服 市场·数据 市场·渠道 市场·工具; do
+  python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; assert '$mr' in list_roles()" && {
+    echo "  ✅ 市场层角色 $mr 已注册"; pass=$((pass+1)); } || { echo "  ❌ $mr 未注册"; fail=$((fail+1)); }
+done
+
+# 校验 DAG 调度：经理(plan) 依赖架构(architect) 而非开发(develop)，可提前分工
+python3 - <<'PY' && echo "  ✅ DAG 提前分工：plan 依赖 architect，可与 develop 并行"; pass=$((pass+1)) || { echo "  ❌ DAG 提前分工校验失败"; fail=$((fail+1)); }
+import sys; sys.path.insert(0,'.')
+import yaml
+from graph import DagEngine
+team = yaml.safe_load(open('team.yaml'))
+nodes = team['pipeline']['dag']['nodes']
+dag = DagEngine('full','',nodes)
+ok, err = dag.validate(); assert ok, err
+plan_node = [n for n in nodes if n['id']=='plan'][0]
+# plan 应依赖 architect，不应依赖 develop
+assert 'architect' in plan_node['depends_on']
+assert 'develop' not in plan_node['depends_on']
+# 波次应包含并行（同一波次多节点），证明非直线
+waves = dag.waves()
+assert any(len(w)>1 for w in waves), '缺少并行波次'
+PY
+
+# 校验分形扩展引擎可用
+python3 - <<'PY' && echo "  ✅ 分形扩展：10 任务可拆 3 组并行"; pass=$((pass+1)) || { echo "  ❌ 分形扩展校验失败"; fail=$((fail+1)); }
+import sys; sys.path.insert(0,'.')
+import fractal
+plan = fractal.build_fractal_plan([f't{i}' for i in range(10)])
+assert plan['scaled'] and plan['team_count'] >= 2
+PY
 
 # 校验 架构·经理 已注册且承担分配调度核心
 grep -q '架构·经理' <(python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; print(list_roles())")

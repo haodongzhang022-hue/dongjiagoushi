@@ -33,6 +33,11 @@ graph TD
 | **经验记忆库+语义触发模块** | `src/memory/` | 统一向量格式 + LanceDB/云端双后端兼容 + 持续积累经验 + 语义向量触发引擎（真实向量检索，非关键词） | 协作交互/输入 | 可检索记忆 + 角色语义触发 | 流程编排 | ✅ |
 | **看板模块** | `scripts/generate-dashboard.py` + `.cnb.yml` | 基于 Issue 声明头自动汇总模块版本演进看板 + 里程碑表 | Issue 声明头 | `docs/DASHBOARD.md` 二级信息 | 流程编排 | ✅ |
 | **本地 Agent 模块** | `local-agent/` | 无 @ 环境下的 CLI 入口替代云端触发 + 团队流水线编排到交付 | 命令行/需求 | 交付报告 + 接力卡 | 无 | ✅ |
+| **DAG 调度模块** | `local-agent/graph.py` | 拓扑排序 + 并行波次调度（非直线） | team.yaml 的 dag.nodes | 并行波次 | 无 | ✅ |
+| **分形扩展模块** | `local-agent/fractal.py` | 开发按规模分形多小组 + 递归 | 任务清单 | 分形计划 | 无 | ✅ |
+| **入口层模块** | `roles/secretary.py` + settings | 默认入口/意图翻译/路由 | 用户直接对话 | 路由到对应角色 | 无 | ✅ |
+| **市场分层模块** | `roles/market.py` + settings | 销售/客服/数据/渠道/工具 通用基建 | 获客/服务诉求 | 获客产物 | 无 | ✅ |
+| **跨平台适配模块** | `docs/PLATFORM_ADAPTERS.md` | cnb.cool / deepseek harness / MCP 蜂群适配方案 | 宿主触发 | 统一活动规则适配 | DAG/接力协议 | ✅ |
 
 ## 三、数据流向
 
