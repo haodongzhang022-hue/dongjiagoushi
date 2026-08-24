@@ -335,6 +335,50 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_taskprs_task ON task_prs(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_taskprs_agent ON task_prs(agent_id)",
+    # ---- 21. 事件路由日志（dispatcher · 事件→路由→派发→守卫拦截 全链路留痕）----
+    """
+    CREATE TABLE IF NOT EXISTS dispatch (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id      TEXT NOT NULL,            -- 事件唯一 id（ev-前缀，同事件去重键）
+        event_type    TEXT DEFAULT '',          -- issue.open/issue.update/rejection/comment/...
+        source        TEXT DEFAULT '',          -- 事件源（本仓库/外部适配器名）
+        entity        TEXT DEFAULT '',          -- 关联实体 key（issue 标题/任务 gid/驳回 key）
+        gid           TEXT DEFAULT '',          -- 全局唯一寻址（task/issue/agent gid）
+        matched_rule  TEXT DEFAULT '',          -- 命中的触发规则名
+        target_role   TEXT DEFAULT '',          -- 路由目标角色
+        target_agent  TEXT DEFAULT '',          -- 派发的目标 agent gid
+        status        TEXT DEFAULT 'queued',    -- queued/released/hold/rejected/skipped/dispatched
+        gate          TEXT DEFAULT 'auto',      -- auto=自动放行 / hold=人工审核闸门
+        dedup_key     TEXT DEFAULT '',          -- 去重键（同 key 只派一次）
+        note          TEXT DEFAULT '',          -- 说明（守卫拦截原因/派发说明）
+        created_at    TEXT,
+        updated_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_dispatch_event ON dispatch(event_id)",
+    "CREATE INDEX IF NOT EXISTS idx_dispatch_status ON dispatch(status)",
+    "CREATE INDEX IF NOT EXISTS idx_dispatch_gid ON dispatch(gid)",
+    # ---- 22. 驳回迭代表（rejections · 驳回非终点，进入再次迭代闭环）----
+    """
+    CREATE TABLE IF NOT EXISTS rejections (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        rejection_id  TEXT NOT NULL,            -- 驳回记录 id（rj-前缀）
+        task_id       TEXT NOT NULL,            -- 被驳回的任务 gid
+        gid           TEXT NOT NULL,            -- 唯一确定的负责实体 gid（精准路由目标）
+        agent_id      TEXT NOT NULL,            -- 负责该任务的 agent gid（按 gid 精准回派）
+        reason        TEXT DEFAULT '',          -- 驳回原因（评审 🔴必修 / 测试 🔴阻塞 / 哨兵上报）
+        level         TEXT DEFAULT 'must',      -- must/block/other
+        iteration     INTEGER DEFAULT 1,        -- 迭代次数（驳回非终点，+1 再回环）
+        status        TEXT DEFAULT 'pending',   -- pending/reassigned/reworked/approved/blocked
+        assigned_to   TEXT DEFAULT '',          -- 派发的目标 agent gid（改进重提）
+        monitor       INTEGER DEFAULT 1,        -- 是否纳入监控（哨兵联动）
+        created_at    TEXT,
+        updated_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_rejection_task ON rejections(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_rejection_gid ON rejections(gid)",
+    "CREATE INDEX IF NOT EXISTS idx_rejection_status ON rejections(status)",
 ]
 
 
