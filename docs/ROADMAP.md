@@ -37,6 +37,7 @@
 | M28 | 规模伸缩层 · 测试与文档 | ✅ | `local-agent/tests/test_scale.sh` 7 组测试 + 主测试/本地测试全绿 + `docs/FRAMEWORK_V3.md`（见 Issue #20） |
 | M29 | 上位机 · 定时器 + 状态机工程能力引擎 | ✅ | `local-agent/engine/`：状态机（合法转移表+强制校验+留痕）+ 定时器（周期/超时/心跳巡检）+ 上位机整合（HostEngine）+ `test_engine.sh` 7 组测试 + `docs/HOST_ENGINE.md`（见 Issue #26） |
 | M30 | 调度中枢 · 事件驱动自动化调度层（dispatcher） | ✅ | `local-agent/dispatcher/`：事件源监听（本仓库+外部适配器插槽）+ 触发规则引擎 + Action 队列（自动优先+人工审核闸门，不卡进程）+ 防无效护栏（去重/频限/进度上限）+ 驳回迭代闭环（rejections 表按 gid 回派改进重提）+ sentinel 进度上限判定强化 + Web 可视化面板 + `test_dispatcher.sh` 8 组测试 + `docs/DISPATCHER.md`（见 Issue #26） |
+| M31 | 外部事件源接入 · 多终端协同 + 秘钥/IP白名单安全 + 本地上位机辅助 | ✅ | `local-agent/dispatcher/{security,webhook,sources,host_helper}.py`：多终端源预设（本地电脑/手机/虚拟机/沙盒/上位机，不只一个源）+ 秘钥 key + IP 白名单 安全认证（deny-by-default）+ 多源 Webhook 接收端（POST /webhook/<source>，webhook 更合理）+ 认证审计留痕 + 本地上位机辅助角色预设（host_start/report/pull/ack/overview）+ `test_external_source.sh` 5 组测试 + `docs/EXTERNAL_SOURCE.md`（见 Issue #26） |
 
 ## 架构八步模板
 
@@ -112,5 +113,6 @@ dashboard 模块（init）
 | 框架自升级闭环 | `docs/FRAMEWORK_UPGRADE.md` |
 | 上位机定时器+状态机引擎 | `local-agent/engine/`（state_machine/timer/host/cli）+ `local-agent/tests/test_engine.sh` + `docs/HOST_ENGINE.md` |
 | 调度中枢·事件驱动自动化调度 | `local-agent/dispatcher/`（source/rules/queue/router/guard/reject/webui/engine/cli）+ `local-agent/tests/test_dispatcher.sh` + `docs/DISPATCHER.md` |
+| 外部事件源接入·多终端协同+安全 | `local-agent/dispatcher/`（security/webhook/sources/host_helper）+ `local-agent/tests/test_external_source.sh` + `docs/EXTERNAL_SOURCE.md` |
 | 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容 可复现） + `tests/test_doc_consistency.sh`（文档-实现一致性 防漂移） |
 | 验收清单 | `docs/templates/acceptance-checklist.md` |

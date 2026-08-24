@@ -35,12 +35,14 @@
   python -m local-agent.dispatcher.cli web --port 8080
 """
 from . import source, rules, guard, queue, router, reject, engine, webui
+from . import security, webhook, sources, host_helper
 from .source import ExternalAdapter, RepoPollAdapter, normalize_event
 from .rules import RuleEngine, default_rules
 from .guard import Guard
 
 __all__ = [
     "source", "rules", "guard", "queue", "router", "reject", "engine", "webui",
+    "security", "webhook", "sources", "host_helper",
     "ExternalAdapter", "RepoPollAdapter", "normalize_event",
     "RuleEngine", "default_rules", "Guard",
 ]

@@ -109,8 +109,12 @@
 │   │   ├── router.py                    #   路由派发器（按 gid 精准定位负责 agent）
 │   │   ├── reject.py                    #   驳回迭代表（驳回非终点，按 gid 回派改进重提）
 │   │   ├── engine.py                    #   统一调度引擎（scan / --watch 持续守护）
-│   │   ├── webui.py                     #   Web 可视化面板（事件流/路由/拦截/驳回/哨兵/进度尺）
-│   │   └── cli.py                       #   CLI：scan / watch / web / overview / reject
+│   │   ├── webui.py                     #   Web 可视化面板（事件流/路由/拦截/驳回/哨兵/进度尺/外部源）
+│   │   ├── cli.py                       #   CLI：scan / watch / web / overview / reject / ext / webhook / host
+│   │   ├── security.py                  #   🆕 外部源安全：秘钥 key + IP 白名单 + 认证审计（见 docs/EXTERNAL_SOURCE.md）
+│   │   ├── webhook.py                   #   🆕 多源 Webhook 接收端（POST /webhook/<source>，本地/手机/虚拟机/沙盒/上位机）
+│   │   ├── sources.py                   #   🆕 多源适配器注册 + 本地电脑适配器（云端-本地协同）
+│   │   └── host_helper.py               #   🆕 本地上位机辅助角色（预设功能，之后接入真实上位机）
 │   ├── roles.d/                         # 🆕 角色插件目录（放一个 .py 即自动加载新角色）
 │   │   └── analyst.py                   #   插件角色示例（架构·数据分析师）
 │   ├── roles/                           # 25 个角色模块（秘书/产品/总师/总师助理/经理/小组长/开发/评审/对齐/找工具/测试/数据管理员/监控哨兵 + 市场层5 + 公司化三战线7）

@@ -379,6 +379,38 @@ SCHEMA_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_rejection_task ON rejections(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_rejection_gid ON rejections(gid)",
     "CREATE INDEX IF NOT EXISTS idx_rejection_status ON rejections(status)",
+    # ---- 23. 外部事件源登记表（security · 秘钥 + IP 白名单，多终端独立授权）----
+    """
+    CREATE TABLE IF NOT EXISTS external_sources (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        src_id        TEXT NOT NULL,            -- 外部源 id（ext-前缀，全局唯一）
+        name          TEXT NOT NULL,            -- 外部源名（local_pc/phone/vm/sandbox/host_upper）
+        api_key       TEXT DEFAULT '',          -- 该源独立秘钥（安全：key 认证）
+        ip_whitelist  TEXT DEFAULT '',          -- 允许的来源 IP/CIDR（逗号分隔；空=deny-all）
+        kind          TEXT DEFAULT 'webhook',   -- webhook/poll/host
+        meta          TEXT DEFAULT '{}',        -- 扩展元信息（备注/对接地址）
+        enabled       INTEGER DEFAULT 1,        -- 1=启用 / 0=停用
+        created_at    TEXT,
+        updated_at    TEXT,
+        UNIQUE(name)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_extsrc_name ON external_sources(name)",
+    # ---- 24. 外部源认证审计表（security · 每次认证成功/失败留痕，供面板俯瞰）----
+    """
+    CREATE TABLE IF NOT EXISTS external_auth (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        auth_id       TEXT NOT NULL,            -- 认证记录 id（au-前缀）
+        source_name   TEXT DEFAULT '',          -- 外部源名
+        client_ip     TEXT DEFAULT '',          -- 来源 IP
+        result        TEXT DEFAULT '',          -- allow=通过 / deny=拦截
+        reason        TEXT DEFAULT '',          -- 拦截原因（未登记/停用/秘钥不匹配/IP不在白名单）
+        api_key_masked TEXT DEFAULT '',         -- 秘钥打码留痕（不落明文，安全红线）
+        created_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_extauth_src ON external_auth(source_name)",
+    "CREATE INDEX IF NOT EXISTS idx_extauth_result ON external_auth(result)",
 ]
 
 
