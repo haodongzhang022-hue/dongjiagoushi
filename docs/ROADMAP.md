@@ -29,6 +29,12 @@
 | M20 | 开发分形扩展（多小组） | ✅ | `local-agent/fractal.py` 按项目规模分形多小组并行 + 小组长整合测试统一向上交付 + 可递归（见 Issue #18） |
 | M21 | 默认入口 + 市场获客分层 | ✅ | `架构·秘书` 默认入口（产品经理/秘书优先，`@CodeBuddy` 主动切换身份）+ 市场·销售/客服/数据/渠道/工具 通用基建（见 Issue #18） |
 | M22 | 跨平台适配（cnb.cool / deepseek harness / MCP 蜂群） | ✅ | 统一活动规则 + `docs/PLATFORM_ADAPTERS.md` 适配方案（cnb.cool 原生 / deepseek harness 本地 / MCP 工具化）（见 Issue #18） |
+| M23 | 规模伸缩层 · 团队规模声明 | ✅ | `local-agent/scale/spec.py`：`--spec` 声明团队大小/分工层级/并发度/模式 + 自动分工拓扑 + 资源评估（见 Issue #20，docs/FRAMEWORK_V3.md） |
+| M24 | 规模伸缩层 · 前置流程区分 | ✅ | `local-agent/scale/profile.py`：不同位置走不同流程模板（default/company/harness/acquisition/support）（见 Issue #20） |
+| M25 | 规模伸缩层 · 角色插件化 | ✅ | `local-agent/scale/plugin.py` + `roles.d/`：放一个 .py 即自动加载新角色，灵活增减无需改核心代码（见 Issue #20） |
+| M26 | 规模伸缩层 · 消息总线 + 状态分片 | ✅ | `local-agent/scale/{broker,store}.py`：agent 间发布/订阅/广播 + 按 agent 分片状态（替代单文件接力卡）（见 Issue #20） |
+| M27 | 规模伸缩层 · 并发池 + 统一调度引擎 | ✅ | `local-agent/scale/{pool,engine}.py`：真并行波次 + 2500 级并发模拟 + `--scale` CLI 入口（见 Issue #20） |
+| M28 | 规模伸缩层 · 测试与文档 | ✅ | `local-agent/tests/test_scale.sh` 7 组测试 + 主测试/本地测试全绿 + `docs/FRAMEWORK_V3.md`（见 Issue #20） |
 
 ## 架构八步模板
 

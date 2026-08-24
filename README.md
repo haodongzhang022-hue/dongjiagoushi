@@ -64,11 +64,21 @@
 ├── scripts/
 │   └── generate-dashboard.py            # 🚀 看板自动生成器
 ├── local-agent/                         # 🚀 本地 Agent 团队（无 @ 环境，需求→交付自动编排）
-│   ├── run.py                           # 本地入口：--role / --pipeline / --resume
+│   ├── run.py                           # 本地入口：--role / --pipeline / --resume / --scale
 │   ├── team.yaml                        # 团队角色 + DAG 流水线定义（含秘书入口 + 分形开发节点）
 │   ├── orchestrator.py                  # 编排引擎（DAG 调度 + 分形执行，需求→交付）
 │   ├── graph.py                         # 🆕 DAG 引擎（拓扑排序 + 并行波次，非直线）
 │   ├── fractal.py                       # 🆕 分形扩展引擎（开发多小组并行 + 整合）
+│   ├── scale/                           # 🆕🚀 规模伸缩层（架构升级：可伸缩蜂群协作平台）
+│   │   ├── spec.py                      #   团队规模/分工层级/并发度声明 + 资源评估
+│   │   ├── profile.py                   #   前置流程区分（不同位置不同流程模板）
+│   │   ├── plugin.py                    #   角色插件化注册（灵活增减角色的规则支撑）
+│   │   ├── broker.py                    #   agent 间消息总线（发布/订阅/定向/广播）
+│   │   ├── store.py                     #   按 agent 分片的状态存储（替代单文件接力卡）
+│   │   ├── pool.py                      #   并发执行池（真并行波次，支持大规模并发模拟）
+│   │   └── engine.py                    #   统一调度引擎（整合以上，规模化流水线）
+│   ├── roles.d/                         # 🆕 角色插件目录（放一个 .py 即自动加载新角色）
+│   │   └── analyst.py                   #   插件角色示例（架构·数据分析师）
 │   ├── roles/                           # 15 个角色模块（秘书/产品/总师/经理/小组长/开发/评审/对齐/找工具/测试 + 市场5角色）
 │   └── llm/                             # 多模型后端抽象（OpenAI 兼容/CLI 兜底占位）
 ├── docs/
@@ -124,6 +134,18 @@ graph TD
     - **市场获客分层**：工具/数据/渠道/客服/销售 为平台级通用基建，服务对外获客 + 对内需求（`roles/market.py`）。
     - **多宿主适配**：统一活动规则 + 适配 cnb.cool / deepseek harness / MCP 蜂群（`docs/PLATFORM_ADAPTERS.md`）。
     详见 [docs/FRAMEWORK_V2.md](docs/FRAMEWORK_V2.md)（体系五维增强架构设计）。
+12. **可伸缩蜂群协作平台（规模伸缩层 scale）**：架构升级，支撑**上百/上千/2500 级**并发协作：
+    - **团队规模声明**：`--spec '{"team_size":2500,"levels":3,"mode":"harness"}'` 声明团队大小、分工层级、并发度，并自动生成分工拓扑 + 资源评估（超单机上限会提示升级分布式后端）。
+    - **前置流程区分**：不同"位置"走不同流程模板——`default`（个人需求）/`company`（在线公司多部门）/`harness`（deepseek 内嵌）/`acquisition`（对外获客）/`support`（客服售后）。
+    - **角色插件化**：在 `roles.d/` 放一个继承 `BaseRole` 的 `.py` 即自动加载新角色（灵活增减，无需改核心代码）。
+    - **消息总线 + 状态分片 + 并发池**：agent 间发布/订阅消息、按 agent 分片状态（替代单文件接力卡）、真并行波次执行。
+    ```bash
+    cd local-agent && python3 run.py --scale --profile harness \
+      --spec '{"team_size":100,"levels":3}' --req "做一个高并发系统"
+    python3 run.py --list-profiles   # 查看前置流程模板
+    python3 run.py --list-roles      # 查看角色（含插件）
+    ```
+    详见 [docs/FRAMEWORK_V3.md](docs/FRAMEWORK_V3.md)（架构升级设计）。
 
 ---
 
