@@ -99,6 +99,52 @@ roles:
     trigger_words: ["工具", "获客工具", "自动化", "基建", "选型"]
     slogan: "横切工具基建，为各层复用不造轮子。"
 
+  # ---- 市场获客线 · 选单情报（决定做什么单/有没有价值）----
+  - name: "架构·找需求"
+    module: "roles.company"
+    class: "DemandFinderRole"
+    step: "需求来源 / 商机列表 / 可接性评估（选单入口）"
+    trigger_words: ["找需求", "找单", "商机", "线索采集", "需求来源"]
+    slogan: "找单、初筛——把零散线索整理成结构化商机。"
+  - name: "架构·价值确认"
+    module: "roles.company"
+    class: "ValueVerifierRole"
+    step: "价值评级 / 市场空白 / 方向建议（选单判定）"
+    trigger_words: ["价值确认", "值不值得", "市场空白", "好方向", "价值评级"]
+    slogan: "核查做什么有价值、找市场空白、给方向建议。"
+  - name: "架构·竞品分析"
+    module: "roles.company"
+    class: "CompetitorRole"
+    step: "竞品清单 / 优劣势 / 差异化定位（竞品情报）"
+    trigger_words: ["竞品", "竞品分析", "竞争对手", "差异化"]
+    slogan: "竞品优劣势、差异化定位——找差异化切入点。"
+
+  # ---- 能力底座线 · 持续开发（更快更稳成本更低）----
+  - name: "架构·工具开发"
+    module: "roles.company"
+    class: "ToolBuilderRole"
+    step: "工具沉淀 / 系统迭代 / 工具库管理（自研复用）"
+    trigger_words: ["工具开发", "自研工具", "沉淀", "工具库", "系统迭代"]
+    slogan: "自研沉淀复用工具、系统迭代——不找现成，自己造。"
+  - name: "架构·优化"
+    module: "roles.company"
+    class: "OptimizerRole"
+    step: "效率优化 / 算法优化 / 收益评估"
+    trigger_words: ["优化", "效率", "交互效率", "算法优化", "性能优化"]
+    slogan: "提升使用/交互效率、算法优化，收益量化。"
+  - name: "架构·数据管理"
+    module: "roles.company"
+    class: "DataAdminRole"
+    step: "数据存储 / 数据调用 / 数据核实（内部全域）"
+    trigger_words: ["数据管理", "数据存储", "数据调用", "数据核实", "数据字典"]
+    slogan: "数据存储、调用、核实——内部全域数据管理员。"
+  - name: "架构·运维"
+    module: "roles.company"
+    class: "OpsRole"
+    step: "部署上线 / 监控告警 / 故障处理（底座保障）"
+    trigger_words: ["运维", "部署", "监控", "上线", "故障", "告警"]
+    slogan: "部署、监控、故障处理——持续开发的底座保障。"
+
 # ============================================================
 # 团队流水线（DAG 工作流，替代旧直线 pipeline）
 # ============================================================
