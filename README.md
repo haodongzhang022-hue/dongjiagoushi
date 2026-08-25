@@ -162,6 +162,7 @@ graph TD
     python3 run.py --list-roles      # 查看角色（含插件）
     ```
     详见 [docs/FRAMEWORK_V3.md](docs/FRAMEWORK_V3.md)（架构升级设计）。
+13. **解耦式功能模块开发（按功能分布 · 防冲突 · 跨项目可复用）**：每个功能模块**独立成 PR、base 一律 `main`**，禁止把新模块 base 挂到其他功能分支上（避免 #29/#30 耦合冲突教训）；按功能域解耦、接口显式化、开 PR 前 `merge-tree` 校验与 `main` 无冲突、每个 PR 自含测试+文档。评审在 PR 层面核验五条，任一不满足即打回（详见 AGENTS.md「解耦式功能模块开发」固定规则 + [docs/ISSUE_MANAGEMENT.md](docs/ISSUE_MANAGEMENT.md) 第八节）。
 
 ---
 
