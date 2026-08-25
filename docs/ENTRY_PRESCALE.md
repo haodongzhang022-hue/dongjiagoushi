@@ -95,3 +95,29 @@
 | `local-agent/tests/test_prescale_entry.sh` | **新增**：15 条断言 |
 | `AGENTS.md` | 默认入口协议升级为强制入口；规模预设标注可执行引擎 |
 | `.cnb.yml` | test 阶段接入 prescale-entry 测试 |
+
+---
+
+## 迭代：2 次定团队规模接入真实流水线引擎（Issue #31 二次测试）
+
+**背景**：初次落地时，`adjust_by_architect`（经理按架构增量修正）仅有单元测试，**未接入真实
+流水线引擎**。本次按「升级本项目、完善稳定好用」目标，把「2 次定团队规模」真正接入两条流水线。
+
+**设计**（每次只定一次，不重复堆砌）：
+
+| 次数 | 时机 | 承担角色 | 动作 |
+|---|---|---|---|
+| 第 1 次 | 需求澄清阶段 | 架构·秘书 | `prescale(req)` 做体量预设（team_size+collab_plan+risk_level），作基准锚点 |
+| 第 2 次 | 架构明确后 | 架构·经理 | `adjust_by_architect(pre, {scale_factor})` 按架构做**增量修正**，不做从零规划 |
+
+**接入点**：
+
+- `scale/engine.py::run_scaled`：prescale 后立即调用 `adjust_by_architect`，实际团队规模 =
+  `max(用户声明, 经理增量修正)`；报告含 `prescale_adjusted` + `scale_twice`（first/second/final）。
+  支持 `spec.arch_scale_factor` 传入架构增量因子。
+- `scale/spec.py`：`DEFAULT_SPEC` / `normalize` 新增 `arch_scale_factor` / `risk_override`。
+- `orchestrator.py::run_pipeline`（DAG 主流水线 + 线性回退）：秘书节点做第 1 次预设，经理节点
+  做第 2 次增量修正；交付报告含 `scale_twice` 留痕。
+
+**测试**：`test_prescale_entry.sh` 新增第 5 节「2 次定团队规模·真实流水线引擎接入」两条断言，
+验证 `run_scaled` 与 `run_pipeline` 均已接入且生效（17 条全绿）。

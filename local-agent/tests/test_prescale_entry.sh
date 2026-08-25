@@ -160,6 +160,36 @@ EOF
 
 t "run.py --prescale 可调用" "python3 run.py --prescale --req '做一个客服系统' --complexity medium"
 
+echo "===== [prescale] 5. 2 次定团队规模·真实流水线引擎接入 ====="
+t "run_scaled 第1次(澄清预设)+第2次(经理增量修正) 均接入" "$PY - <<'EOF'
+from scale import engine, prescale
+prescale.clear_prescale_records()
+rep = engine.run_scaled('升级本项目集群架构，全链路平台级，多岗位多部门协同，完善稳定性',
+                        spec_obj={'team_size': 4, 'arch_scale_factor': 1.6}, verbose=False)
+st = rep['scale_twice']
+assert 'first' in st and 'second' in st
+assert st['first']['stage'] == '澄清预设'
+assert st['second']['stage'] == '经理按架构增量修正'
+assert st['second']['adjusted'] is True
+assert st['second']['team_size'] > st['first']['team_size'], '第2次定规模未增量修正'
+assert rep['spec']['team_size'] == st['final_team_size']
+print('2次定规模: 第1次', st['first']['team_size'], '→ 第2次', st['second']['team_size'],
+      '→ 最终', st['final_team_size'])
+EOF
+"
+
+t "run_pipeline DAG 主流水线 2次定规模接入" "$PY - <<'EOF'
+import orchestrator
+rep = orchestrator.run_pipeline('升级本项目多岗位协同完善稳定性', backend='cli_fallback')
+st = rep['scale_twice']
+assert 'first' in st and 'second' in st
+assert st['first']['stage'] == '秘书澄清阶段'
+assert st['second']['stage'] == '经理按架构增量修正'
+assert st['first']['team_size'] >= 1
+print('DAG 主流水线 2次定规模: 第1次', st['first']['team_size'], '→ 第2次', st['second']['team_size'])
+EOF
+"
+
 echo ""
-echo "===== 规模预设 + 强制入口 测试结果：$pass 通过 / $fail 失败 ====="
+echo "===== 规模预设 + 强制入口 + 2次定规模 测试结果：$pass 通过 / $fail 失败 ====="
 [ "$fail" = "0" ] || exit 1

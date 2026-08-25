@@ -34,6 +34,9 @@ DEFAULT_SPEC = {
     "mode": "team",
     "profile": "default",
     "roles": [],           # 空 → 用 profile 默认角色集
+    # 架构明确后的规模增量修正因子（第 2 次定团队规模）
+    "arch_scale_factor": 1.0,   # 经理按架构的增量系数，>1 扩编、<1 缩编、=1 持平
+    "risk_override": None,      # 经理按架构可覆盖风险级
 }
 
 # 单机后端可承载的合理上限（超出需分布式）
@@ -63,6 +66,8 @@ def normalize(s):
     s.setdefault("mode", "team")
     s.setdefault("profile", "default")
     s.setdefault("roles", [])
+    s["arch_scale_factor"] = float(s.get("arch_scale_factor", 1.0))
+    s.setdefault("risk_override", None)
     return s
 
 
