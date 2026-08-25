@@ -44,5 +44,19 @@ class SecretaryRole(BaseRole):
                 "意图翻译(intent_parsed)",
                 "路由建议(route: 目标角色/理由)",
                 "兜底反问(≤3 questions)",
+                "强制入口留痕(entry_guard: 已接收→已路由→回显接管)",
             ],
+        }
+
+    def route_guard(self, target_role):
+        """强制入口护栏：秘书作为默认入口，任何需求必须先经本角色接收并路由留痕。
+
+        返回结构化路由留痕卡，供下游角色回显『已接管自秘书路由的 X』，
+        保证『默认从秘书进入』不可被显式 @ 绕过（rules 固定入口）。
+        """
+        return {
+            "entry": self.name,
+            "routed_to": target_role,
+            "ack": f"已接管自秘书路由的 {target_role}",
+            "mandatory": True,
         }
