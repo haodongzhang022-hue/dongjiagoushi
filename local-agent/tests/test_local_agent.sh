@@ -39,10 +39,10 @@ fi
 # 续跑
 t "从接力卡续跑 --resume" "$RUN --resume --backend cli_fallback"
 
-# 校验角色注册表完整性（18 个角色：入口层秘书 + 需求/设计 + 总师助理 + 调度/协同 + 实现/质量 + 数据管理员 + 监控哨兵 + 市场获客分层）
+# 校验角色注册表完整性（25 个角色：入口层秘书 + 需求/设计 + 总师助理 + 调度/协同 + 实现/质量 + 数据管理员 + 监控哨兵 + 市场获客分层 + 公司化三战线）
 count=$(python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; print(len(list_roles()))")
-if [ "$count" = "18" ]; then
-  echo "  ✅ 角色注册表 18 个角色齐全（含 架构·秘书 默认入口 + 架构·总师 + 架构·总师助理 + 架构·经理 分配调度核心 + 架构·数据管理员 + 架构·监控哨兵 + 市场层 5 角色）"; pass=$((pass+1))
+if [ "$count" = "25" ]; then
+  echo "  ✅ 角色注册表 25 个角色齐全（含 架构·秘书 默认入口 + 架构·总师 + 架构·总师助理 + 架构·经理 分配调度核心 + 架构·数据管理员 + 架构·监控哨兵 + 市场层 5 + 公司化三战线）"; pass=$((pass+1))
 else
   echo "  ❌ 角色数量异常: $count"; fail=$((fail+1))
 fi
@@ -92,6 +92,20 @@ assert plan['scaled'] and plan['team_count'] >= 2
 PY
 
 # 校验 架构·经理 已注册且承担分配调度核心
+# 校验框架自迭代修复：_estimate_tasks 能识别子需求数并触发多小组分形
+python3 - <<'PY' && echo "  ✅ 框架自迭代：_estimate_tasks 识别子需求数触发多小组"; pass=$((pass+1)) || { echo "  ❌ _estimate_tasks 修复校验失败"; fail=$((fail+1)); }
+import sys; sys.path.insert(0,'.')
+from orchestrator import _estimate_tasks
+import fractal
+# 6 个子需求 → 应估出 ≥5 任务 → 分形 2 小组
+n = _estimate_tasks('开发hello_team工具，需要：1团队问候 2团队元数据 3跨组数据互通 4统一交付入口 5小组A核心 6小组B元数据')
+plan = fractal.build_fractal_plan([f't{i}' for i in range(n)])
+assert plan['scaled'] and plan['team_count'] == 2, (n, plan)
+# 短需求 → 单组
+assert _estimate_tasks('做一个简单的问候系统') == 1
+print(f'_estimate_tasks={n} → 分形 {plan["team_count"]} 小组')
+PY
+
 grep -q '架构·经理' <(python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; print(list_roles())")
 if [ $? = 0 ]; then
   echo "  ✅ 分配调度核心 架构·经理 已注册"; pass=$((pass+1))

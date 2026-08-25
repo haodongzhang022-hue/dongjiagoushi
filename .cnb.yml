@@ -50,6 +50,10 @@ main:
             bash local-agent/tests/test_sentinel.sh
             echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="
             bash local-agent/tests/test_ops_sim.sh
+            echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="
+            bash tests/test_company_model.sh
+            echo "==== 端到端小需求测试（mini-e2e：小需求端到端信号灯） ===="
+            bash tests/test_mini_e2e.sh
             echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
             bash tests/test_doc_consistency.sh
     - name: build knowledge base
