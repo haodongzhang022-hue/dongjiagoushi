@@ -40,10 +40,20 @@ main:
             bash local-agent/tests/test_local_agent.sh
             echo "==== 规模伸缩层测试（scale：规模声明/前置流程/角色插件/消息总线/状态分片/并发池） ===="
             bash local-agent/tests/test_scale.sh
+            echo "==== 上位机定时器+状态机引擎测试（engine：状态机合法转移/强制校验/定时器超时/上位机整合） ===="
+            bash local-agent/tests/test_engine.sh
             echo "==== 数据管理层测试（data：数据库承载/内容存档/进度统计/消息管线/任务存储/数据管理员/2500并发） ===="
             bash local-agent/tests/test_data_layer.sh
             echo "==== 协作运作机制测试（collab：实体解耦+loc寻址+移交/层级空间/ACL权限/版本冲突检测/小组提交整合） ===="
             bash local-agent/tests/test_collab.sh
+            echo "==== 监控哨兵测试（sentinel：目标收敛监控/无效努力判定/打断重规划/上报局部调整） ===="
+            bash local-agent/tests/test_sentinel.sh
+            echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="
+            bash local-agent/tests/test_ops_sim.sh
+            echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="
+            bash tests/test_company_model.sh
+            echo "==== 端到端小需求测试（mini-e2e：小需求端到端信号灯） ===="
+            bash tests/test_mini_e2e.sh
             echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
             bash tests/test_doc_consistency.sh
     - name: build knowledge base

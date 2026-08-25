@@ -291,3 +291,178 @@ def stat_history(metric, limit=100):
         (metric, limit),
     )
     return [dict(r) for r in rows]
+
+
+# ================= gid_registry（全局唯一编号注册表） =================
+
+def registry_get(etype, biz_key):
+    """查某业务 key 已登记的全局唯一 gid；未登记返回 None。"""
+    row = db.query_one(
+        "SELECT gid FROM gid_registry WHERE etype=? AND biz_key=?",
+        (etype, biz_key),
+    )
+    return row["gid"] if row else None
+
+
+def registry_set(etype, biz_key, gid):
+    """登记某业务 key 的全局唯一 gid（幂等 upsert，同 key 同 gid）。"""
+    db.execute(
+        """
+        INSERT INTO gid_registry (etype, biz_key, gid, created_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(etype, biz_key) DO UPDATE SET gid=excluded.gid
+        """,
+        (etype, biz_key, gid, db.now_iso()),
+    )
+    return gid
+
+
+def registry_lookup_by_gid(gid):
+    """按 gid 反查其 etype/biz_key（供精准定位某实体）。"""
+    row = db.query_one(
+        "SELECT etype, biz_key, gid FROM gid_registry WHERE gid=?", (gid,)
+    )
+    return dict(row) if row else None
+
+
+# ================= task_pools（功能域任务池） =================
+
+def upsert_pool(pool_id, domain, parent_pool="", capacity=0, load=0.0, status="active"):
+    """登记/更新一个功能域任务池（按任务负载动态伸缩容量）。"""
+    now = db.now_iso()
+    db.execute(
+        """
+        INSERT INTO task_pools (pool_id, domain, parent_pool, capacity, load, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(pool_id) DO UPDATE SET
+            domain=excluded.domain, parent_pool=excluded.parent_pool,
+            capacity=excluded.capacity, load=excluded.load, status=excluded.status
+        """,
+        (pool_id, domain, parent_pool, int(capacity), float(load), status, now),
+    )
+    return pool_id
+
+
+def get_pool(pool_id):
+    row = db.query_one("SELECT * FROM task_pools WHERE pool_id=?", (pool_id,))
+    return dict(row) if row else None
+
+
+def list_pools(domain=None, status=None):
+    sql = "SELECT * FROM task_pools"
+    params = []
+    conds = []
+    if domain:
+        conds.append("domain=?")
+        params.append(domain)
+    if status:
+        conds.append("status=?")
+        params.append(status)
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY id"
+    return [dict(r) for r in db.query(sql, params)]
+
+
+def update_pool_capacity(pool_id, capacity):
+    db.execute(
+        "UPDATE task_pools SET capacity=?, load=? WHERE pool_id=?",
+        (int(capacity), float(capacity), pool_id),
+    )
+
+
+def count_pools():
+    row = db.query_one("SELECT COUNT(*) AS n FROM task_pools")
+    return row["n"] if row else 0
+
+
+# ================= task_split（任务拆分 / 加派） =================
+
+def add_split(split_id, parent_task, branch_task, agent_id, reason="", submitter="",
+              status="open"):
+    """登记一次任务拆分/加派（开发中途发现任务过大申报，或初始拆分）。"""
+    now = db.now_iso()
+    db.execute(
+        """
+        INSERT INTO task_split (split_id, parent_task, branch_task, agent_id, reason,
+                                submitter, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(split_id) DO UPDATE SET
+            parent_task=excluded.parent_task, branch_task=excluded.branch_task,
+            agent_id=excluded.agent_id, reason=excluded.reason,
+            submitter=excluded.submitter, status=excluded.status
+        """,
+        (split_id, parent_task, branch_task, agent_id, reason, submitter, status, now),
+    )
+    return split_id
+
+
+def split_of(parent_task, status="open"):
+    """查某父任务的拆分分支记录（按时间升序）。"""
+    sql = "SELECT * FROM task_split WHERE parent_task=?"
+    params = [parent_task]
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    sql += " ORDER BY id"
+    return [dict(r) for r in db.query(sql, params)]
+
+
+def list_splits(status=None):
+    sql = "SELECT * FROM task_split"
+    params = []
+    if status:
+        sql += " WHERE status=?"
+        params.append(status)
+    sql += " ORDER BY id"
+    return [dict(r) for r in db.query(sql, params)]
+
+
+def set_split_status(split_id, status):
+    db.execute("UPDATE task_split SET status=? WHERE split_id=?", (status, split_id))
+
+
+# ================= task_prs（任务 PR/Issue 映射） =================
+
+def add_task_pr(pr_id, task_id, agent_id, issue_id="", seq=1, kind="new", status="open"):
+    """登记一个任务提交的 PR（每个任务可 1-3 个 PR，各按独立 Issue 处理）。"""
+    now = db.now_iso()
+    db.execute(
+        """
+        INSERT INTO task_prs (pr_id, task_id, agent_id, issue_id, seq, kind, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(pr_id) DO UPDATE SET
+            task_id=excluded.task_id, agent_id=excluded.agent_id,
+            issue_id=excluded.issue_id, seq=excluded.seq, kind=excluded.kind,
+            status=excluded.status
+        """,
+        (pr_id, task_id, agent_id, issue_id, int(seq), kind, status, now),
+    )
+    return pr_id
+
+
+def prs_for_task(task_id, status=None):
+    """某任务的全部 PR（按提交顺序）。"""
+    sql = "SELECT * FROM task_prs WHERE task_id=?"
+    params = [task_id]
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    sql += " ORDER BY seq, id"
+    return [dict(r) for r in db.query(sql, params)]
+
+
+def pr_count_for_task(task_id, status=None):
+    """某任务已提交的 PR 数（用于 1-3 上限校验）。"""
+    return len(prs_for_task(task_id, status))
+
+
+def prs_for_agent(agent_id, status=None):
+    """某 agent 提交的全部 PR（精准定位某 agent 的工作）。"""
+    sql = "SELECT * FROM task_prs WHERE agent_id=?"
+    params = [agent_id]
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    sql += " ORDER BY id"
+    return [dict(r) for r in db.query(sql, params)]

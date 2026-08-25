@@ -7,6 +7,7 @@
 """
 from .product import ProductRole
 from .architect import ArchitectRole
+from .chief_assistant import ChiefAssistantRole
 from .manager import ManagerRole
 from .team_lead import TeamLeadRole
 from .developer import DeveloperRole
@@ -15,6 +16,7 @@ from .version_keeper import VersionKeeperRole
 from .tool_finder import ToolFinderRole
 from .tester import TesterRole
 from .data_admin import DataAdminRole
+from .sentinel import SentinelRole
 from .secretary import SecretaryRole
 from .market import (
     SalesRole,
@@ -29,7 +31,7 @@ from .company import (
     CompetitorRole,
     ToolBuilderRole,
     OptimizerRole,
-    DataAdminRole,
+    DataAdminRole as CompanyDataAdminRole,
     OpsRole,
 )
 
@@ -39,6 +41,7 @@ ROLE_REGISTRY = {
     # ---- 需求转化/设计 ----
     "架构·产品": ProductRole,
     "架构·总师": ArchitectRole,
+    "架构·总师助理": ChiefAssistantRole,
     # ---- 调度/协同 ----
     "架构·经理": ManagerRole,
     "架构·小组长": TeamLeadRole,
@@ -49,6 +52,7 @@ ROLE_REGISTRY = {
     "架构·找工具": ToolFinderRole,
     "架构·测试": TesterRole,
     "架构·数据管理员": DataAdminRole,
+    "架构·监控哨兵": SentinelRole,
     # ---- 市场获客分层（通用基建）----
     "市场·销售": SalesRole,
     "市场·客服": SupportRole,
@@ -62,7 +66,7 @@ ROLE_REGISTRY = {
     # ---- 能力底座线 · 持续开发（更快更稳成本更低）----
     "架构·工具开发": ToolBuilderRole,
     "架构·优化": OptimizerRole,
-    "架构·数据管理": DataAdminRole,
+    "架构·数据管理": CompanyDataAdminRole,
     "架构·运维": OpsRole,
 }
 

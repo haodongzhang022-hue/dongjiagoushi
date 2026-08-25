@@ -39,13 +39,17 @@ fi
 # 续跑
 t "从接力卡续跑 --resume" "$RUN --resume --backend cli_fallback"
 
-# 校验角色注册表完整性（16 个角色：入口层秘书 + 需求/设计 + 调度/协同 + 实现/质量 + 数据管理员 + 市场获客分层）
+# 校验角色注册表完整性（25 个角色：入口层秘书 + 需求/设计 + 总师助理 + 调度/协同 + 实现/质量 + 数据管理员 + 监控哨兵 + 市场获客分层 + 公司化三战线）
 count=$(python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; print(len(list_roles()))")
-if [ "$count" = "16" ]; then
-  echo "  ✅ 角色注册表 16 个角色齐全（含 架构·秘书 默认入口 + 架构·经理 分配调度核心 + 架构·数据管理员 + 市场层 5 角色）"; pass=$((pass+1))
+if [ "$count" = "25" ]; then
+  echo "  ✅ 角色注册表 25 个角色齐全（含 架构·秘书 默认入口 + 架构·总师 + 架构·总师助理 + 架构·经理 分配调度核心 + 架构·数据管理员 + 架构·监控哨兵 + 市场层 5 + 公司化三战线）"; pass=$((pass+1))
 else
   echo "  ❌ 角色数量异常: $count"; fail=$((fail+1))
 fi
+
+# 校验总师助理已注册（专角色专用：改错改框架，保总师上下文纯净）
+python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; assert '架构·总师助理' in list_roles()" && {
+  echo "  ✅ 架构·总师助理 已注册"; pass=$((pass+1)); } || { echo "  ❌ 架构·总师助理 未注册"; fail=$((fail+1)); }
 
 # 校验数据管理员角色已注册
 python3 -c "import sys; sys.path.insert(0,'local-agent'); from roles import list_roles; assert '架构·数据管理员' in list_roles()" && {

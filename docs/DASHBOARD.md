@@ -95,7 +95,7 @@
 | M1 | 顶层架构拓扑 | docs/ARCHITECTURE.md | 状态 `docs/ARCHITECTURE.md` · 线索 [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
 | M2 | 可行性验证 | 参考仓库核验 + 官方文档核验 | 状态 `参考仓库源码核验 + 官方文档核验` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
 | M3 | 工程实施方案（第一版骨架） | 目录结构 + 模块文件 | 状态 `本仓库目录结构 + 各模块文件` · 线索 — |
-| M4 | 分工与协作规则 | AGENTS.md + settings.yml 扩展位 | 状态 `AGENTS.md + settings.yml 角色扩展位` · 线索 [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20), [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16), [#5](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/5), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
+| M4 | 分工与协作规则 | AGENTS.md + settings.yml 扩展位 | 状态 `AGENTS.md + settings.yml 角色扩展位` · 线索 [#31](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/31), [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20), [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16), [#5](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/5), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
 | M5 | 进度对齐（暂停点） | CP1/CP2/CP3 护栏 | 状态 `CP1/CP2/CP3 护栏` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
 | M6 | 索引建立 | docs/ 索引 + 产物索引 | 状态 `docs/ 索引 + 产物索引` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4), [#1](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/1) |
 | M7 | 真实场景跑通验证 | 用 architect skill 跑真实需求 | 状态 `用架构师 skill 跑一个真实架构需求` · 线索 [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
@@ -107,6 +107,10 @@
 
 | Issue | 模块 | 模块版本 | agent | agent版本 | type | 目标 | 依赖 | 状态 |
 |-------|------|---------|-------|----------|------|------|------|------|
+| [#31](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/31) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
+| [#26](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/26) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
+| [#25](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/25) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
+| [#23](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/23) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#18](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/18) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16) | `local-agent` | v0.1.0 | `架构·总师 / 架构·产品 / 架构·开发 / 架构·评审 / 架构·测试` | v0.1.0 | init | 补齐本地 Agent 能力——无 @ 环境下用 CLI 承载云端触发，形成「需求→产品→架构→分工→协同→测试→交付」团队闭环 | #4 #15 | 🟢 open |
@@ -123,10 +127,14 @@
 
 ## 五、待办 / 阻塞点扫描
 
-当前 open Issue：**11** / 总 11。
+当前 open Issue：**15** / 总 15。
 
 | Issue | 标题 | 模块 | 阻塞线索 |
 |-------|------|------|----------|
+| [#31](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/31) | 层间协作 | `—` | — |
+| [#26](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/26) | 引入状态机 上位机定时器 | `—` | — |
+| [#25](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/25) | 防止系统无效努力 | `—` | — |
+| [#23](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/23) | 数据架构升级 | `—` | — |
 | [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20) | 继续用架构师，尝试优化本项目 | `—` | — |
 | [#18](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/18) | 当前准备开发成一个体系，不只是一个agent就算完成本项目了 | `—` | — |
 | [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16) | 支持本地agent和框架的明确 | `local-agent` | — |

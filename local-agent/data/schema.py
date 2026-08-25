@@ -239,6 +239,102 @@ SCHEMA_DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_memory_space ON memory(space)",
+    # ---- 15. 目标进度尺（防无效努力 · 量化距离到目标的刻度，供监控哨兵判定收敛/停滞）----
+    """
+    CREATE TABLE IF NOT EXISTS goal_meters (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        meter_id      TEXT NOT NULL,            -- 目标刻度 id（如 g-<task_id>）
+        task_id       TEXT DEFAULT '',          -- 关联任务
+        agent_id      TEXT DEFAULT '',          -- 正在推进该目标的角色
+        target        TEXT DEFAULT '',          -- 目标描述（验收标准 / 北极星）
+        goal_total    REAL DEFAULT 0,           -- 目标总量（0..goal_total，距离=goal_total-current）
+        current       REAL DEFAULT 0,           -- 当前已达量（向目标收敛的进度刻度）
+        distance      REAL DEFAULT 0,           -- 距目标距离 = goal_total - current（越小越近）
+        delta         REAL DEFAULT 0,           -- 本次相对上次的进展（正=推进，0=停滞，负=回退/横跳）
+        note          TEXT DEFAULT '',          -- 说明（做了什么）
+        ts            TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_goal_task ON goal_meters(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_goal_agent ON goal_meters(agent_id)",
+    # ---- 16. 监控哨兵动作（防无效努力 · 打断/重规划/上报/调整 留痕）----
+    """
+    CREATE TABLE IF NOT EXISTS sentinel_actions (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        action_id     TEXT NOT NULL,            -- 动作 id（interrupt-<uuid> / escalate-<uuid>）
+        task_id       TEXT DEFAULT '',
+        agent_id      TEXT DEFAULT '',          -- 被打断的角色
+        level         INTEGER DEFAULT 1,        -- 触发级别：1=打断+重规划 / 2=上报架构师助理讨论局部调整
+        reason        TEXT DEFAULT '',          -- 触发原因（stagnation/oscillation/repeated_error）
+        detail        TEXT DEFAULT '{}',        -- 检测详情（距离序列 / 判定参数）
+        action        TEXT DEFAULT '',          -- 处置动作描述
+        ts            TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sentinel_task ON sentinel_actions(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sentinel_level ON sentinel_actions(level)",
+    # ---- 17. 全局唯一编号注册表（gid · 全局唯一、稳定寻址、二次触发同一实体）----
+    """
+    CREATE TABLE IF NOT EXISTS gid_registry (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        etype         TEXT NOT NULL,            -- agent|task|pr|issue|group|pool|meter
+        biz_key       TEXT NOT NULL,            -- 业务 key（稳定名/标题/功能域），同一 key 取同一 gid
+        gid           TEXT NOT NULL,            -- 全局唯一 ID（ag-/tk-/pr-/...前缀）
+        created_at    TEXT,
+        UNIQUE(etype, biz_key),
+        UNIQUE(gid)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_gid_type_key ON gid_registry(etype, biz_key)",
+    "CREATE INDEX IF NOT EXISTS idx_gid_gid ON gid_registry(gid)",
+    # ---- 18. 功能域任务池（pool · 按任务负载动态扩展 agent，非直接固定并发）----
+    """
+    CREATE TABLE IF NOT EXISTS task_pools (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        pool_id       TEXT NOT NULL,            -- 功能域任务池唯一 id（pl-前缀）
+        domain        TEXT NOT NULL,            -- 功能域（登录/结算/报表/...）
+        parent_pool   TEXT DEFAULT '',          -- 父池（拆分子池时指向父）
+        capacity      INTEGER DEFAULT 0,        -- 当前扩容后的并发容量（随任务负载伸缩）
+        load          REAL DEFAULT 0,           -- 当前负载（积压任务数 / 权重）
+        status        TEXT DEFAULT 'active',    -- active/draining/closed
+        created_at    TEXT,
+        UNIQUE(pool_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_pool_domain ON task_pools(domain)",
+    # ---- 19. 任务拆分 / 加派（小组长整合 · 大任务拆分与开发中途申报加派）----
+    """
+    CREATE TABLE IF NOT EXISTS task_split (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        split_id      TEXT NOT NULL,            -- 拆分/加派记录 id（sp-前缀）
+        parent_task   TEXT NOT NULL,            -- 被拆分的父任务 gid
+        branch_task   TEXT NOT NULL,            -- 拆分出的分支任务 gid
+        agent_id      TEXT NOT NULL,            -- 负责该分支的 agent gid
+        reason        TEXT DEFAULT '',          -- 拆分/加派原因（任务过大/开发中发现过大/申报）
+        submitter     TEXT DEFAULT '',          -- 申报方（开发 agent / 小组长）
+        status        TEXT DEFAULT 'open',      -- open/aggregated（是否已汇总回小组长）
+        created_at    TEXT,
+        UNIQUE(split_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_split_parent ON task_split(parent_task)",
+    # ---- 20. 任务 PR/Issue 映射（每个角色任务 1-3 PR，各按独立 Issue 处理）----
+    """
+    CREATE TABLE IF NOT EXISTS task_prs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        pr_id         TEXT NOT NULL,            -- PR 全局唯一 id（pr-前缀）
+        task_id       TEXT NOT NULL,            -- 归属任务 gid
+        agent_id      TEXT NOT NULL,            -- 提交该 PR 的 agent gid
+        issue_id      TEXT DEFAULT '',          -- 对应独立 Issue id（is-前缀）
+        seq           INTEGER DEFAULT 1,        -- 第几个 PR（1/2/3）
+        kind          TEXT DEFAULT 'new',       -- new=独立新PR / amend=对既有PR修改再提交
+        status        TEXT DEFAULT 'open',      -- open/merged/closed
+        created_at    TEXT,
+        UNIQUE(pr_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_taskprs_task ON task_prs(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_taskprs_agent ON task_prs(agent_id)",
 ]
 
 

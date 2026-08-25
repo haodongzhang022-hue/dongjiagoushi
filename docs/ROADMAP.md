@@ -35,6 +35,7 @@
 | M26 | 规模伸缩层 · 消息总线 + 状态分片 | ✅ | `local-agent/scale/{broker,store}.py`：agent 间发布/订阅/广播 + 按 agent 分片状态（替代单文件接力卡）（见 Issue #20） |
 | M27 | 规模伸缩层 · 并发池 + 统一调度引擎 | ✅ | `local-agent/scale/{pool,engine}.py`：真并行波次 + 2500 级并发模拟 + `--scale` CLI 入口（见 Issue #20） |
 | M28 | 规模伸缩层 · 测试与文档 | ✅ | `local-agent/tests/test_scale.sh` 7 组测试 + 主测试/本地测试全绿 + `docs/FRAMEWORK_V3.md`（见 Issue #20） |
+| M29 | 上位机 · 定时器 + 状态机工程能力引擎 | ✅ | `local-agent/engine/`：状态机（合法转移表+强制校验+留痕）+ 定时器（周期/超时/心跳巡检）+ 上位机整合（HostEngine）+ `test_engine.sh` 7 组测试 + `docs/HOST_ENGINE.md`（见 Issue #26） |
 
 ## 架构八步模板
 
@@ -108,5 +109,6 @@ dashboard 模块（init）
 | 使用说明 | `README.md` |
 | 知识库索引入口 | `docs/KNOWLEDGE.md` |
 | 框架自升级闭环 | `docs/FRAMEWORK_UPGRADE.md` |
+| 上位机定时器+状态机引擎 | `local-agent/engine/`（state_machine/timer/host/cli）+ `local-agent/tests/test_engine.sh` + `docs/HOST_ENGINE.md` |
 | 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容 可复现） + `tests/test_doc_consistency.sh`（文档-实现一致性 防漂移） |
 | 验收清单 | `docs/templates/acceptance-checklist.md` |
