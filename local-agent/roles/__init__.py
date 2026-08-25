@@ -7,6 +7,7 @@
 """
 from .product import ProductRole
 from .architect import ArchitectRole
+from .chief_assistant import ChiefAssistantRole
 from .manager import ManagerRole
 from .team_lead import TeamLeadRole
 from .developer import DeveloperRole
@@ -31,6 +32,7 @@ ROLE_REGISTRY = {
     # ---- 需求转化/设计 ----
     "架构·产品": ProductRole,
     "架构·总师": ArchitectRole,
+    "架构·总师助理": ChiefAssistantRole,
     # ---- 调度/协同 ----
     "架构·经理": ManagerRole,
     "架构·小组长": TeamLeadRole,
