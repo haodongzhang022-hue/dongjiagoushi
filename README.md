@@ -115,6 +115,10 @@
 │   │   ├── webhook.py                   #   🆕 多源 Webhook 接收端（POST /webhook/<source>，本地/手机/虚拟机/沙盒/上位机）
 │   │   ├── sources.py                   #   🆕 多源适配器注册 + 本地电脑适配器（云端-本地协同）
 │   │   └── host_helper.py               #   🆕 本地上位机辅助角色（预设功能，之后接入真实上位机）
+│   ├── topology/                        # 🆕 拓扑对比框架（多线路对比执行/指标累积/长时间判断，见 docs/TOPOLOGY_COMPARISON.md）
+│   │   ├── topologies.py                  #   3 条拓扑线路定义（linear/dag/event）
+│   │   ├── metrics.py                     #   对比指标收集与持久化
+│   │   └── runner.py                      #   对比执行器 CLI（同一需求跑不同拓扑）
 │   ├── dispatch_engine.py              # 🆕 经理四层分发深度引擎（L1声明→L2分发→L3触发→L3.5接单→L4工作交付，验收口径=走到L4，见 docs/DISPATCH_DEPTH.md）
 │   ├── dispatch/                        # 🆕 通用派发能力包（派发工作全员化 · 可复用模块，见 docs/DISPATCH_ABILITY.md）
 │   │   ├── ability.py                   #   DispatchAbility 通用能力类（全员可派发 L1→L4 + 可接单[接单]/进度尺/交付）

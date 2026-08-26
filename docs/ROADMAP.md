@@ -44,6 +44,7 @@
 | M35 | 测试环境依赖加固 | ⏳ | local-agent + functional-links 测试在云 CI 全绿；沙盒/云环境差异文档化（Issue #8，T4） |
 | M36 | 看板/进度可视化持续维护 | ✅ | DASHBOARD.md 随 issue 变更自动刷新（Issue #7，T5） |
 | M37 | 分发递进深度模型（L1→L4）+ 经理分发引擎 | ✅ | 设计：四层递进（L1声明→L2分发→L3触发→L3.5接单→L4工作交付），经理锁 L4 + 权限模型（docs/DISPATCH_DEPTH.md，总师）；落地：`local-agent/dispatch_engine.py`（L1声明/L2分发+投池+真实Issue/L3触发接力卡/L3.5接单回执/L4开工+goal_meters进度尺+交付）+ 差异化补强（深度俯瞰 by_depth + L4 action 路由执行 + 防跳层）+ `test_dispatch_engine.sh` 8 组测试，全绿（Issue #33）|
+| M38 | 拓扑对比框架 · 多线路对比 + 长时间累积判断 | ✅ | `local-agent/topology/`：3 条拓扑（linear/dag/event）+ 对比执行器 + 指标持久化 + 长时间累积 + `test_topology_comparison.sh` 4 组测试 + `docs/TOPOLOGY_COMPARISON.md`（Issue #41）|
 ## 架构八步模板
 
 见 [docs/templates/architect-report.md](templates/architect-report.md)，每次做真实架构设计时按此模板产出。
