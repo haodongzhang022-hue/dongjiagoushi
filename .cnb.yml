@@ -74,6 +74,8 @@ main:
             bash local-agent/tests/test_benchmark_ab.sh
             echo "==== 混合调度与零散差分测试（topology-hybrid：中央调控+一窝蜂抢单 / 零散一窝蜂 / 规模可调 / 任务性质差分） ===="
             bash local-agent/tests/test_topology_hybrid.sh
+            echo "==== 高尔顿板 MVP 原型测试（galton：Router+3Worker+1Aggregator 球路由→加工→合并闭环） ===="
+            bash local-agent/tests/test_galton.sh
             echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="
             bash tests/test_company_model.sh
             echo "==== 端到端小需求测试（mini-e2e：小需求端到端信号灯） ===="

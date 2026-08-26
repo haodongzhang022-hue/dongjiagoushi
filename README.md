@@ -130,6 +130,10 @@
 │   │   ├── resolver.py                  #   核心解析器：触发串识别/仓库探测/跨同仓判定/权限建议
 │   │   ├── ability.py                   #   HandleAbility 能力类（self_handle/resolve/is_cross）
 │   │   └── __init__.py                  #   导出 HandleAbility（默认挂载到 BaseRole，所有角色具备）
+│   ├── galton/                            # 🆕 高尔顿板 MVP 原型（Router+3Worker+1Aggregator 球路由→加工→合并闭环，见 docs/GALTON.md）
+│   │   ├── engine.sh                    #   Bash 核心引擎（沙盒可直接验证）
+│   │   ├── engine.py                    #   Python 等价实现（云 CI / 真实环境）
+│   │   └── __init__.py                  #   模块接口导出
 │   ├── roles.d/                         # 🆕 角色插件目录（放一个 .py 即自动加载新角色）
 │   │   └── analyst.py                   #   插件角色示例（架构·数据分析师）
 │   ├── roles/                           # 25 个角色模块（秘书/产品/总师/总师助理/经理/小组长/开发/评审/对齐/找工具/测试/数据管理员/监控哨兵 + 市场层5 + 公司化三战线7）

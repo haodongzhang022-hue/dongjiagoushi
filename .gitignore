@@ -18,3 +18,6 @@ local-agent/topology/_metrics/
 
 # 真实任务 AB 隔离对比运行时隔离目录（本地累积，不进版本库）
 local-agent/topology/_bench/
+
+# 高尔顿板运行时产物（worker 输出/汇总，不进版本库）
+local-agent/galton/_runtime/
