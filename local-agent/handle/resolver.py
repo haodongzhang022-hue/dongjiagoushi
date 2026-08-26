@@ -94,9 +94,26 @@ def _git_remote_org_repo():
 
 
 def _env_org_repo():
-    """从环境变量探测当前操作仓库的 org/repo。"""
-    org = os.environ.get("CNB_ORG") or os.environ.get("GIT_ORG")
-    repo = os.environ.get("CNB_REPO") or os.environ.get("GIT_REPO")
+    """从环境变量探测当前操作仓库的 org/repo。
+
+    识别源（按优先级）：
+      1. CNB 平台实际注入变量（最权威，运行时不依赖 git remote）：
+         - `CNB_GROUP_SLUG`（org / 组织）+ `CNB_REPO_NAME`（仓库名）
+         - `CNB_ROOT_SLUG`（根命名空间，org 兜底）+ `CNB_REPO_NAME`
+         - `CNB_ORG` / `CNB_REPO`（通用别名，兼容其他宿主）
+      2. GIT 通用变量：`GIT_ORG` / `GIT_REPO`（本地/CI 兜底）。
+    这些让仓库识别**不假设 org 固定**（用户诉求：『甚至 dongdongxiaozu 都不一定对』），
+    并能在 git remote 缺失或解析失败时仍用平台权威值正确识别当前仓库。
+    """
+    # CNB 平台实际注入：org = CNB_GROUP_SLUG / CNB_ROOT_SLUG，repo = CNB_REPO_NAME
+    org = (os.environ.get("CNB_GROUP_SLUG") or os.environ.get("CNB_ROOT_SLUG")
+           or os.environ.get("CNB_ORG"))
+    repo = (os.environ.get("CNB_REPO_NAME") or os.environ.get("CNB_REPO"))
+    if org and repo:
+        return org, repo
+    # GIT 通用变量（本地 / 其他 CI 兜底）
+    org = os.environ.get("GIT_ORG")
+    repo = os.environ.get("GIT_REPO")
     if org and repo:
         return org, repo
     return None, None

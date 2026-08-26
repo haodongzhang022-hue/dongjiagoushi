@@ -13,6 +13,7 @@
 #   T-H4 解析器各格式支持     —— @org/repo(角色) / @org/repo / @repo / @CodeBuddy
 #   T-H5 BaseRole 全员挂载    —— 每个角色实例都具备 self_handle / resolve / is_cross
 #   T-H6 权限建议             —— 跨库/同库给出权限建议，避免选错角色受限
+#   T-H7 CNB 环境变量识别      —— CNB_GROUP_SLUG/CNB_REPO_NAME/CNB_ROOT_SLUG/CNB_ORG 识别当前仓库（自适应 org）
 #
 # 用法：
 #   bash tests/test_handle_ability.sh      # 本地运行
@@ -99,6 +100,42 @@ res["H4_full"] = resolver.parse_at("@orga/repoa(某角色)")["role"]
 res["H4_two"] = resolver.format_at("orgb", "repob", "CodeBuddy")
 res["H4_single"] = resolver.parse_at("@onlyrepo")["repo"]
 
+# T-H7: CNB 平台实际注入环境变量识别（CNB_GROUP_SLUG/CNB_REPO_NAME）
+import os as _os
+def _env_probe(env):
+    old = {k: _os.environ.get(k) for k in env}
+    for k, v in env.items():
+        if v is None:
+            _os.environ.pop(k, None)
+        else:
+            _os.environ[k] = v
+    try:
+        return resolver._env_org_repo()
+    finally:
+        for k, v in old.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
+
+# CNB 平台标准变量 → 应识别
+_res7 = _env_probe({"CNB_GROUP_SLUG": "dongdongxiaozu",
+                    "CNB_REPO_NAME": "dongjiagoushi",
+                    "CNB_ROOT_SLUG": None, "CNB_ORG": None, "CNB_REPO": None})
+res["H7_cnb"] = f"{_res7[0]}/{_res7[1]}" if _res7 else "NONE"
+
+# CNB 根命名空间兜底 + repo → 应识别
+_res8 = _env_probe({"CNB_GROUP_SLUG": None, "CNB_ROOT_SLUG": "rootorg",
+                    "CNB_REPO_NAME": "myrepo",
+                    "CNB_ORG": None, "CNB_REPO": None})
+res["H7_root"] = f"{_res8[0]}/{_res8[1]}" if _res8 else "NONE"
+
+# 通用别名 CNB_ORG/CNB_REPO → 应识别
+_res9 = _env_probe({"CNB_GROUP_SLUG": None, "CNB_ROOT_SLUG": None,
+                    "CNB_REPO_NAME": None,
+                    "CNB_ORG": "o1", "CNB_REPO": "r1"})
+res["H7_alias"] = f"{_res9[0]}/{_res9[1]}" if _res9 else "NONE"
+
 # T-H5: BaseRole 全员挂载
 class Dev(BaseRole):
     name = "架构·开发"
@@ -157,6 +194,11 @@ assert_eq "H5 capability 含 handle_ability" "${MAP[H5_cap]}" "True"
 echo "▶ T-H6 权限建议"
 assert_contains "H6 跨库建议(必须用目标仓库)" "${MAP[H6_cross_note]}" "必须用目标仓库"
 assert_contains "H6 同仓建议(可复用)" "${MAP[H6_same_note]}" "可复用"
+
+echo "▶ T-H7 CNB 平台环境变量识别（自适应仓库，不假设 org 固定）"
+assert_eq "H7 CNB_GROUP_SLUG+CNB_REPO_NAME 识别" "${MAP[H7_cnb]}" "dongdongxiaozu/dongjiagoushi"
+assert_eq "H7 CNB_ROOT_SLUG 兜底+CNB_REPO_NAME 识别" "${MAP[H7_root]}" "rootorg/myrepo"
+assert_eq "H7 CNB_ORG+CNB_REPO 通用别名识别" "${MAP[H7_alias]}" "o1/r1"
 
 echo ""
 echo "======================================================"

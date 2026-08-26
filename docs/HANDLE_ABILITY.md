@@ -23,7 +23,20 @@
 | 维度 | 含义 | 来源 |
 |------|------|------|
 | **角色承载仓库** | CodeBuddy NPC 由哪个仓库承载（用 `@org/承载仓库(CodeBuddy)` 触发） | 会话触发串 `@org/repo(角色)` |
-| **当前操作仓库** | agent 正在为其工作的仓库 | git remote / 环境变量 / 默认约定 |
+| **当前操作仓库** | agent 正在为其工作的仓库 | CNB 环境变量 → git remote → 默认约定 |
+
+### 当前操作仓库的识别源（自适应 org，不写死）
+
+`detect_current_org_repo()` 按优先级探测，**不假设 org/repo 固定**（用户诉求：
+『甚至 dongdongxiaozu 都不一定对』）：
+
+1. **CNB 平台实际注入环境变量**（最权威，运行时不依赖 git remote）：
+   - `CNB_GROUP_SLUG`（org）+ `CNB_REPO_NAME`（仓库名）
+   - `CNB_ROOT_SLUG`（根命名空间，org 兜底）+ `CNB_REPO_NAME`
+   - `CNB_ORG` / `CNB_REPO`（通用别名，兼容其他宿主）
+2. **GIT 通用变量**：`GIT_ORG` / `GIT_REPO`（本地 / CI 兜底）
+3. **git remote**：`git remote -v` 解析 `org/repo`
+4. **默认约定**：`dongdongxiaozu/dongjiagoushi`（最终兜底）
 
 典型场景：`@dongdongxiaozu/youkaifaxilieagent(CodeBuddy)` 触发一个 CodeBuddy
 去操作 `dongdongxiaozu/dongjiagoushi`。此时**角色承载仓库**是 `youkaifaxilieagent`，
@@ -83,6 +96,7 @@ local-agent/handle/
 - T-H4 解析器各格式支持
 - T-H5 BaseRole 全员挂载透传
 - T-H6 权限建议
+- T-H7 CNB 环境变量识别（自适应 org）
 
 > 触发：显式 `[触发:架构·评审]` / 语义命中「@ 格式 / 跨仓库召唤 / 权限 / 写死角色名 /
 > 自适应定位 / handle」/ rules 固定。
