@@ -1,13 +1,88 @@
 # -*- coding: utf-8 -*-
-"""角色基类：定义统一执行接口。"""
+"""
+角色基类：定义统一执行接口 + 全员通用能力挂载。
+
+派发能力全员化（Issue #33 用户拍板）：
+  - 派发工作是高频复用的模块能力，不应只属于经理；
+  - 本基类默认给**每个角色**挂载 `DispatchAbility`（通用派发能力），
+    让全员既会「派发」（L1→L4 四层深度）也会「接单」（[接单]→开工→进度尺→交付）；
+  - 团队因此从「散兵」升级为「可协作体系」：每个 agent 具备派发能力 + 使用规则 + 时机。
+
+使用方式（任意角色实例上）：
+    role = DeveloperRole()
+    role.dispatch(repo, assignments)     # 作为派发方，四层分发
+    role.accept(task_key, agent_id)      # 作为被派发方，接单回执
+"""
+import os
+import sys
+
+# 确保 local-agent 目录在 sys.path（便于导入 dispatch.ability）
+_LOCAL_AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _LOCAL_AGENT_DIR not in sys.path:
+    sys.path.insert(0, _LOCAL_AGENT_DIR)
 
 
 class BaseRole:
-    """所有角色继承。子类实现 SYSTEM_PROMPT 与 output_contract()。"""
+    """所有角色继承。子类实现 SYSTEM_PROMPT 与 output_contract()。
+
+    默认挂载通用派发能力（DispatchAbility）：全员可派发、可接单。
+    """
 
     name = ""
     SYSTEM_PROMPT = ""
 
+    def __init__(self):
+        # 懒加载通用派发能力（绑定到自身角色名，留痕归因）
+        try:
+            from dispatch import DispatchAbility
+            self.dispatch_ability = DispatchAbility(owner=self)
+        except Exception:
+            # 能力加载失败不阻断角色可用（环境差异容错）
+            self.dispatch_ability = None
+
+    # ---- 派发能力透传（全员通用）----
+    def dispatch(self, repo, assignments, enable_issue=True):
+        """四层分发一站式（L1→L2→L3→L4）。任意 agent 均可派发子任务。"""
+        if self.dispatch_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
+        return self.dispatch_ability.dispatch(repo, assignments,
+                                               enable_issue=enable_issue)
+
+    def dispatch_depth(self, repo, assignments, enable_issue=True):
+        """别名：四层分发深度一站式入口（与 dispatch 相同）。"""
+        return self.dispatch(repo, assignments, enable_issue=enable_issue)
+
+    def accept(self, task_key, agent_id, role=None, note=""):
+        """接单回执：收到 [触发:<角色>] 接力卡后回执 [接单] 确认接手。"""
+        if self.dispatch_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
+        return self.dispatch_ability.accept(
+            task_key, agent_id, role=role or self.name, note=note)
+
+    def track_progress(self, task_key, agent_id, target, goal_total, current,
+                       note="", role=None):
+        """进度尺推进：每次推进写 goal_meters 刻度，供哨兵收敛判定。"""
+        if self.dispatch_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
+        return self.dispatch_ability.track_progress(
+            task_key, agent_id, target=target, goal_total=goal_total,
+            current=current, note=note, role=role or self.name)
+
+    def deliver(self, task_key, agent_id, output, issue_ref="", role=None):
+        """向上交付：标记任务 done + 归档产物 + 留痕。"""
+        if self.dispatch_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
+        return self.dispatch_ability.deliver(
+            task_key, agent_id, output, issue_ref=issue_ref, role=role or self.name)
+
+    def capability(self):
+        """返回本角色的能力清单（含通用派发能力）。"""
+        base = {"role": self.name}
+        if self.dispatch_ability is not None:
+            base["dispatch_ability"] = self.dispatch_ability.capability()
+        return base
+
+    # ---- 既有接口保持兼容 ----
     def system_prompt(self):
         return self.SYSTEM_PROMPT
 

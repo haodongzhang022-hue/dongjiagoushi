@@ -75,7 +75,30 @@
 **权限意识**：触发接单需对应角色有 @ 权限（`@dongdongxiaozu/dongjiagoushi (架构·经理)`
 或 CodeBuddy 兜底 / 专用派发 agent），权限不足导致派发断裂须显式上报，不静默失败。
 
+### 派发能力全员化（DispatchAbility · 通用复用能力 · 固定规则）
+
+派发工作是**高频复用的模块能力**，不应只属于经理。已统一开发为通用能力
+`DispatchAbility`（`local-agent/dispatch/ability.py`），并默认挂载到**所有角色基类**
+`BaseRole`——**每个 agent 都具备派发能力 + 使用规则 + 时机**，团队由此从「散兵」升级为
+真正可协作的体系（详见 `docs/DISPATCH_ABILITY.md`）：
+
+- **全员可派发**：任意 agent 可在**自己的职责域内**派发子任务（L1声明→L2分发→L3触发→L4开工），
+  不必等经理；任务过大拆分、功能域投池、多角色协同均可用派发能力承载。
+- **全员可接单**：任意 agent 收到带 `[触发:<角色全称>]` 的接力卡，必须回执 `[接单]`
+  → 开工 → 进度尺推进 → 向上交付（完整 L4 闭环）。
+- **接口**：`dispatch/accept/track_progress/deliver` 已挂在 BaseRole，所有角色实例直接可用；
+  `capability()` 返回能力声明（含派发规则）。
+- **使用时机**：工作可拆为子任务且对应角色可承接 → 派发；收到 `[触发]` 接力卡 → 接单。
+- **不越权**：派发须在自己的职责域内；**跨岗位派发须经经理统一协调**，不越权直接指挥其他岗位。
+- **防无效**：同一任务二次触发同一 gid（不漂移）；接单后写 `goal_meters` 进度尺；
+  命中哨兵停滞/横跳/重复错误判定按协议处置。
+- **经理职责**：经理作为**分配调度核心**，统一协调跨岗位派发；能力与全员同源（复用 BaseRole）。
+
+> 派发能力全员化 ≠ 无序派发：派发有边界（职责域）、有留痕（gid + 进度尺 + 交付）、
+> 有监督（哨兵收敛判定 + 经理统一协调跨岗位）。
+
 ### 同岗位多角色交互机制（peer collab · 固定规则）
+
 
 跨岗位协作（DAG 接力）已成熟，但**同岗位（同角色）多个 agent 面对同一个问题**时的交互长期缺失——"分工了但没协同"。本机制补齐**同岗位协作层**（引擎 `local-agent/collab/peer.py`），对齐「默认单兵、按需补位、疑难才会诊」方向，**不是全员投票的冗余**：
 
@@ -233,6 +256,11 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── REVIEWER_PRECURSOR.md           # 审核者前置助手·决策补全机制（3层时点+5类or分支）
   ├── PEER_COLLAB_CLOSURE.md          # 同岗协作收尾闭环（会诊→审核者前置→人类 全自动）
   ├── DISPATCH_DEPTH.md               # 分发递进深度模型（L1声明→L4工作交付，经理锁 L4）
+  ├── DISPATCH_ABILITY.md             # 派发能力全员化（通用复用能力，全员可派发可接单）
+  └── templates/issue-template.md     # Issue 结构化声明模板
+local-agent/dispatch/                 # 通用派发能力包（DispatchAbility 全员能力）
+  ├── ability.py                      # 通用派发能力类（L1→L4 + 接单闭环）
+  └── __init__.py                     # 导出 DispatchAbility
   └── templates/issue-template.md     # Issue 结构化声明模板
 README.md                             # 使用说明
 ```
