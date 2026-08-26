@@ -118,9 +118,19 @@
 
 > 触发：显式 `[触发:架构·审核前置助手]` / 语义命中「两个都不够好 / 二选一 / 拿不准 / 分歧 / 解决不掉 / 换方案 / 开源 / 现成方案 / 背锅」/ rules 固定。只补全决策，不越权代替人类拍责任归属。
 
-### 前期辅助与架构师渐进（规模预设 · 3 阶段）固定规则
+### 统一审查处置标签（Review Disposition · 固定规则）
 
-- **前期辅助角色组（默认 1 个，按需增减）**：秘书/产品先接住；需设计加架构师；需调研加调研专员/架构师助理；对外加市场·销售/客服。初始 1 个、按需增、按需减，非固定打包。
+审查机制里"结论该怎么处理"必须**统一全加规范处置标签，且稳定触发、缺一即评审未完成**。任何审查/决策点恒输出一个规范标签，不各自取名、不漏加（详见 `docs/REVIEW_DISPOSITION.md`）：
+
+- **① 规范标签全集（统一全加）**：`merge`(适合合并) / `proceed`(适合推进) / `fix_bug`(适合改bug) / `research`(适合调研) / `human`(适合移交人类判断) / `consult`(适合专家会诊) / `vote`(适合投票)。规范来源是 `local-agent/collab/disposition.py` 的 `DISPOSITION_LABELS` / `DISPOSITION_ORDER`（唯一规范，文档/规则/测试都从这里对齐）。
+- **② 稳定触发（强制必有）**：`dispose()` 是确定性分类器——给定严重级 + 触发信号 + 场景，**必然返回**一个规范标签；无输入也落到 `proceed` 兜底。显式指定标签时严格校验（`require_label`），非规范标签即报错，防"加错/漏加"。**「架构·评审」输出契约强制绑定 disposition 字段，缺标签即评审未完成、不视为有效评审**。
+- **③ 归一化映射**：把零散 action / 信号 / 分级统一映射到规范标签——🔴必修→`fix_bug`、🟢优化→`merge`、🟡建议→`proceed`、hard/high_risk→`consult`、dispute→`vote`、skill_gap/stall→`research`、needs_human/requires_human→`human`、defect→`fix_bug`、adopt/merge→`merge`、escalate→`human`、reroute→`research`。
+- **④ 按标签自动化流程（route）**：`merge`→合并确认(⏸CP3)放行；`proceed`→继续开发回小组长整合；`fix_bug`→[回转]退回开发复评清零；`research`→外部探索(L2)/调研；`human`→结果前置打开人类拍板闸门(`human_gate`)；`consult`→专家会诊(`peer.expert_consult`)，未收敛走审核者前置助手→人类；`vote`→共识表决(`peer.consensus_judge`)，未共识显式上报小组长→总师→人类。
+- **⑤ 留痕与俯瞰**：每次审查处置调用 `record_disposition()` 写 `archives`(kind=`disposition`)可回溯；`disposition_overview()` 统计各标签出现次数供监控。
+
+> 触发：显式 `[触发:架构·评审]` / 语义命中「评审/审查/走查/质量/合并/推进/改bug/调研/会诊/投票/移交人类/处置」/ rules 固定。规则层已落地引擎 `disposition.py` + 测试 `test_disposition.sh`，红灯可查到底有没有带标签。
+
+### 前期辅助与架构师渐进（规模预设 · 3 阶段）固定规则
 - **规模预设前置（可执行引擎）**：秘书/产品/架构师/调研在**需求澄清阶段**先按体量预设 `team_size + collab_plan + risk_level` + 检索经验方案库，作为增减基准锚点；架构明确后由**架构·经理按架构做增量修正**，不做从零规划。**已落地可执行引擎 `local-agent/scale/prescale.py`**（`prescale(req) → {team_size, collab_plan, risk_level, source}` + 经验方案库 `search_pattern` + 增量修正 `adjust_by_architect` + 强制留痕 `prescale_records`），并有测试断言『需求进入处理前必须先有预设记录』，红灯可查到底预没预设。
 - **架构师 3 阶段渐进**（避免一轮直出最大框架出错）：**阶段1 粗纲**（功能架构顶层框架）→ **阶段2 功能域**（逐模块填充实现架构）→ **阶段3 细纲**（接口/数据结构/伪代码细纲供开发接）。每阶段独立检查点，错误在早期暴露修正。
 
@@ -215,6 +225,7 @@ AGENTS.md                             # 本文件：全局协作规则
 docs/                                 # 架构文档（索引 / 路线图 / 八步模板 / Issue 版本管理）
   ├── ISSUE_MANAGEMENT.md             # Issue 声明与模块/Agent 双版本管理机制
   ├── REVIEWER_PRECURSOR.md           # 审核者前置助手·决策补全机制（3层时点+5类or分支）
+  ├── REVIEW_DISPOSITION.md           # 统一审查处置标签机制（适合合并/推进/改bug/调研/交人/会诊/投票）
   ├── PEER_COLLAB_CLOSURE.md          # 同岗协作收尾闭环（会诊→审核者前置→人类 全自动）
   └── templates/issue-template.md     # Issue 结构化声明模板
 README.md                             # 使用说明
