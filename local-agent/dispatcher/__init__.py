@@ -36,13 +36,14 @@
 """
 from . import source, rules, guard, queue, router, reject, engine, webui
 from . import security, webhook, sources, host_helper
+from . import probe
 from .source import ExternalAdapter, RepoPollAdapter, normalize_event
 from .rules import RuleEngine, default_rules
 from .guard import Guard
 
 __all__ = [
     "source", "rules", "guard", "queue", "router", "reject", "engine", "webui",
-    "security", "webhook", "sources", "host_helper",
+    "security", "webhook", "sources", "host_helper", "probe",
     "ExternalAdapter", "RepoPollAdapter", "normalize_event",
     "RuleEngine", "default_rules", "Guard",
 ]

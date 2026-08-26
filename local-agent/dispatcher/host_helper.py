@@ -77,14 +77,12 @@ def host_report(event_type, entity, detail=None, source_name="local_pc", via="lo
             return {"ok": True, "result": dispatcher.process_event(ev)}
         except Exception as e:  # noqa
             return {"ok": False, "error": str(e)}
-    # via="local"：经本地适配器 emit
+    # via="local"：经本地适配器 emit → 事件到达即触发脉冲式信号探测器（不轮询）
     adapter = sources_mod.get_adapter(source_name)
     if adapter is None:
         adapter = sources_mod.build_local_host(source_name)
-    adapter.emit(ev)
-    from . import engine
-    dispatcher = engine.Dispatcher(sources=[adapter])
-    report = dispatcher.scan_once()
+    from . import probe as probe_mod
+    report = adapter.emit(ev) or probe_mod.fire_signal(ev)
     return {"ok": True, "emit": True, "report": report}
 
 

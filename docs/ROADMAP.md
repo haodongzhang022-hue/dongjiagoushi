@@ -38,6 +38,11 @@
 | M29 | 上位机 · 定时器 + 状态机工程能力引擎 | ✅ | `local-agent/engine/`：状态机（合法转移表+强制校验+留痕）+ 定时器（周期/超时/心跳巡检）+ 上位机整合（HostEngine）+ `test_engine.sh` 7 组测试 + `docs/HOST_ENGINE.md`（见 Issue #26） |
 | M30 | 调度中枢 · 事件驱动自动化调度层（dispatcher） | ✅ | `local-agent/dispatcher/`：事件源监听（本仓库+外部适配器插槽）+ 触发规则引擎 + Action 队列（自动优先+人工审核闸门，不卡进程）+ 防无效护栏（去重/频限/进度上限）+ 驳回迭代闭环（rejections 表按 gid 回派改进重提）+ sentinel 进度上限判定强化 + Web 可视化面板 + `test_dispatcher.sh` 8 组测试 + `docs/DISPATCHER.md`（见 Issue #26） |
 | M31 | 外部事件源接入 · 多终端协同 + 秘钥/IP白名单安全 + 本地上位机辅助 | ✅ | `local-agent/dispatcher/{security,webhook,sources,host_helper}.py`：多终端源预设（本地电脑/手机/虚拟机/沙盒/上位机，不只一个源）+ 秘钥 key + IP 白名单 安全认证（deny-by-default）+ 多源 Webhook 接收端（POST /webhook/<source>，webhook 更合理）+ 认证审计留痕 + 本地上位机辅助角色预设（host_start/report/pull/ack/overview）+ `test_external_source.sh` 5 组测试 + `docs/EXTERNAL_SOURCE.md`（见 Issue #26） |
+| M32 | 知识库充实（入库+索引入口） | ⏳ | 把 docs/、模板、Issue 声明头批量入库 + tag 触发 codewiki，让 @CodeBuddy 对话可 RAG 检索（Issue #6，T1） |
+| M33 | 真实场景跑通验证（arch-skill） | ⏳ | 用 architect skill 跑一个真实架构需求，走完整八步留痕（Issue #4，T2） |
+| M34 | 框架健康度审查 | ⏳ | 盘点 open issue，解决残留/关闭陈旧/整合双版本线（Issue #11，T3） |
+| M35 | 测试环境依赖加固 | ⏳ | local-agent + functional-links 测试在云 CI 全绿；沙盒/云环境差异文档化（Issue #8，T4） |
+| M36 | 看板/进度可视化持续维护 | ✅ | DASHBOARD.md 随 issue 变更自动刷新（Issue #7，T5） |
 
 ## 架构八步模板
 
@@ -80,16 +85,18 @@ dashboard 模块（init）
 > 依赖关系：`#4/#5/#6/#7` 均 depends_on 测试护栏 `#8`。测试（#8）落地后，其余模块按此标准验收。
 > 双版本推进规则：一个 Issue 只在一个最小迭代单位（单一模块或单一 agent）上升版；跨维度改动需分别写明 `module_version` 与 `agent_version`，各升各的，不抢整体版本号，避免局部迭代并发合并冲突。
 
-## 下一阶段（V0.2 建议）
+## 下一阶段（V0.3+ · 分工待办，见 Issue #33 分工卡）
 
-0. **框架自升级闭环**（本批已落地，`framework` 模块 v0.1.0）：把"框架自身"纳入版本治理 —— FRAMEWORK_UPGRADE.md 定义何时触发升级 + upgrade 类型 + framework 版本线；memory 接真实 embedding（sentence-transformers，未装回退哈希）；新增文档-实现一致性测试（test_doc_consistency）；看板加框架健康度维度。
-1. **真实场景验证**：在仓库内或关联 Issue 中，用 architect skill 跑一个真实架构需求，验证八步流畅度。
-1. ✅ **经验记忆库 + 语义向量触发**：已落地 `src/memory/` —— 统一向量格式 + LanceDB 本地持久化 + 云端 CNB 知识库同格式适配 + 双写兼容 + 持续积累经验 + 语义向量触发引擎（T9 可复现）。语义向量触发从"prompt/关键词层面"升级为"真实向量检索"。
-2. ✅ **多角色补全**：已在 `.cnb/settings.yml` 补全 PM/DEV/CR/QA 人设，并落地三层触发强制化 + 回转/打断协议（T8 可复现，见本批任务）。
-3. ✅ **协作触发与回转打断可复现**：`tests/test_relay_workflow.sh` 端到端复现接力卡传递/回转打回/中断续跑，纳入 `.cnb.yml` test 阶段信号灯。
-3. **知识库充实**：将架构文档、模板持续入库，供 agent 检索。
-4. ✅ **可视化看板自动化**：已落地 `scripts/generate-dashboard.py` → `docs/DASHBOARD.md`，并在 `.cnb.yml` 挂了 `issue.*` 自动刷新（见任务 D）。
+框架 V0.3+ 壳已建（framework-shell / local-agent / scale / engine / data / collab / sentinel / dispatcher / probe / external-source / peer-collab / peer-closure）。当前真实待办按 T1~T5 分工派活：
 
+- **T1 知识库充实**（🔴P0 / #6 / 架构·数据管理员+架构·开发）：docs/模板/声明头批量入库 + tag 触发 codewiki → RAG 检索可用（M32）。
+- **T2 真实场景跑通验证**（🔴P0 / #4 / 架构·总师+架构·测试）：用 architect skill 跑真实需求，走完整八步留痕（M33）。依赖 T1。
+- **T3 框架健康度审查**（🟠P1 / #11 / 架构·总师+架构·评审）：盘点 15 个 open issue，解决残留/关闭陈旧/整合双版本线（M34）。
+- **T4 测试环境依赖加固**（🟠P1 / #8 / 架构·开发+架构·运维）：local-agent + functional-links 测试在云 CI 全绿；沙盒 vs 云环境差异文档化（M35）。
+- **T5 看板/进度可视化持续维护**（🟡P2 / #7 / 架构·数据管理员）：DASHBOARD.md 随 issue 变更自动刷新（M36，已落地）。
+
+> 依赖：`T1 → T2`；`T3/T4/T5` 相互独立可并行（DAG 非直线）。各任务带接力卡，仓库 agent 经 `@` 按 `[触发:角色]` 接单，成果按小组层层上报、看板自动可视化。
+> 环境提示：本沙盒缺 `python3` + cnb 云凭据，local-agent 12 项 + functional-links 13 项 + doc-consistency 2 项失败为**环境限制非代码缺陷**，须在云 CI 验证。
 ## 可视化看板
 
 模块版本演进看板 + 里程碑表已自动化生成，人类俯瞰决策直接看 [docs/DASHBOARD.md](DASHBOARD.md)（由 `scripts/generate-dashboard.py` 在 Issue 增改删时自动刷新）。

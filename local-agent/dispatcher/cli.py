@@ -134,6 +134,40 @@ def cmd_webhook(args):
     serve(args.port, register_defaults=not args.no_preset)
 
 
+def cmd_probe(args):
+    """脉冲式信号探测器：fire / reg / overview。"""
+    _ensure_db()
+    from dispatcher import probe as probe_mod
+    probe_cmd = getattr(args, "probe_cmd", "overview")
+    if probe_cmd == "fire":
+        ev = {
+            "event_type": args.type,
+            "source": args.source,
+            "entity": args.entity,
+            "gid": args.gid,
+            "detail": _parse_detail(args.detail),
+        }
+        report = probe_mod.fire_signal(ev, register_miss=True)
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    elif probe_cmd == "reg":
+        if args.action_type == "script":
+            action = {"type": "script", "script": args.action_key}
+        elif args.action_type == "dispatch":
+            action = {"type": "dispatch", "target_role": args.action_key or "架构·开发"}
+        else:
+            action = {"type": args.action_type}
+        pid = probe_mod.register_probe(
+            args.name, event_type=args.type or "", source=args.source or "",
+            action=action, enabled=not args.disabled,
+        )
+        print(json.dumps({"probe_id": pid, "name": args.name}, ensure_ascii=False))
+    else:
+        print(json.dumps({
+            "probes": probe_mod.list_probes(),
+            "overview": probe_mod.firing_overview(limit=args.limit),
+        }, ensure_ascii=False, indent=2, default=str))
+
+
 def cmd_host(args):
     """本地上位机辅助角色。"""
     _ensure_db()
@@ -242,6 +276,29 @@ def main():
     h_ack.add_argument("--event-id", required=True)
     h_ack.add_argument("--reject", action="store_true")
     h_ack.set_defaults(fn=cmd_host)
+
+    # 脉冲式信号探测器：signal fire / reg / overview
+    p_probe = sub.add_parser("signal", help="脉冲式信号探测器（有条件就触发，路由到脚本，不轮询）")
+    probe_sub = p_probe.add_subparsers(dest="probe_cmd")
+    p_fire = probe_sub.add_parser("fire", help="投递一个信号，命中探测器即触发一次")
+    p_fire.add_argument("--type", default="requirement")
+    p_fire.add_argument("--source", default="repo")
+    p_fire.add_argument("--entity", default="")
+    p_fire.add_argument("--gid", default="")
+    p_fire.add_argument("--detail", default="{}")
+    p_fire.set_defaults(fn=cmd_probe)
+    p_reg = probe_sub.add_parser("reg", help="注册一个探测器（触发条件+路由动作）")
+    p_reg.add_argument("name", help="探测器名")
+    p_reg.add_argument("--type", default="", help="命中的事件类型（空=任意）")
+    p_reg.add_argument("--source", default="", help="命中的事件源（空=任意）")
+    p_reg.add_argument("--action-type", default="dispatch", choices=["dispatch", "script", "emit", "handler"])
+    p_reg.add_argument("--action-key", default="", help="路由动作的键（script 路径 / target_role）")
+    p_reg.add_argument("--disabled", action="store_true")
+    p_reg.set_defaults(fn=cmd_probe)
+    p_ov2 = probe_sub.add_parser("overview", help="探测器 + 触发留痕俯视图")
+    p_ov2.add_argument("--limit", type=int, default=50)
+    p_ov2.set_defaults(fn=cmd_probe)
+    p_ov2.set_defaults(probe_cmd="overview")
 
     args = parser.parse_args()
     if not getattr(args, "cmd", None):

@@ -60,6 +60,8 @@ main:
             bash local-agent/tests/test_external_source.sh
             echo "==== 调度中枢测试（dispatcher：事件驱动自动化调度/规则引擎/Action队列/防无效护栏/驳回迭代闭环/进度上限/Web面板） ===="
             bash local-agent/tests/test_dispatcher.sh
+            echo "==== 脉冲式信号探测器测试（probe：有条件就触发/路由到脚本/不轮询/不静默失败） ===="
+            bash local-agent/tests/test_probe.sh
             echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="
             bash local-agent/tests/test_ops_sim.sh
             echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="
