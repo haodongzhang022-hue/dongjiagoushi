@@ -44,6 +44,13 @@ class LocalHostAdapter(source_mod.ExternalAdapter):
     默认 provider 不实现（返回空），供接入方注入本地数据源；提供 `emit`
     便捷方法让本地进程主动上报事件（如本地守护脚本调用）。
 
+    **脉冲式改造（对齐用户拍板：轮询不好，换脉冲式信号探测器）**：
+      - `emit` 直接把事件投递给脉冲式信号探测器 `probe.fire_signal`，
+        **事件到达即触发一次**，不再进入本地暂存队列等 poll 轮询消费；
+      - `poll` 保留为**显式单次拉取**（非持续轮询），供一次性手动扫描/外部显式调用，
+        不用于持续守护循环空转；
+      - 单源拉取失败**显式上报**（写 firing 且 note 标 error），不静默吞异常。
+
     示例：
       adapter = LocalHostAdapter(name="local_pc")
       adapter.emit({"event_type": "requirement", "entity": "本地新需求",
@@ -53,23 +60,36 @@ class LocalHostAdapter(source_mod.ExternalAdapter):
     def __init__(self, name="local_pc", local_provider=None, local_store=None):
         super().__init__(name)
         self._provider = local_provider
-        # 本地事件暂存队列（内存），供 poll 消费
+        # 本地事件暂存队列（内存）仅作为 poll 显式拉取时的**二级兜底**，
+        # 不再是主消费路径（主路径走 emit -> probe.fire_signal 事件驱动）。
         self._local_store = local_store if local_store is not None else []
 
     def emit(self, raw_event):
-        """本地进程主动上报一条事件（进入本地暂存，poll 时被消费）。"""
+        """本地进程主动上报一条事件：事件到达即触发脉冲式信号探测器，不走轮询。"""
         if isinstance(raw_event, dict):
             raw_event.setdefault("source", self.name)
-        self._local_store.append(raw_event)
+        try:
+            from . import probe as probe_mod
+            return probe_mod.fire_signal(raw_event, register_miss=True)
+        except Exception:  # noqa: BLE001 探测器不可用时兜底暂存（不丢事件）
+            self._local_store.append(raw_event)
+            return None
 
     def poll(self):
-        """轮询本地事件：消费 provider 或暂存队列，返回原始事件 list。"""
+        """显式单次拉取本地事件（非持续轮询）：消费 provider + 暂存兜底队列。
+
+        供一次性手动扫描 / 外部显式调用；不做为持续守护循环的空转轮询。
+        """
         events = []
         if self._provider:
             try:
                 events.extend(self._provider() or [])
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001 显式上报 provider 失败，不静默
+                from . import probe as probe_mod
+                probe_mod._record_firing(
+                    {"probe_id": self.name, "name": f"{self.name}.provider"},
+                    {"event_type": "source.error", "source": self.name},
+                    matched=True, ok=False, note=f"provider error: {e}")
         events.extend(self._local_store)
         self._local_store.clear()
         return events

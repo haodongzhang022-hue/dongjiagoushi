@@ -411,6 +411,56 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_extauth_src ON external_auth(source_name)",
     "CREATE INDEX IF NOT EXISTS idx_extauth_result ON external_auth(result)",
+    # ---- 25. 脉冲式信号探测器（probe · 有条件就触发，路由到脚本，不轮询）----
+    """
+    CREATE TABLE IF NOT EXISTS probe (
+        probe_id      TEXT PRIMARY KEY,         -- 探测器 id（prb-前缀 / 稳定寻址，二次注册取回同一）
+        name          TEXT DEFAULT '',          -- 探测器名（业务标识）
+        event_type    TEXT DEFAULT '',          -- 命中的事件类型（空=任意）
+        source        TEXT DEFAULT '',          -- 命中的事件源（空=任意）
+        action        TEXT DEFAULT '',          -- 处理器路由配置 JSON（script/handler/dispatch/emit）
+        enabled       INTEGER DEFAULT 1,        -- 1=启用 / 0=停用
+        priority      INTEGER DEFAULT 0,        -- 匹配优先级（值大先匹配）
+        created_at    TEXT,
+        updated_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_probe_enabled ON probe(enabled)",
+    # ---- 26. 信号触发留痕（probe_firings · 每次触发显式记录，不静默失败）----
+    """
+    CREATE TABLE IF NOT EXISTS probe_firings (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        firing_id     TEXT NOT NULL,            -- 触发记录 id（pf-前缀）
+        probe_id      TEXT DEFAULT '',          -- 命中的探测器 id
+        probe_name    TEXT DEFAULT '',          -- 命中的探测器名
+        event_id      TEXT DEFAULT '',          -- 触发它的信号/事件 id
+        event_type    TEXT DEFAULT '',          -- 信号事件类型
+        source        TEXT DEFAULT '',          -- 信号来源
+        entity        TEXT DEFAULT '',          -- 关联实体 key
+        gid           TEXT DEFAULT '',          -- 关联实体 gid
+        matched       INTEGER DEFAULT 1,        -- 是否命中
+        ok            INTEGER DEFAULT 1,        -- 触发执行是否成功（0=失败，显式上报不吞）
+        note          TEXT DEFAULT '',          -- 触发结果/失败原因
+        created_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_probe_firing_probe ON probe_firings(probe_id)",
+    "CREATE INDEX IF NOT EXISTS idx_probe_firing_ok ON probe_firings(ok)",
+    # ---- 27. 遗漏信号留痕（probe_misses · 无探测器命中的信号显式暴露，不静默吞掉）----
+    """
+    CREATE TABLE IF NOT EXISTS probe_misses (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        miss_id       TEXT NOT NULL,            -- 遗漏记录 id（pm-前缀）
+        event_id      TEXT DEFAULT '',          -- 未被处理的信号 id
+        event_type    TEXT DEFAULT '',          -- 信号事件类型
+        source        TEXT DEFAULT '',          -- 信号来源
+        entity        TEXT DEFAULT '',          -- 关联实体 key
+        gid           TEXT DEFAULT '',          -- 关联实体 gid
+        note          TEXT DEFAULT '',          -- 说明（遗漏未处理，需安排）
+        created_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_probe_miss_type ON probe_misses(event_type)",
 ]
 
 

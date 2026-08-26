@@ -112,6 +112,33 @@ webhook 轮询等），实现 `poll()` 返回一批原始事件，dispatcher 统
 | collab 协作引擎 | rejections/dispatch 记录可作实体被寻址/授权/留痕 |
 | generate-dashboard | Web 面板与静态版本看板并存（Web 优先实时，静态做历史） |
 
+### 脉冲式信号探测器（probe · 纠偏：轮询不好，换脉冲式）
+
+> 用户拍板：**轮询不好，换脉冲式的一个信号探测器——有条件就触发、路由到脚本、
+> 不多处一直轮询（轮询会静默失败，机制上就不好）。**
+
+`dispatcher/probe.py` 落地**脉冲式信号探测器**，取代"多处持续轮询"的旧范式：
+
+- **探测器（probe）** = 触发条件(matcher) + 处理器(handler/script)，注册成表；
+- **信号触发（`fire_signal`）**：收到一个信号（事件/条件满足）时**精确匹配**探测器，
+  命中即触发对应处理器**一次**——有条件就触发，无信号不空转（不轮询）；
+- **路由到脚本**：`action.type="script"` 时经 subprocess 路由执行脚本；也可
+  `handler`（callable）或 `dispatch`（路由派发给对应 agent）；
+- **不静默失败**：每次触发显式写 `probe_firings`，失败 `note` 标 error，绝不吞异常；
+  无探测器命中的信号写 `probe_misses`（遗漏未处理，显式暴露而非静默丢弃）；
+- **防无效**：复用 guard 去重护栏，同信号同探测器只触发一次。
+
+**事件驱动入口**：webhook / `host.emit` / `signal fire` 都走 `fire_signal`，
+事件到达即触发，不再靠 `poll()` 轮询消费。`LocalHostAdapter.emit` 已改为主路径事件驱动；
+`poll()` 仅作显式单次拉取，不用于持续守护循环空转。
+
+CLI：
+```bash
+python3 -m dispatcher.cli signal reg dev-req --type requirement --source local_pc --action-type dispatch --action-key "架构·产品"
+python3 -m dispatcher.cli signal fire --type requirement --source local_pc --entity "新需求"
+python3 -m dispatcher.cli signal overview      # 探测器 + 触发留痕俯视图
+```
+
 ## 五、CLI 用法
 
 ```bash
@@ -122,6 +149,9 @@ python3 -m dispatcher.cli web --port 8080      # 起 Web 可视化面板
 python3 -m dispatcher.cli overview             # 队列/驳回/统计摘要
 python3 -m dispatcher.cli reject --task tk-报表 --agent ag-报表开发 --reason "🔴必修 竞态"
                                            # 手工登记驳回并触发迭代回派
+python3 -m dispatcher.cli signal fire --type requirement --source local_pc --entity "新需求"
+                                           # 脉冲式：投递信号，命中探测器即触发
+python3 -m dispatcher.cli signal overview      # 探测器 + 触发留痕俯视图
 ```
 
 ## 六、验收（AC，可量化）
