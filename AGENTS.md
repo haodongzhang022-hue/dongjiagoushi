@@ -72,7 +72,8 @@
 - **④ 适配动态扩增 agent**：按负载扩容出来的新 agent 用 `peer.join_cohort` **加入既有 cohort**，继承共享上下文并参与同岗位交互（gid 稳定寻址不漂移）。
 - **⑤ 自动分形协同**：`fractal` 从「串行 for 计划生成器」升级为**小组内同岗位 agent 真并行执行 + 互发消息**（`peer.team_parallel_execute`），小组内仍过大可递归再分形，各小组小组长整合后统一向上交付。
 - **⑥ 收敛可观测**：`peer.cohort_view / overview` 提供编队成员 / 专长 / 消息数 / 会诊次数的俯视图，供人类 / 经理 / 哨兵监控。
-- 触发：同岗位多 agent 面向同一问题 / 专长缺口 / 卡点 / 高风险 / 疑难 / 扩增 / 自动分形即走本机制（`peer` 引擎）。
+- **⑦ 收尾闭环（自动化优先）**：会诊未收敛 → 自动进入 `collab/closure.run()` 收尾闭环——`precursor`（审核者前置助手 L1→L2→L3）→ `human_gate`（结果前置人类拍板）→ `decisions`（决策落库+动作消费）→ `sentinel/peer_guard`（同岗收敛监控），**能自决就自决、需担责就结果前置交人**，直到功能验证通过（详见 `docs/PEER_COLLAB_CLOSURE.md`）。
+- 触发：同岗位多 agent 面向同一问题 / 专长缺口 / 卡点 / 高风险 / 疑难 / 扩增 / 自动分形 / **会诊未收敛**即走本机制（`peer` 引擎 + `closure` 收尾闭环）。
 
 ### 触发强制化（仓库级固定 rules，最高优先级）
 
@@ -214,6 +215,7 @@ AGENTS.md                             # 本文件：全局协作规则
 docs/                                 # 架构文档（索引 / 路线图 / 八步模板 / Issue 版本管理）
   ├── ISSUE_MANAGEMENT.md             # Issue 声明与模块/Agent 双版本管理机制
   ├── REVIEWER_PRECURSOR.md           # 审核者前置助手·决策补全机制（3层时点+5类or分支）
+  ├── PEER_COLLAB_CLOSURE.md          # 同岗协作收尾闭环（会诊→审核者前置→人类 全自动）
   └── templates/issue-template.md     # Issue 结构化声明模板
 README.md                             # 使用说明
 ```

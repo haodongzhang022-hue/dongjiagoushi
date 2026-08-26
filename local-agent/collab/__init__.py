@@ -17,4 +17,15 @@
 同岗位多角色交互（peer collab）：
   - peer.py 补齐「同一岗位上多个 agent 面对同一个问题」的交互协议，
     对齐「默认单兵、按需补位、疑难才会诊」方向（非全员投票冗余）。
+
+收尾闭环（peer collab closure，Issue #31 缺漏 G1~G4）：
+  - decisions.py   决策落库 + 动作消费（会诊/前置/人类拍板持久化 + 驱动改道/补位/升级）
+  - precursor.py   审核者前置助手引擎（L1 内部分支→L2 外部探索→L3 交人 + ⑤自决）
+  - human_gate.py  结果前置·人类拍板（决策点叫人类 + CP 留痕，非事后背锅）
+  - closure.py     收尾闭环统一编排（会诊未收敛 → 前置 → 人类 全自动多自动一环）
+
+哨兵同岗收敛监控（sentinel.peer_guard）：对同岗协作组（cohort）量化收敛监控。
+
+新模块（peer collab 收尾闭环）按需 import，避免破坏既有依赖：
+  from collab import decisions, precursor, human_gate, closure
 """

@@ -13,9 +13,10 @@ sentinel · 监控哨兵包
   - store.py   目标进度尺(goal_meters) + 监控动作(sentinel_actions) 数据访问
   - detect.py  停滞 / 横跳 / 重复错误 判定引擎
   - engine.py  哨兵统一处置协议（track → interrupt/escalate）
+  - peer_guard.py  同岗位协作组（cohort）收敛监控（E2，复用进度尺/判定，供收尾闭环）
 
 由「架构·监控哨兵」角色（roles/sentinel.py）统一执行；规则见 docs/SENTINEL.md。
 """
 from sentinel import store, detect, engine
 
-__all__ = ["store", "detect", "engine"]
+__all__ = ["store", "detect", "engine", "peer_guard"]
