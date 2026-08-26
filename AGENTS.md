@@ -97,6 +97,31 @@
 > 派发能力全员化 ≠ 无序派发：派发有边界（职责域）、有留痕（gid + 进度尺 + 交付）、
 > 有监督（哨兵收敛判定 + 经理统一协调跨岗位）。
 
+### 自适应 @ 定位能力全员化（HandleAbility · 通用复用能力 · 固定规则）
+
+跨库 / 跨仓召唤谁，**不得写死**角色名或承载仓库（如 `youkaifaxilieagent`），因为
+触发本仓库 CodeBuddy 的可能不是该角色、org 也可能不是 `dongdongxiaozu`；且每个
+角色的权限通常只覆盖其所属仓库。已统一开发为通用能力 `HandleAbility`
+（`local-agent/handle/ability.py` + `resolver.py`），默认挂载到**所有角色基类**
+`BaseRole`——每个 agent 都能**根据当前触发它的仓库动态识别自身完整 @ 格式**，
+并在跨库协作时自动定位**目标仓库有权限角色**（详见 `docs/HANDLE_ABILITY.md`）：
+
+- **不写死**：任何 CodeBuddy 角色名 / 承载仓库 / org 一律动态解析（触发串 →
+  git remote / 环境变量探测 → 默认兜底），写死即失效。
+- **自我识别**：`self_handle()` 从会话触发串 `@org/repo(角色)` 动态识别自身完整 @
+  格式，用于身份声明 / 汇报落款，不再硬编码。
+- **跨库用目标仓库**：`resolve(target_org, target_repo, role)` 解析目标仓库有权限的
+  `@org/repo(角色)`，保证权限够用（跨库必须用目标仓库完整 @，否则角色无目标仓库权限）。
+- **同仓复用防冗余**：`is_cross()` 先检测——同仓库可复用本仓库 @，跨仓库才走完整解析。
+- **权限优先**：要动哪个仓库，就用哪个仓库里有权限的角色（CodeBuddy 兜底或该仓库
+  已注册专属角色）；拿不准给权限建议并显式暴露，不静默选择。
+- **接口**：`self_handle/identity/resolve/is_cross/codebuddy` 已挂 BaseRole，所有角色实例
+  直接可用；`capability()` 返回能力声明（含定位规则）。
+
+> 防重复兼顾：同仓库先检测能复用就不重造；跨仓库协作才走完整 @ 解析——既避免冗余
+> 召唤，又保证跨库权限足够。触发词：`@ 格式 / 跨仓库召唤 / 权限 / 写死角色名 /
+> 自适应定位 / handle`。
+
 ### 同岗位多角色交互机制（peer collab · 固定规则）
 
 
@@ -257,10 +282,15 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── PEER_COLLAB_CLOSURE.md          # 同岗协作收尾闭环（会诊→审核者前置→人类 全自动）
   ├── DISPATCH_DEPTH.md               # 分发递进深度模型（L1声明→L4工作交付，经理锁 L4）
   ├── DISPATCH_ABILITY.md             # 派发能力全员化（通用复用能力，全员可派发可接单）
+  ├── HANDLE_ABILITY.md               # 自适应 @ 定位能力（不写死角色名/跨库权限/同仓复用）
   └── templates/issue-template.md     # Issue 结构化声明模板
 local-agent/dispatch/                 # 通用派发能力包（DispatchAbility 全员能力）
   ├── ability.py                      # 通用派发能力类（L1→L4 + 接单闭环）
   └── __init__.py                     # 导出 DispatchAbility
   └── templates/issue-template.md     # Issue 结构化声明模板
+local-agent/handle/                   # 自适应 @ 定位能力包（HandleAbility 全员能力）
+  ├── resolver.py                     # 核心解析器：触发串/探测/跨同仓判定/权限建议
+  ├── ability.py                      # HandleAbility 能力类（self_handle/resolve/is_cross）
+  └── __init__.py                     # 导出 HandleAbility
 README.md                             # 使用说明
 ```

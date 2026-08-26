@@ -126,6 +126,10 @@
 │   ├── dispatch/                        # 🆕 通用派发能力包（派发工作全员化 · 可复用模块，见 docs/DISPATCH_ABILITY.md）
 │   │   ├── ability.py                   #   DispatchAbility 通用能力类（全员可派发 L1→L4 + 可接单[接单]/进度尺/交付）
 │   │   └── __init__.py                  #   导出 DispatchAbility（默认挂载到 BaseRole，所有角色具备）
+│   ├── handle/                          # 🆕 自适应 @ 定位能力包（不写死角色名/跨库权限，见 docs/HANDLE_ABILITY.md）
+│   │   ├── resolver.py                  #   核心解析器：触发串识别/仓库探测/跨同仓判定/权限建议
+│   │   ├── ability.py                   #   HandleAbility 能力类（self_handle/resolve/is_cross）
+│   │   └── __init__.py                  #   导出 HandleAbility（默认挂载到 BaseRole，所有角色具备）
 │   ├── roles.d/                         # 🆕 角色插件目录（放一个 .py 即自动加载新角色）
 │   │   └── analyst.py                   #   插件角色示例（架构·数据分析师）
 │   ├── roles/                           # 25 个角色模块（秘书/产品/总师/总师助理/经理/小组长/开发/评审/对齐/找工具/测试/数据管理员/监控哨兵 + 市场层5 + 公司化三战线7）
