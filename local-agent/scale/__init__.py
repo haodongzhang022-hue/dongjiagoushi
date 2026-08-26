@@ -9,11 +9,12 @@
   - store    按 agent 分片的状态存储（替代单文件接力卡）
   - pool     并发执行池（真并行波次，支持 2500 级并发模拟）
   - spec     团队规模/分工层级/并发度声明（与 AI 交互的入口）
-  - profile  前置流程区分（不同位置的流程模板）
+  - profile  前置流程区分（不同位置的流程模板，含秘书强制入口护栏）
+  - prescale 规模预设（澄清阶段体量/协作/风险基准锚点 + 经验方案库检索）
   - plugin   角色插件化注册（灵活增减角色的规则支撑）
 
 对外统一入口：`run_scaled_pipeline()`（见 scale/engine.py）。
 """
-from . import broker, store, pool, spec, profile, plugin
+from . import broker, store, pool, spec, profile, prescale, plugin
 
-__all__ = ["broker", "store", "pool", "spec", "profile", "plugin"]
+__all__ = ["broker", "store", "pool", "spec", "profile", "prescale", "plugin"]

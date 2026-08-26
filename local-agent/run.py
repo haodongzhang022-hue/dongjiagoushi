@@ -35,7 +35,7 @@ import relay
 from roles import list_roles
 
 # 规模伸缩层（架构升级核心）
-from scale import engine, spec, profile, plugin
+from scale import engine, spec, profile, prescale, plugin
 
 
 def main():
@@ -56,7 +56,44 @@ def main():
     parser.add_argument("--profile", default=None, help="前置流程模板：default/company/harness/acquisition/support")
     parser.add_argument("--list-profiles", action="store_true", help="列出前置流程模板")
     parser.add_argument("--concurrency", type=int, default=None, help="覆盖并发度（压测）")
+    # ---- 规模预设 + 强制入口（测试关键发现修复）----
+    parser.add_argument("--prescale", action="store_true", help="对需求做规模预设（澄清阶段基准锚点）")
+    parser.add_argument("--complexity", default=None, help="显式指定复杂度带：simple/medium/complex")
+    parser.add_argument("--guard-entry", action="store_true", help="校验强制入口（是否必须经架构·秘书）")
+    parser.add_argument("--direct-role", default=None, help="显式 @ 的角色（用于校验是否跳过秘书）")
+    parser.add_argument("--prescale-records", action="store_true", help="列出规模预设留痕记录")
     args = parser.parse_args()
+
+    if args.prescale_records:
+        recs = prescale.prescale_records()
+        if not recs:
+            print("（暂无规模预设记录）")
+        else:
+            print(f"规模预设留痕记录（共 {len(recs)} 条）：")
+            for key, rec in recs.items():
+                p = rec.get("preset", {})
+                print(f"  - [{rec.get('kind')}] {rec.get('req_key')}")
+                print(f"      → team_size={p.get('team_size')} collab={p.get('collab_plan')} "
+                      f"risk={p.get('risk_level')} source={p.get('source')}")
+        return 0
+
+    if args.guard_entry:
+        if not args.req:
+            parser.error("--guard-entry 需要 --req 需求文本")
+        r = profile.guard_entry(
+            (spec.parse(args.spec) if args.spec else {}).get("profile", "default"),
+            direct_role=args.direct_role,
+        )
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+        return 0 if r["ok"] else 2
+
+    if args.prescale:
+        if not args.req:
+            parser.error("--prescale 需要 --req 需求文本")
+        kind = (spec.parse(args.spec) if args.spec else {}).get("profile", "default")
+        pre = prescale.prescale(args.req, kind=kind, complexity_hint=args.complexity)
+        print(prescale.to_json(pre))
+        return 0
 
     if args.list_profiles:
         print("前置流程模板（不同位置不同流程）：")

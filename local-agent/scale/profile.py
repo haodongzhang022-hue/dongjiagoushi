@@ -64,6 +64,78 @@ DEFAULT_PROFILES = {
 }
 
 
+# 强制入口设定（secretary-mandatory）
+# ======================================================================
+# 测试关键发现 1：Issue#31 用户直接 @架构·产品，跳过了「架构·秘书」。
+# 修复：把「架构·秘书」设为**不可跳过的默认强制入口**。
+#
+# 语义：
+#   - 凡未经显式指定其他强制入口模板（harness 内嵌等）的需求，必须先经秘书
+#     接收、翻译、路由留痕，才可进入对应角色。
+#   - 即使角色被显式 @ 触发，也须回显「已接管自秘书路由的 X」（路由留痕）。
+#   - MANDATORY_ENTRY_ROLES：哪些入口模板强制从「架构·秘书」进入。
+#
+# 说明：harness 模板（deepseek 内嵌，无市场层直入研发）因调用方是已定角色的
+#   harness 宿主，允许跳过秘书直入产品；除此之外的模板均强制秘书入口。
+# ======================================================================
+SECRETARY_ROLE = "架构·秘书"
+
+# 强制秘书入口的模板（其余未列出的非 harness 模板默认也强制秘书）
+SECRETARY_MANDATORY_PROFILES = {"default", "company", "acquisition", "support"}
+# 允许跳过秘书（已有固定调用方/已定角色的内嵌场景）
+SECRETARY_OPTIONAL_PROFILES = {"harness"}
+
+
+def is_secretary_mandatory(profile_name):
+    """判断某 profile 是否强制「架构·秘书」为入口（不可跳过）。"""
+    return profile_name not in SECRETARY_OPTIONAL_PROFILES
+
+
+def guard_entry(spec_profile="default", direct_role=None):
+    """强制入口护栏：校验需求是否已先经秘书接收并路由留痕。
+
+    参数:
+      spec_profile: 前置流程模板名
+      direct_role: 若用户显式 @ 了某角色（绕过秘书），传入以校验
+    返回:
+      dict { ok, mandatory, entry, message, direct_role }
+      - ok=True:  已满足强制入口要求（或该 profile 本就允许跳过秘书）
+      - ok=False: 违反了强制入口要求，需先经秘书路由留痕
+    """
+    mandatory = is_secretary_mandatory(spec_profile)
+    entry = get_profile(spec_profile)["entry"] if get_profile(spec_profile) else SECRETARY_ROLE
+    if not mandatory:
+        # 允许跳过秘书的模板（harness）：直接放行
+        return {
+            "ok": True,
+            "mandatory": False,
+            "entry": entry,
+            "message": f"profile '{spec_profile}' 允许跳过秘书，入口为 {entry}。",
+            "direct_role": direct_role,
+        }
+    # 强制秘书入口模板：无论 direct_role 是谁，都必须经秘书，或回显已接管自秘书路由
+    if direct_role and direct_role != SECRETARY_ROLE:
+        return {
+            "ok": False,
+            "mandatory": True,
+            "entry": SECRETARY_ROLE,
+            "message": (
+                f"⚠ 强制入口要求：需求必须先经「架构·秘书」接收/翻译/路由留痕，"
+                f"再进入 {direct_role}。当前直接 @{direct_role} 跳过了秘书，"
+                f"违反 rules 固定入口。请先补秘书路由留痕，并回显"
+                f"『已接管自秘书路由的 {direct_role}』。"
+            ),
+            "direct_role": direct_role,
+        }
+    return {
+        "ok": True,
+        "mandatory": True,
+        "entry": SECRETARY_ROLE,
+        "message": f"入口合规：经「架构·秘书」路由（{spec_profile}）。",
+        "direct_role": direct_role,
+    }
+
+
 def list_profiles():
     """列出所有可用入口模板。"""
     return list(DEFAULT_PROFILES.keys())

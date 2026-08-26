@@ -20,7 +20,7 @@ scale 流水线是既有 orchestrator 的**规模化增强**：小规模（< LOC
 import json
 import time
 
-from . import broker, store, pool, spec, profile, plugin
+from . import broker, store, pool, spec, profile, plugin, prescale
 
 # 数据底座（数据架构升级）：规模流水线的信息互通/内容存档/进度/任务 落到数据库承载
 DATA_ENABLED = True
@@ -35,18 +35,30 @@ except Exception:  # noqa: BLE001
         DATA_ENABLED = False
 
 
-def preflight(spec_obj):
-    """前置检查：校验规模声明 + 前置路由 + 资源评估。
+def preflight(spec_obj, direct_role=None):
+    """前置检查：校验规模声明 + 强制入口 + 规模预设 + 前置路由 + 资源评估。
 
-    返回 dict: { spec, route, resource, topology }
+    参数:
+      spec_obj: 规模声明
+      direct_role: 若显式 @ 了某角色（绕过秘书），传入以校验强制入口
+    返回 dict: { spec, route, entry_guard, prescale, resource, topology }
     """
     s = spec.normalize(spec_obj)
     r = profile.route(s.get("profile", "default"))
+    # 强制入口护栏：需求必须先经「架构·秘书」接收/路由留痕，不可跳过
+    guard = profile.guard_entry(s.get("profile", "default"), direct_role=direct_role)
+    # 规模预设：澄清阶段先按体量预设，作为经理增量修正的基准锚点
+    pre = prescale.prescale(
+        s.get("req", "") or s.get("request", "") or "",
+        kind=r["profile"],
+    )
     est = spec.resource_estimate(s)
     topo = spec.build_topology(s)
     return {
         "spec": s,
         "route": r,
+        "entry_guard": guard,
+        "prescale": pre,
         "resource": est,
         "topology": topo,
         "leaf_agents": spec.leaf_count(topo),
@@ -67,16 +79,37 @@ def run_scaled(req, spec_obj=None, concurrency_override=None, verbose=True):
     s = spec.normalize(spec_obj or {})
     if concurrency_override:
         s["concurrency"] = concurrency_override
+    s["req"] = req  # 把需求文本挂到 spec，供 prescale 使用
 
-    # 1. 前置流程区分
+    # 1. 前置流程区分 + 强制入口护栏（不可跳过秘书）
     route = profile.route(s.get("profile", "default"))
+    guard = profile.guard_entry(s.get("profile", "default"), direct_role=s.get("direct_role"))
+    # 1b. 规模预设（澄清阶段基准锚点）——第 1 次定团队规模
+    pre = prescale.prescale(req, kind=route["profile"])
+    # 1c. 架构明确后，架构·经理按架构做增量修正——第 2 次定团队规模
+    #     基于澄清预设 scale_factor 增量调整，不做从零规划（adjust_by_architect）
+    arch_factor = float(s.get("arch_scale_factor", 1.0))
+    risk_override = s.get("risk_override") or None
+    pre_adj = prescale.adjust_by_architect(pre, {
+        "scale_factor": arch_factor,
+        "risk_override": risk_override,
+    })
+    # 实际团队规模 = max(用户声明, 经理增量修正) —— 修正值作为最低基准锚点
+    adjusted_size = max(s["team_size"], pre_adj["team_size"])
+    if adjusted_size != s["team_size"]:
+        s["team_size"] = adjusted_size
+        s["concurrency"] = max(1, adjusted_size) if s["concurrency"] == arch_factor or s.get("_auto_conc") else s["concurrency"]
     # 2. 加载角色（内置 + 插件）
     reg = plugin.merged_registry()
     # 按 profile / spec 过滤角色
     role_names = plugin.filter_by_spec(list(reg.keys()), s.get("roles", []))
     if verbose:
         print(f"[scale] 前置路由: {route['description']}")
-        print(f"[scale] 团队规模: {s['team_size']} 个 agent, "
+        print(f"[scale] 强制入口护栏: {guard['message']}")
+        print(f"[scale] 第1次定规模(澄清预设): {pre['team_size']} 人 / {pre['collab_plan']} / 风险 {pre['risk_level']} (source={pre['source']})")
+        print(f"[scale] 第2次定规模(经理增量修正): {pre_adj['team_size']} 人 / 风险 {pre_adj['risk_level']} "
+              f"(adjusted_by_architect={pre_adj.get('adjusted_by_architect')}, scale_factor={arch_factor})")
+        print(f"[scale] 实际团队规模(取max): {s['team_size']} 个 agent, "
               f"分工层级 {s['levels']}, 并发 {s['concurrency']}")
         print(f"[scale] 可用角色 {len(role_names)} 个: {role_names[:8]}{'...' if len(role_names)>8 else ''}")
 
@@ -171,6 +204,16 @@ def run_scaled(req, spec_obj=None, concurrency_override=None, verbose=True):
         "scaled": True,
         "spec": s,
         "route": route,
+        "entry_guard": guard,
+        "prescale": pre,
+        "prescale_adjusted": pre_adj,   # 第 2 次定团队规模（经理按架构增量修正）
+        "scale_twice": {
+            "first": {"team_size": pre["team_size"], "collab": pre["collab_plan"],
+                       "risk": pre["risk_level"], "stage": "澄清预设"},
+            "second": {"team_size": pre_adj["team_size"], "risk": pre_adj["risk_level"],
+                        "stage": "经理按架构增量修正", "adjusted": pre_adj.get("adjusted_by_architect")},
+            "final_team_size": s["team_size"],
+        },
         "resource": est,
         "topology": {"leaf_agents": leaf},
         "cards_created": len(cards),

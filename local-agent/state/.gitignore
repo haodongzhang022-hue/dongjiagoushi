@@ -1,3 +1,7 @@
 # 接力卡与分片状态不纳入版本库（运行时产物）
 relay_card.json
 agent_*.json
+# 规模预设留痕记录不纳入版本库（运行时产物）
+prescale_records.json
+# 规模测试运行产生的分片状态卡（运行时产物，不纳入版本库）
+*_1.json

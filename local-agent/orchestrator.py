@@ -18,6 +18,8 @@ import relay
 from graph import DagEngine, build_dag_from_steps
 from llm import get_backend
 from roles import get_role
+# 2 次定团队规模：澄清阶段 prescale + 架构明确后经理 adjust_by_architect
+from scale import prescale as _prescale
 
 TEAM_YAML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "team.yaml")
 
@@ -43,12 +45,16 @@ def _run_one(role, req, llm, card, node):
 
 
 def _fractal_develop(plan, req, llm, card, team):
-    """分形扩展：把开发任务拆为多小组并行，各小组开发后由小组长整合测试。
+    """分形扩展：把开发任务拆为多小组并行，各小组内同岗位开发真并行+互发消息，
+    小组长整合测试后统一向上交付。
 
-    当前为结构骨架实现：真实任务拆解依赖架构·经理的输出与 LLM；
-    此处生成分形计划并逐小组执行，输出整合摘要（占位后端下不伪造真实代码）。
+    升级：接入同岗位协作（collab.peer）：
+      - 用 peer.auto_fractal 建各小组的同岗位 cohort（差异化编队，默认单兵、按需补位）；
+      - 小组内开发 agent 真并行执行且互发消息消费彼此产出（不再是串行 for 循环）；
+      - 支持按信号（专长缺口/卡点/高风险）触发差异化补位。
     """
     import fractal
+    from collab import peer
 
     plan_text = fractal.describe_plan(plan)
     relay.log(card, f"[分形] 开发按规模拆为 {plan['team_count']} 个小组并行")
@@ -56,18 +62,45 @@ def _fractal_develop(plan, req, llm, card, team):
     dev_role = get_role("架构·开发")
     lead_role = get_role("架构·小组长")
     lines = [plan_text]
+
+    # 为每个小组建同岗位 cohort（差异化编队）
+    cohorts = {}
     for t in plan["teams"]:
+        cid = peer.spawn_cohort(
+            "架构·开发",
+            lead_agent=f"dev-{t['team_id']}-lead",
+            size=len(t["tasks"]),
+            mode="differentiated",
+            req=req,
+            space=f"team.{t['team_id']}",
+        )
+        cohorts[t["team_id"]] = cid
+
+    for t in plan["teams"]:
+        cid = cohorts[t["team_id"]]
         sub_req = f"{req}\n（分形小组 {t['team_id']}，任务：{t['tasks']}）"
-        out = dev_role.run(llm, sub_req) if dev_role else f"[无开发角色] {t['team_id']}"
-        lines.append(f"--- {t['team_id']} 开发输出 ---\n{out}")
+        # 小组内同岗位开发真并行 + 互发消息（不再是串行 for）
+        agents = peer.cohort_members(cid)
+        if len(agents) <= 1:
+            # 单兵：主战直做（默认单兵，防冗余）
+            out = dev_role.run(llm, sub_req) if dev_role else f"[无开发角色] {t['team_id']}"
+            lines.append(f"--- {t['team_id']} 开发输出 ---\n{out}")
+        else:
+            # 多 agent：差异化并行，各自负责不同专长切面，产出通过 peer_message 交互
+            def _dev(aid, task, fb):
+                return (dev_role.run(llm, f"{sub_req}\n（agent {aid} 负责）")
+                        if dev_role else f"[无开发角色] {aid}")
+            team_out = peer.team_parallel_execute(cid, t["tasks"], _dev)
+            for aid, out in team_out.items():
+                lines.append(f"--- {t['team_id']}·{aid} 开发输出 ---\n{out}")
         # 小组长对单小组做整合（测试+整合摘要）
         if lead_role:
             integ = lead_role.run(
-                llm, f"整合并测试小组 {t['team_id']} 的交付：{out}"
+                llm, f"整合并测试小组 {t['team_id']} 的交付：{lines[-1]}"
             )
             lines.append(f"--- {t['team_id']} 整合 ---\n{integ}")
     card["output"] = "\n".join(lines)
-    relay.log(card, "[分形] 多小组开发+整合完成，统一向上交付")
+    relay.log(card, "[分形] 多小组同岗并行开发+整合完成，统一向上交付")
     return card["output"]
 
 
@@ -81,6 +114,9 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
 
     card = relay.new_card(req, first_step="secretary", first_role="架构·秘书")
     report = {"req": req, "dag": False, "steps": []}
+
+    # 2 次定团队规模·留痕：秘书澄清阶段第 1 次预设，经理按架构第 2 次增量修正
+    scale_twice = {}
 
     # ---- 构建 DAG ----
     if use_dag and "dag" in team.get("pipeline", {}):
@@ -111,6 +147,43 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
                 card["current_progress"] = _step_label(nd)
                 relay.save(card)
                 print(f"\n▶ [DAG波次] {_step_label(nd)}")
+
+                # ---- 2 次定团队规模·秘书澄清阶段第 1 次预设 ----
+                if nid == "secretary" or nd["role"] == "架构·秘书":
+                    pre = _prescale.prescale(req, kind="default")
+                    scale_twice["first"] = {
+                        "stage": "秘书澄清阶段",
+                        "team_size": pre["team_size"],
+                        "collab": pre["collab_plan"],
+                        "risk": pre["risk_level"],
+                        "source": pre["source"],
+                    }
+                    print(f"   [第1次定规模] 秘书澄清预设: team_size={pre['team_size']} "
+                          f"collab={pre['collab_plan']} risk={pre['risk_level']} (source={pre['source']})")
+
+                # ---- 2 次定团队规模·经理按架构第 2 次增量修正 ----
+                if nid == "plan" or nd["role"] == "架构·经理":
+                    base = scale_twice.get("first")
+                    if base:
+                        # 经理按架构评估的增量因子：默认取澄清预设，可用 --arch-scale-factor 覆盖
+                        adj = _prescale.adjust_by_architect(
+                            {
+                                "team_size": base["team_size"],
+                                "collab_plan": base["collab"],
+                                "risk_level": base["risk"],
+                            },
+                            {"scale_factor": float(getattr(nd, "scale_factor", 1.0))
+                             if hasattr(nd, "scale_factor") else 1.0},
+                        )
+                        scale_twice["second"] = {
+                            "stage": "经理按架构增量修正",
+                            "team_size": adj["team_size"],
+                            "risk": adj["risk_level"],
+                            "adjusted": adj.get("adjusted_by_architect"),
+                            "scale_factor": 1.0,
+                        }
+                        print(f"   [第2次定规模] 经理增量修正: team_size={adj['team_size']} "
+                              f"risk={adj['risk_level']} (adjusted={adj.get('adjusted_by_architect')})")
 
                 # 分形开发节点
                 if nd.get("fractal") and nd["fractal"].get("enabled") and nd["role"] == "架构·开发":
@@ -145,6 +218,7 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
         card["status"] = "done"
         card["output"] = f"交付完成：{req}"
         relay.save(card)
+        report["scale_twice"] = scale_twice
         return report
 
     # ---- 回退：线性 steps（兼容旧配置/旧调用）----
@@ -162,6 +236,32 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
             card["current_progress"] = _step_label(nd)
             relay.save(card)
             print(f"\n▶ {_step_label(nd)}")
+
+            # ---- 2 次定团队规模（线性回退同样接入）----
+            if nid == "secretary" or nd["role"] == "架构·秘书":
+                _pre = _prescale.prescale(req, kind="default")
+                scale_twice["first"] = {
+                    "stage": "秘书澄清阶段", "team_size": _pre["team_size"],
+                    "collab": _pre["collab_plan"], "risk": _pre["risk_level"],
+                    "source": _pre["source"],
+                }
+                print(f"   [第1次定规模] 秘书澄清预设: team_size={_pre['team_size']} "
+                      f"collab={_pre['collab_plan']} risk={_pre['risk_level']} (source={_pre['source']})")
+            if nid == "plan" or nd["role"] == "架构·经理":
+                if scale_twice.get("first"):
+                    _base = scale_twice["first"]
+                    _adj = _prescale.adjust_by_architect(
+                        {"team_size": _base["team_size"], "collab_plan": _base["collab"],
+                         "risk_level": _base["risk"]},
+                        {"scale_factor": 1.0},
+                    )
+                    scale_twice["second"] = {
+                        "stage": "经理按架构增量修正", "team_size": _adj["team_size"],
+                        "risk": _adj["risk_level"], "adjusted": _adj.get("adjusted_by_architect"),
+                        "scale_factor": 1.0,
+                    }
+                    print(f"   [第2次定规模] 经理增量修正: team_size={_adj['team_size']} "
+                          f"risk={_adj['risk_level']} (adjusted={_adj.get('adjusted_by_architect')})")
 
             if nd["role"] == "编排引擎":
                 card["output"] = f"交付完成：{req}"
