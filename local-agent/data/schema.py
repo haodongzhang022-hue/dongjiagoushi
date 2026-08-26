@@ -335,6 +335,82 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_taskprs_task ON task_prs(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_taskprs_agent ON task_prs(agent_id)",
+    # ---- 21. 事件路由日志（dispatcher · 事件→路由→派发→守卫拦截 全链路留痕）----
+    """
+    CREATE TABLE IF NOT EXISTS dispatch (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id      TEXT NOT NULL,            -- 事件唯一 id（ev-前缀，同事件去重键）
+        event_type    TEXT DEFAULT '',          -- issue.open/issue.update/rejection/comment/...
+        source        TEXT DEFAULT '',          -- 事件源（本仓库/外部适配器名）
+        entity        TEXT DEFAULT '',          -- 关联实体 key（issue 标题/任务 gid/驳回 key）
+        gid           TEXT DEFAULT '',          -- 全局唯一寻址（task/issue/agent gid）
+        matched_rule  TEXT DEFAULT '',          -- 命中的触发规则名
+        target_role   TEXT DEFAULT '',          -- 路由目标角色
+        target_agent  TEXT DEFAULT '',          -- 派发的目标 agent gid
+        status        TEXT DEFAULT 'queued',    -- queued/released/hold/rejected/skipped/dispatched
+        gate          TEXT DEFAULT 'auto',      -- auto=自动放行 / hold=人工审核闸门
+        dedup_key     TEXT DEFAULT '',          -- 去重键（同 key 只派一次）
+        note          TEXT DEFAULT '',          -- 说明（守卫拦截原因/派发说明）
+        created_at    TEXT,
+        updated_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_dispatch_event ON dispatch(event_id)",
+    "CREATE INDEX IF NOT EXISTS idx_dispatch_status ON dispatch(status)",
+    "CREATE INDEX IF NOT EXISTS idx_dispatch_gid ON dispatch(gid)",
+    # ---- 22. 驳回迭代表（rejections · 驳回非终点，进入再次迭代闭环）----
+    """
+    CREATE TABLE IF NOT EXISTS rejections (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        rejection_id  TEXT NOT NULL,            -- 驳回记录 id（rj-前缀）
+        task_id       TEXT NOT NULL,            -- 被驳回的任务 gid
+        gid           TEXT NOT NULL,            -- 唯一确定的负责实体 gid（精准路由目标）
+        agent_id      TEXT NOT NULL,            -- 负责该任务的 agent gid（按 gid 精准回派）
+        reason        TEXT DEFAULT '',          -- 驳回原因（评审 🔴必修 / 测试 🔴阻塞 / 哨兵上报）
+        level         TEXT DEFAULT 'must',      -- must/block/other
+        iteration     INTEGER DEFAULT 1,        -- 迭代次数（驳回非终点，+1 再回环）
+        status        TEXT DEFAULT 'pending',   -- pending/reassigned/reworked/approved/blocked
+        assigned_to   TEXT DEFAULT '',          -- 派发的目标 agent gid（改进重提）
+        monitor       INTEGER DEFAULT 1,        -- 是否纳入监控（哨兵联动）
+        created_at    TEXT,
+        updated_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_rejection_task ON rejections(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_rejection_gid ON rejections(gid)",
+    "CREATE INDEX IF NOT EXISTS idx_rejection_status ON rejections(status)",
+    # ---- 23. 外部事件源登记表（security · 秘钥 + IP 白名单，多终端独立授权）----
+    """
+    CREATE TABLE IF NOT EXISTS external_sources (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        src_id        TEXT NOT NULL,            -- 外部源 id（ext-前缀，全局唯一）
+        name          TEXT NOT NULL,            -- 外部源名（local_pc/phone/vm/sandbox/host_upper）
+        api_key       TEXT DEFAULT '',          -- 该源独立秘钥（安全：key 认证）
+        ip_whitelist  TEXT DEFAULT '',          -- 允许的来源 IP/CIDR（逗号分隔；空=deny-all）
+        kind          TEXT DEFAULT 'webhook',   -- webhook/poll/host
+        meta          TEXT DEFAULT '{}',        -- 扩展元信息（备注/对接地址）
+        enabled       INTEGER DEFAULT 1,        -- 1=启用 / 0=停用
+        created_at    TEXT,
+        updated_at    TEXT,
+        UNIQUE(name)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_extsrc_name ON external_sources(name)",
+    # ---- 24. 外部源认证审计表（security · 每次认证成功/失败留痕，供面板俯瞰）----
+    """
+    CREATE TABLE IF NOT EXISTS external_auth (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        auth_id       TEXT NOT NULL,            -- 认证记录 id（au-前缀）
+        source_name   TEXT DEFAULT '',          -- 外部源名
+        client_ip     TEXT DEFAULT '',          -- 来源 IP
+        result        TEXT DEFAULT '',          -- allow=通过 / deny=拦截
+        reason        TEXT DEFAULT '',          -- 拦截原因（未登记/停用/秘钥不匹配/IP不在白名单）
+        api_key_masked TEXT DEFAULT '',         -- 秘钥打码留痕（不落明文，安全红线）
+        created_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_extauth_src ON external_auth(source_name)",
+    "CREATE INDEX IF NOT EXISTS idx_extauth_result ON external_auth(result)",
 ]
 
 

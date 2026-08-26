@@ -32,6 +32,9 @@ DEFAULTS = {
     "oscillation_net_threshold": 0.05,  # 净推进占 goal_total 的比例下限
     # 重复错误：同一 agent 在同一任务提交相同 note/类别动作 >= n 次
     "repeated_error_n": 3,
+    # 进度上限停滞：最近 n 条完成度相对峰值均未提升（< eps）→ 最大完成度封顶
+    "progress_cap_n": 3,
+    "progress_cap_eps": 0.0005,
 }
 
 
@@ -99,6 +102,44 @@ def _is_error_note(note):
     return any(m in note for m in _ERROR_MARKERS)
 
 
+def detect_progress_cap_stall(series, params):
+    """进度上限停滞：最大完成度不再提升（用户核心诉求：进度无法进步）。
+
+    完成度 = current / goal_total，取序列已达峰值 max_ratio；
+    若最近 progress_cap_n 条刻度的完成度相对峰值均未提升（< progress_cap_eps），
+    即判定「最大完成度不能提升」——任务卡在无法再进步的状态（不是一句循环，
+    而是整套行为在开发中被同一瓶颈卡住，进度无法进步）。
+
+    返回 (hit, detail)，detail 含峰值、最近完成度、未完成部分占比。
+    """
+    n = params.get("progress_cap_n", 3)
+    eps = params.get("progress_cap_eps", 0.0005)
+    if len(series) < n + 1:
+        return False, {}
+    # 归一化完成度序列
+    ratios = []
+    for s in series:
+        gt = float(s.get("goal_total", 0.0)) or 1.0
+        ratios.append(float(s.get("current", 0.0)) / gt)
+    peak = max(ratios)
+    tail = ratios[-n:]
+    no_gain = all(peak - r <= eps for r in tail)
+    # 区分「先有进展再封顶」与「从头停滞」：进度上限停滞必须此前出现过真实进步
+    # （至少一个早于 tail 的点 ratio < peak - eps），否则归入普通 stagnation。
+    prior = ratios[:-n] if len(ratios) > n else []
+    had_progress = any(peak - r > eps for r in prior)
+    if no_gain and had_progress:
+        # 未完成部分占比 = 1 - 峰值（标记还没开发成功的部分）
+        unfinished = 1.0 - peak
+        return True, {
+            "peak": round(peak, 4),
+            "last_ratios": [round(r, 4) for r in tail],
+            "unfinished_ratio": round(unfinished, 4),
+            "note": f"最大完成度封顶于 {round(peak*100,1)}%，未完成部分 {round(unfinished*100,1)}%"
+        }
+    return False, {}
+
+
 def detect_repeated_error(series, params):
     """重复错误：同一 agent 在同一任务反复提交**同一失败动作**（note 显式标错）>= n 次。
 
@@ -138,17 +179,22 @@ def analyze(series, goal_total=1.0, agent_id="", task_id="", params=None):
     detail = {}
     cur_dist = dist[-1] if dist else 0.0
 
-    stag, stag_step = detect_stagnation(dist, params)
-    if stag and len(dist) >= params["stagnation_n"] + 1:
-        hit, reason, detail = True, "stagnation", {"max_abs_step": stag_step}
+    # 进度上限停滞优先判定（用户核心诉求：进度无法进步 / 最大完成度不能提升）
+    cap, cap_d = detect_progress_cap_stall(series, params)
+    if cap:
+        hit, reason, detail = True, "progress_cap_stall", cap_d
     else:
-        osc, osc_d = detect_oscillation(dist, params, goal_total)
-        if osc:
-            hit, reason, detail = True, "oscillation", osc_d
+        stag, stag_step = detect_stagnation(dist, params)
+        if stag and len(dist) >= params["stagnation_n"] + 1:
+            hit, reason, detail = True, "stagnation", {"max_abs_step": stag_step}
         else:
-            rep, note = detect_repeated_error(series, params)
-            if rep:
-                hit, reason, detail = True, "repeated_error", {"repeated_note": note}
+            osc, osc_d = detect_oscillation(dist, params, goal_total)
+            if osc:
+                hit, reason, detail = True, "oscillation", osc_d
+            else:
+                rep, note = detect_repeated_error(series, params)
+                if rep:
+                    hit, reason, detail = True, "repeated_error", {"repeated_note": note}
 
     # 级别：已对该任务触发过 2 级（此前上报过架构师助理）→ 本次直接 2 级；
     # 否则 1 级（打断 + 重规划）。
