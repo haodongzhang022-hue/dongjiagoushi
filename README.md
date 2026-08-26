@@ -117,8 +117,11 @@
 │   │   └── host_helper.py               #   🆕 本地上位机辅助角色（预设功能，之后接入真实上位机）
 │   ├── topology/                        # 🆕 拓扑对比框架（多线路对比执行/指标累积/长时间判断，见 docs/TOPOLOGY_COMPARISON.md）
 │   │   ├── topologies.py                  #   3 条拓扑线路定义（linear/dag/event）
-│   │   ├── metrics.py                     #   对比指标收集与持久化
-│   │   └── runner.py                      #   对比执行器 CLI（同一需求跑不同拓扑）
+│   │   ├── metrics.py                     #   全维度对比指标收集与持久化（并发/速度/完成度/bug/token/文件/agent/资源）
+│   │   ├── resource.py                    #   🆕 资源消耗监控（CPU/内存/网络/文件，零第三方依赖）
+│   │   ├── tasksource.py                  #   🆕 真实任务源（架构完未分配/经理分工未触发的真实待办）
+│   │   ├── runner.py                      #   基础对比执行器 CLI（同一需求跑不同拓扑）
+│   │   └── benchmark.py                   #   🆕 增强AB隔离对比执行器（真实任务+全维度+资源监控）
 │   ├── dispatch_engine.py              # 🆕 经理四层分发深度引擎（L1声明→L2分发→L3触发→L3.5接单→L4工作交付，验收口径=走到L4，见 docs/DISPATCH_DEPTH.md）
 │   ├── dispatch/                        # 🆕 通用派发能力包（派发工作全员化 · 可复用模块，见 docs/DISPATCH_ABILITY.md）
 │   │   ├── ability.py                   #   DispatchAbility 通用能力类（全员可派发 L1→L4 + 可接单[接单]/进度尺/交付）

@@ -66,6 +66,8 @@ main:
             bash local-agent/tests/test_ops_sim.sh
             echo "==== 拓扑对比测试（topology-comparison：多线路对比执行/指标累积/长时间判断） ===="
             bash local-agent/tests/test_topology_comparison.sh
+            echo "==== 真实任务AB隔离对比测试（benchmark-ab：真实未完成任务的拓扑对比/9维度/资源监控/隔离） ===="
+            bash local-agent/tests/test_benchmark_ab.sh
             echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="
             bash tests/test_company_model.sh
             echo "==== 端到端小需求测试（mini-e2e：小需求端到端信号灯） ===="
