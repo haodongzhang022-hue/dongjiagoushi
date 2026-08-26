@@ -52,6 +52,8 @@ main:
             bash local-agent/tests/test_peer_collab.sh
             echo "==== 同岗协作收尾闭环测试（peer closure：会诊→审核者前置助手→人类拍板 全自动闭环） ===="
             bash local-agent/tests/test_peer_closure.sh
+            echo "==== 统一审查处置标签测试（disposition：适合合并/推进/改bug/调研/交人/会诊/投票，统一全加+稳定触发+按标签自动化流程） ===="
+            bash local-agent/tests/test_disposition.sh
             echo "==== 监控哨兵测试（sentinel：目标收敛监控/无效努力判定/打断重规划/上报局部调整） ===="
             bash local-agent/tests/test_sentinel.sh
             echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="

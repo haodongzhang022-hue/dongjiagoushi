@@ -131,6 +131,31 @@ contains "generate-dashboard 支持框架健康度" "$(cat scripts/generate-dash
 contains "DASHBOARD 已含框架健康度章节" "$(cat docs/DASHBOARD.md)" "框架健康度"
 
 # ============================================================
+# 五、统一审查处置标签：文档与实现一致性
+# ============================================================
+echo ""
+echo "▶ 五、统一审查处置标签（Review Disposition）一致性"
+
+file_exists "REVIEW_DISPOSITION.md 存在" "docs/REVIEW_DISPOSITION.md"
+contains "AGENTS.md 含统一审查处置标签规则" "$(cat AGENTS.md)" "统一审查处置标签"
+
+# 引擎（唯一规范来源）应存在，且 spec 覆盖七种标签
+OUT=$($PY -c "import sys; sys.path.insert(0,'local-agent'); from collab import disposition; print(','.join(disposition.spec()['labels']))" 2>/dev/null)
+check "disposition.spec 七种标签" "merge,proceed,fix_bug,research,human,consult,vote" "$OUT"
+
+# 评审输出契约强制绑定 disposition
+contains "评审输出契约含 disposition" "$(cat local-agent/roles/reviewer.py)" "disposition"
+contains "评审提示声明缺标签即评审未完成" "$(cat local-agent/roles/reviewer.py)" "缺标签即评审未完成"
+
+# 文档标签表与引擎 spec 一致（每行含规范标签名）
+contains "文档含 merge 标签" "$(cat docs/REVIEW_DISPOSITION.md)" "merge"
+contains "文档含 vote 标签" "$(cat docs/REVIEW_DISPOSITION.md)" "vote"
+contains "文档含 consult 标签" "$(cat docs/REVIEW_DISPOSITION.md)" "consult"
+
+# 测试护栏存在
+file_exists "disposition 测试脚本存在" "local-agent/tests/test_disposition.sh"
+
+# ============================================================
 # 汇总（信号灯）
 # ============================================================
 echo ""
