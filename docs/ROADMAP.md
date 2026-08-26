@@ -44,6 +44,7 @@
 | M35 | 测试环境依赖加固 | ⏳ | local-agent + functional-links 测试在云 CI 全绿；沙盒/云环境差异文档化（Issue #8，T4） |
 | M36 | 看板/进度可视化持续维护 | ✅ | DASHBOARD.md 随 issue 变更自动刷新（Issue #7，T5） |
 
+| M37 | 分发递进深度模型（L1→L4）| ⏳ | 四层递进分发深度（L1声明→L2分发→L3触发接单→L4工作交付），经理锁 L4，接单回执/开工/进度尺/交付闭环 + 权限模型（见 Issue #33）|
 ## 架构八步模板
 
 见 [docs/templates/architect-report.md](templates/architect-report.md)，每次做真实架构设计时按此模板产出。
@@ -96,6 +97,7 @@ dashboard 模块（init）
 - **T5 看板/进度可视化持续维护**（🟡P2 / #7 / 架构·数据管理员）：DASHBOARD.md 随 issue 变更自动刷新（M36，已落地）。
 
 > 依赖：`T1 → T2`；`T3/T4/T5` 相互独立可并行（DAG 非直线）。各任务带接力卡，仓库 agent 经 `@` 按 `[触发:角色]` 接单，成果按小组层层上报、看板自动可视化。
+> **派活深度（Issue #33 拍板）**：派活须走「四层递进分发深度模型」（L1声明→L2分发→L3触发接单→L4工作交付），经理目标锁 L4——不只声明/分配/触发，要接单后**真正继续工作**（接单回执→开工→进度尺推进→交付）。详见 docs/DISPATCH_DEPTH.md。
 > 环境提示：本沙盒缺 `python3` + cnb 云凭据，local-agent 12 项 + functional-links 13 项 + doc-consistency 2 项失败为**环境限制非代码缺陷**，须在云 CI 验证。
 ## 可视化看板
 
@@ -122,4 +124,5 @@ dashboard 模块（init）
 | 调度中枢·事件驱动自动化调度 | `local-agent/dispatcher/`（source/rules/queue/router/guard/reject/webui/engine/cli）+ `local-agent/tests/test_dispatcher.sh` + `docs/DISPATCHER.md` |
 | 外部事件源接入·多终端协同+安全 | `local-agent/dispatcher/`（security/webhook/sources/host_helper）+ `local-agent/tests/test_external_source.sh` + `docs/EXTERNAL_SOURCE.md` |
 | 测试信号灯/脚本 | `tests/test_architect_system.sh`（静态断言） + `tests/test_functional_links.sh`（数据获取/看板呈现/RAG读取 真实功能链路） + `tests/test_relay_workflow.sh`（接力卡/回转/打断/三层触发 可复现） + `tests/test_memory_store.sh`（经验记忆库+语义向量触发+双后端兼容 可复现） + `tests/test_doc_consistency.sh`（文档-实现一致性 防漂移） |
+| 分发递进深度模型（L1→L4）| 四层递进分发深度 + 权限模型 + 经理锁 L4 判定标准（见 `docs/DISPATCH_DEPTH.md`）|
 | 验收清单 | `docs/templates/acceptance-checklist.md` |
