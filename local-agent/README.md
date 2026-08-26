@@ -111,10 +111,21 @@ LLM_CLI="ollama run llama3" python3 run.py --pipeline full --req "XX"
 - **回转**：下游发现 🔴必修/🔴阻塞 → 接力卡写 `revert_to`，编排引擎回退重跑。
 - **打断**：中断在 `current_progress` 留续跑点，`--resume` 续跑。
 
+## 同岗位多角色交互（peer collab）
+
+补齐「同一岗位上多个 agent 面对同一个问题」的交互协议（引擎 `collab/peer.py`）：
+
+- **默认单兵**：同岗位默认 1 个主战 agent 直做，防冗余；
+- **差异化按需补位**：专长缺口/卡点/加量信号 → 差异 agent 按触发时机补位（`decide_action`）；
+- **专家会诊**：高风险/疑难/对错难辨信号 → 各自从专长角度给结论+留理由，收敛判定（`expert_consult`）；
+- **适配动态扩容**：扩容新 agent 用 `join_cohort` 加入既有编队，继承共享上下文；
+- **自动分形协同**：`fractal` 从串行 for 升级为小组内同岗 agent 真并行+互发消息（`team_parallel_execute`）。
+
 ## 测试
 
 ```bash
 bash local-agent/tests/test_local_agent.sh
+bash local-agent/tests/test_peer_collab.sh
 ```
 
-验证：CLI 入口 / 单角色触发 / 团队流水线编排 / 接力卡 / 续跑 / 角色清单齐全。
+验证：CLI 入口 / 单角色触发 / 团队流水线编排 / 接力卡 / 续跑 / 角色清单齐全 / 同岗位多角色交互。

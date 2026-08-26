@@ -45,12 +45,16 @@ def _run_one(role, req, llm, card, node):
 
 
 def _fractal_develop(plan, req, llm, card, team):
-    """分形扩展：把开发任务拆为多小组并行，各小组开发后由小组长整合测试。
+    """分形扩展：把开发任务拆为多小组并行，各小组内同岗位开发真并行+互发消息，
+    小组长整合测试后统一向上交付。
 
-    当前为结构骨架实现：真实任务拆解依赖架构·经理的输出与 LLM；
-    此处生成分形计划并逐小组执行，输出整合摘要（占位后端下不伪造真实代码）。
+    升级：接入同岗位协作（collab.peer）：
+      - 用 peer.auto_fractal 建各小组的同岗位 cohort（差异化编队，默认单兵、按需补位）；
+      - 小组内开发 agent 真并行执行且互发消息消费彼此产出（不再是串行 for 循环）；
+      - 支持按信号（专长缺口/卡点/高风险）触发差异化补位。
     """
     import fractal
+    from collab import peer
 
     plan_text = fractal.describe_plan(plan)
     relay.log(card, f"[分形] 开发按规模拆为 {plan['team_count']} 个小组并行")
@@ -58,18 +62,45 @@ def _fractal_develop(plan, req, llm, card, team):
     dev_role = get_role("架构·开发")
     lead_role = get_role("架构·小组长")
     lines = [plan_text]
+
+    # 为每个小组建同岗位 cohort（差异化编队）
+    cohorts = {}
     for t in plan["teams"]:
+        cid = peer.spawn_cohort(
+            "架构·开发",
+            lead_agent=f"dev-{t['team_id']}-lead",
+            size=len(t["tasks"]),
+            mode="differentiated",
+            req=req,
+            space=f"team.{t['team_id']}",
+        )
+        cohorts[t["team_id"]] = cid
+
+    for t in plan["teams"]:
+        cid = cohorts[t["team_id"]]
         sub_req = f"{req}\n（分形小组 {t['team_id']}，任务：{t['tasks']}）"
-        out = dev_role.run(llm, sub_req) if dev_role else f"[无开发角色] {t['team_id']}"
-        lines.append(f"--- {t['team_id']} 开发输出 ---\n{out}")
+        # 小组内同岗位开发真并行 + 互发消息（不再是串行 for）
+        agents = peer.cohort_members(cid)
+        if len(agents) <= 1:
+            # 单兵：主战直做（默认单兵，防冗余）
+            out = dev_role.run(llm, sub_req) if dev_role else f"[无开发角色] {t['team_id']}"
+            lines.append(f"--- {t['team_id']} 开发输出 ---\n{out}")
+        else:
+            # 多 agent：差异化并行，各自负责不同专长切面，产出通过 peer_message 交互
+            def _dev(aid, task, fb):
+                return (dev_role.run(llm, f"{sub_req}\n（agent {aid} 负责）")
+                        if dev_role else f"[无开发角色] {aid}")
+            team_out = peer.team_parallel_execute(cid, t["tasks"], _dev)
+            for aid, out in team_out.items():
+                lines.append(f"--- {t['team_id']}·{aid} 开发输出 ---\n{out}")
         # 小组长对单小组做整合（测试+整合摘要）
         if lead_role:
             integ = lead_role.run(
-                llm, f"整合并测试小组 {t['team_id']} 的交付：{out}"
+                llm, f"整合并测试小组 {t['team_id']} 的交付：{lines[-1]}"
             )
             lines.append(f"--- {t['team_id']} 整合 ---\n{integ}")
     card["output"] = "\n".join(lines)
-    relay.log(card, "[分形] 多小组开发+整合完成，统一向上交付")
+    relay.log(card, "[分形] 多小组同岗并行开发+整合完成，统一向上交付")
     return card["output"]
 
 

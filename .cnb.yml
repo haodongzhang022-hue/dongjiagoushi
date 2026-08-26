@@ -48,6 +48,8 @@ main:
             bash local-agent/tests/test_data_layer.sh
             echo "==== 协作运作机制测试（collab：实体解耦+loc寻址+移交/层级空间/ACL权限/版本冲突检测/小组提交整合） ===="
             bash local-agent/tests/test_collab.sh
+            echo "==== 同岗位多角色交互测试（peer collab：cohort编队/触发门控/专家会诊/适配扩容/自动分形协同） ===="
+            bash local-agent/tests/test_peer_collab.sh
             echo "==== 监控哨兵测试（sentinel：目标收敛监控/无效努力判定/打断重规划/上报局部调整） ===="
             bash local-agent/tests/test_sentinel.sh
             echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="
