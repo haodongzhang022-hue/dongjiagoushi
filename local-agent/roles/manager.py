@@ -68,6 +68,7 @@ result = dispatch_engine.dispatch(repo, assignments, enable_issue=True)
 任务按功能域投入任务池（ops.enqueue_task），按负载动态扩容 agent，非直接固定并发；
 所有 agent/任务用全局唯一 gid（二次触发仍同一负责人/任务）。
 **每个派发任务须显式标注深度层级（L1/L2/L3/L4），目标锁 L4**，不以"分了"为终点。
+派活验收口径=走到 **L4**——"不止有负责的 agent，还有在继续工作的 agent 在工作"。
 **权限意识**：触发接单需对应角色有 @ 权限（`@dongdongxiaozu/dongjiagoushi (架构·经理)`
 或 CodeBuddy 兜底 / 专用派发 agent），权限不足导致派发断裂须显式上报，不静默失败。
 
@@ -84,7 +85,7 @@ result = dispatch_engine.dispatch(repo, assignments, enable_issue=True)
                 "角色分配(assignment: 负责人/输入/输出/依赖/优先级)",
                 "调度编排(schedule: 并行/串行/关键路径)",
                 "进度跟踪(status: todo/in_progress/blocked/done + 阻塞升级)",
-                "分发深度层级(L1声明/L2分发/L3触发/L4工作，目标锁L4，不以分了为终点)",
+                "分发深度层级(L1声明/L2分发/L3触发/L4工作，目标锁L4，验收口径=走到L4，不以分了为终点)",
                 "接单回执确认([接单] + 开工 + 进度尺推进 + 交付)",
             ],
         }

@@ -60,6 +60,8 @@ main:
             bash local-agent/tests/test_dispatcher.sh
             echo "==== 脉冲式信号探测器测试（probe：有条件就触发/路由到脚本/不轮询/不静默失败） ===="
             bash local-agent/tests/test_probe.sh
+            echo "==== 经理四层分发深度引擎测试（dispatch-engine：L1声明→L2分发→L3触发→L3.5接单→L4工作交付，验收口径=走到L4） ===="
+            bash local-agent/tests/test_dispatch_engine.sh
             echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="
             bash local-agent/tests/test_ops_sim.sh
             echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="

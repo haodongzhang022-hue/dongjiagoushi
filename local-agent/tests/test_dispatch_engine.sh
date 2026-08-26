@@ -215,4 +215,38 @@ assert hasattr(manager, "dispatch_depth")
 print("  ✅ 经理角色：SYSTEM_PROMPT 含四层深度模型 + dispatch() 方法可用 通过")
 EOF
 
+echo "===== [dispatch·engine] 8. 差异化补强：深度俯瞰 + L4 action 路由 + 防跳层 ====="
+$PY - <<'EOF'
+import os, tempfile
+from data import admin
+admin.init()
+import dispatch_engine as de
+
+# 8a 深度俯瞰：能按深度分组，区分「只声明/只分发」与「已工作」
+de.declare_assignments([{"task_key": "补强A", "title": "A", "role": "架构·开发", "domain": "d1"}])
+de.dispatch_assign("", [{"task_key": "补强B", "title": "B", "role": "架构·开发", "domain": "d2"}])
+ov = de.dispatch_depth_overview()
+assert ov["total_tasks"] >= 2, ov
+assert ov["by_depth"]["L2_分发"] >= 1, ov["by_depth"]
+print(f"  ✅ 深度俯瞰 by_depth={ov['by_depth']} 可区分深度")
+
+# 8b L4 action 路由执行 script（接单后真的在干活）
+sc = os.path.join(tempfile.gettempdir(), "engine_extra_test.sh")
+open(sc, "w").write("#!/bin/bash\necho ENGINE_EXTRA_RAN\n")
+os.chmod(sc, 0o755)
+a = de.dispatch_assign("", [{"task_key": "补强路由", "title": "路由", "role": "架构·开发", "domain": "rt"}])[0]
+started = de.dispatch_start([{**a, "action": {"type": "script", "path": sc}}])
+ar = started[0]["action_result"]
+assert ar["status"] == "ok" and "ENGINE_EXTRA_RAN" in ar["note"], ar
+print(f"  ✅ L4 action 路由执行脚本：{ar['status']}")
+
+# 8c 防跳层校验函数：未达前置深度显式报错
+try:
+    de._require_level("补强任务", 2, 1)
+    raise SystemExit("FAIL: 未达深度不应放行")
+except ValueError:
+    pass
+print("  ✅ 防跳层：未达前置深度显式报错")
+EOF
+
 echo "===== [dispatch·engine] ALL PASS ====="

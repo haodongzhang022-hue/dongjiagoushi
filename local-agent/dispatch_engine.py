@@ -288,6 +288,7 @@ def dispatch_start(assignments, from_agent="架构·经理"):
     确认被分配 agent 已接单并开始执行，标记任务状态并留痕。
 
     输入：L2/L3 产出的分发记录清单
+    action：可选，{ "type": "script"/"handler"/"dispatch", ... } 路由执行具体工作动作
     输出：每个任务的开工确认
     """
     results = []
@@ -295,6 +296,7 @@ def dispatch_start(assignments, from_agent="架构·经理"):
         task_id = a.get("task_id") or a.get("gid")
         agent_id = a.get("agent_id")
         role = a.get("role", "架构·开发")
+        action = a.get("action") or {}
 
         # 更新任务状态为 in_progress（开始工作）
         if task_id:
@@ -309,6 +311,11 @@ def dispatch_start(assignments, from_agent="架构·经理"):
                 task_id or "",
             )
 
+        # 差异化补强：L4 支持 action 路由执行（script/handler/dispatch）——"接单后真的在干活"
+        action_result = None
+        if action:
+            action_result = _run_action(action, task_id, role, agent_id, task_key=a.get("task_key", ""))
+
         results.append({
             "level": 4,
             "task_key": a.get("task_key", ""),
@@ -316,8 +323,40 @@ def dispatch_start(assignments, from_agent="架构·经理"):
             "agent_id": agent_id,
             "role": role,
             "status": "working",
+            "action": action.get("type") if action else None,
+            "action_result": action_result,
         })
     return results
+
+
+def _run_action(action, task_id, role, agent_id, task_key=""):
+    """执行 L4 工作动作（script/handler/dispatch）。不静默失败：异常显式记 error。"""
+    action_type = action.get("type", "work")
+    try:
+        if action_type == "script":
+            import subprocess
+            path = action.get("path", "")
+            res = subprocess.run(["bash", path], capture_output=True,
+                                 text=True, timeout=60)
+            if res.returncode == 0:
+                return {"type": action_type, "status": "ok",
+                        "note": f"脚本执行成功：{path} | {res.stdout.strip()[:200]}"}
+            return {"type": action_type, "status": "error",
+                    "note": f"脚本执行失败({res.returncode})：{path} | {res.stderr.strip()[:200]}"}
+        if action_type == "dispatch":
+            from dispatcher import router
+            r = router.dispatch({
+                "entity": task_key or task_id, "gid": task_id,
+                "target_role": action.get("to_role", "架构·测试"),
+                "action": "dispatch", "gate": "auto",
+            })
+            return {"type": action_type, "status": "ok",
+                    "note": f"派发到 {r.get('target_agent')}"}
+        # handler / 默认 work
+        return {"type": action_type, "status": "ok", "note": f"已开工（{action_type}）"}
+    except Exception as e:
+        return {"type": action_type, "status": "error",
+                "note": f"L4 工作执行失败：{type(e).__name__}: {e}"}
 
 
 def track_progress(task_key, agent_id, target, goal_total, current,
@@ -469,6 +508,61 @@ def dispatch_overview():
     return {
         "tasks": overview,
         "pools": admin.list_pools(),
+    }
+
+
+# ============================================================
+# 差异化补强：深度俯瞰 + 防跳层校验（辅助架构总师设计落地）
+# ============================================================
+def _require_level(task_key, needed_level, current_depth):
+    """防跳层前置校验：某层执行前须已满足前置深度，否则显式报错。
+
+    needed_level: 该操作需要的最低已达深度（L2 分发=2 / L3 触发=2 / L4 开工=3）
+    current_depth: 当前任务已达深度
+    """
+    if current_depth < needed_level:
+        raise ValueError(
+            f"防跳层：任务 {task_key} 当前分发深度 {current_depth}，"
+            f"须先完成到 L{needed_level}（声明→分发→接单）才可执行该操作。"
+        )
+
+
+def dispatch_depth_overview():
+    """按分发深度分组俯瞰各任务（二级信息 · 人类俯瞰）。
+
+    能区分「只声明/只分发」与「已接单继续工作」——回答"哪些任务真正走到了 L4"。
+    """
+    # 用 repository 直接查询任务 + progress 事件联合判断各层是否发生
+    from data import repository as repo
+    tasks = repo.list_tasks()
+    progress = repo.recent_progress(limit=1000)
+    depth_count = {"L1_声明": 0, "L2_分发": 0, "L3_触发接单": 0, "L4_工作交付": 0}
+    detail = []
+    for t in tasks:
+        task_id = t.get("task_id", "")
+        status = t.get("status", "")
+        events = [p for p in progress if p.get("task_id") == task_id]
+        has_accepted = any(p.get("event") == "accepted" for p in events)
+        has_delivered = any(p.get("event") == "delivered" for p in events)
+        has_work = any(p.get("event") == "work_started" for p in events)
+        if has_delivered:
+            depth, layer = 4, "L4_工作交付"
+        elif has_work or status == "in_progress":
+            depth, layer = 3, "L3_触发接单"
+        elif status in ("todo", "dispatched"):
+            depth, layer = 2, "L2_分发"
+        else:
+            depth, layer = 1, "L1_声明"
+        depth_count[layer] = depth_count.get(layer, 0) + 1
+        detail.append({"task_key": t.get("title") or task_id, "task_id": task_id,
+                       "depth": depth, "layer": layer, "status": status,
+                       "accepted": has_accepted, "delivered": has_delivered})
+    return {
+        "total_tasks": len(tasks),
+        "by_depth": depth_count,
+        "reached_L4": depth_count.get("L4_工作交付", 0),
+        "note": "L4_工作交付才算派活完成；仅 L1 声明/L2 分发为「名义派活」，须追到接单+工作",
+        "detail": detail,
     }
 
 

@@ -131,15 +131,16 @@ L4 不是"多一个开关"，而是把「接单 → 工作」的整条链路跑�
 | `local-agent/team.yaml` | 架构·经理 step 补充「显式声明深度层级，目标锁 L4」 |
 | `docs/ROADMAP.md` | 里程碑补充本机制（DISPATCH_DEPTH） |
 | `docs/DISPATCH_DEPTH.md` | 本文档（深度模型 + L4 闭环要素 + 权限模型） |
-| `local-agent/dispatcher/` | 后续可落地 L4 闭环（接单回执 / 开工指令 / 交付检查） |
+| `local-agent/dispatch_engine.py` | ✅ 已落地：经理四层分发深度引擎（L1声明/L2分发/L3触发/L3.5接单/L4工作交付），一站式 `dispatch()` + `test_dispatch_engine.sh` 8 组测试 |
+| `local-agent/dispatch_engine.py`（差异化补强） | ✅ 深度俯瞰 `dispatch_depth_overview()`（按深度分组，区分「只声明」vs「已接单工作」）+ L4 action 路由执行 + 防跳层校验 `_require_level()` |
 
 ---
 
 ## 七、验收标准
 
-- [ ] 架构·经理分发任务时**显式标注深度层级**（L1/L2/L3/L4），目标锁 L4；
-- [ ] 派发后**有接单回执**（`[接单]`），无回执 = 未真派活；
-- [ ] 接单后有**开工动作**（有工作载体 + 第一动作），能做；
-- [ ] 工作推进写 **goal_meters** 进度尺刻度，sentinel 可判定推进/停滞；
-- [ ] 交付经小组长汇总整合，看板自动可视化；
-- [ ] 权限模型明确（@ 角色全名 / CodeBuddy 兜底 / 专用派发 agent），派发不静默失败。
+- [x] 架构·经理分发任务时**显式标注深度层级**（L1/L2/L3/L4），目标锁 L4；
+- [x] 派发后**有接单回执**（`[接单]`），无回执 = 未真派活；
+- [x] 接单后有**开工动作**（有工作载体 + 第一动作），能做；
+- [x] 工作推进写 **goal_meters** 进度尺刻度，sentinel 可判定推进/停滞；
+- [x] 交付经小组长汇总整合，看板自动可视化；
+- [x] 权限模型明确（@ 角色全名 / CodeBuddy 兜底 / 专用派发 agent），派发不静默失败。

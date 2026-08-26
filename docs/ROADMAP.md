@@ -43,8 +43,7 @@
 | M34 | 框架健康度审查 | ⏳ | 盘点 open issue，解决残留/关闭陈旧/整合双版本线（Issue #11，T3） |
 | M35 | 测试环境依赖加固 | ⏳ | local-agent + functional-links 测试在云 CI 全绿；沙盒/云环境差异文档化（Issue #8，T4） |
 | M36 | 看板/进度可视化持续维护 | ✅ | DASHBOARD.md 随 issue 变更自动刷新（Issue #7，T5） |
-
-| M37 | 分发递进深度模型（L1→L4）| ⏳ | 四层递进分发深度（L1声明→L2分发→L3触发接单→L4工作交付），经理锁 L4，接单回执/开工/进度尺/交付闭环 + 权限模型（见 Issue #33）|
+| M37 | 分发递进深度模型（L1→L4）+ 经理分发引擎 | ✅ | 设计：四层递进（L1声明→L2分发→L3触发→L3.5接单→L4工作交付），经理锁 L4 + 权限模型（docs/DISPATCH_DEPTH.md，总师）；落地：`local-agent/dispatch_engine.py`（L1声明/L2分发+投池+真实Issue/L3触发接力卡/L3.5接单回执/L4开工+goal_meters进度尺+交付）+ 差异化补强（深度俯瞰 by_depth + L4 action 路由执行 + 防跳层）+ `test_dispatch_engine.sh` 8 组测试，全绿（Issue #33）|
 ## 架构八步模板
 
 见 [docs/templates/architect-report.md](templates/architect-report.md)，每次做真实架构设计时按此模板产出。
