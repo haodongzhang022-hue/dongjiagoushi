@@ -140,6 +140,28 @@ def run_one_topology(req_key, req, topology_id, use_llm=True):
 
             # ③ pending 已经更新为仍未触发的节点
 
+    elif strategy in ("hybrid", "scatter"):
+        # 混合调度 / 零散一窝蜂：按 phase 分组执行
+        #   hybrid:  central(中央调控·内部先吃核心) → scramble(余下一窝蜂抢单·全并行) → quality(收口)
+        #   scatter: confirm(架构师确认无架构) → swarm(全部一窝蜂并行) → quality(收口)
+        phases = []
+        seen = set()
+        for n in nodes:
+            ph = n.get("phase", "swarm")
+            if ph not in seen:
+                seen.add(ph)
+                phases.append(ph)
+        waves_used = len(phases)
+        for ph in phases:
+            batch = [n for n in nodes if n.get("phase", "swarm") == ph]
+            for n in batch:
+                steps += 1
+                output = _run_node(n, req, use_llm=use_llm)
+                if _is_revert(output):
+                    reverts += 1
+                if _is_block(output):
+                    blocks += 1
+
     elapsed = time.time() - start
 
     # 计算指标

@@ -48,7 +48,7 @@ from topology.resource import ResourceMonitor, snapshot_files
 # ------------------------------------------------------------
 # 节点执行（真实逻辑 + 可注入 bug/完成度）
 # ------------------------------------------------------------
-def _exec_node(node, req, work_dir, use_llm=True, concurrency=1):
+def _exec_node(node, req, work_dir, use_llm=True, concurrency=1, bug_seed=0):
     """执行单个节点，返回 (output_str, node_meta)。
 
     node_meta 记录该节点的 token 估算、产出文件数、是否产生 bug 信号。
@@ -74,7 +74,11 @@ def _exec_node(node, req, work_dir, use_llm=True, concurrency=1):
         # 模拟输出：token ≈ 输出字符数/3 × 上下文系数，bug 按节点风险因子（不依赖外部库）
         text = f"[模拟执行] {role} 处理 '{req}' 完成，节点 {node_id}"
         token_est = max(1, int(len(text) // 3 * ctx_factor))
-        bug = 1 if ("develop" in node_id and len(req) % 7 == 0) else 0
+        # bug 按节点规模产生差异：抢单/一窝蜂节点越多、序号越大越容易暴露缺陷
+        # bug 判定基于 role 含"开发"（覆盖 develop/scramble/scatter/core_dev 等开发节点），
+        # 随 bug_seed 累积：规模越大（抢单/一窝蜂子任务越多），暴露缺陷越多
+        is_dev = ("develop" in node_id) or ("开发" in role)
+        bug = 1 if (is_dev and bug_seed > 0 and bug_seed % 5 == 0) else 0
         return text, {"token": token_est, "files": 1, "bug": bug}
 
     try:
@@ -82,7 +86,8 @@ def _exec_node(node, req, work_dir, use_llm=True, concurrency=1):
         llm = get_backend()
         result = llm.generate(f"你是{role}，请处理：{req}。任务：{action}")
         token_est = max(1, int(len(result) // 3 * ctx_factor))
-        bug = 1 if ("develop" in node_id and ("Bug" in result or "缺陷" in result)) else 0
+        is_dev = ("develop" in node_id) or ("开发" in role)
+        bug = 1 if (is_dev and ("Bug" in result or "缺陷" in result)) else 0
         return result, {"token": token_est, "files": 1, "bug": bug}
     except Exception as e:
         return f"[执行异常] {e}", {"token": 1, "files": 1, "bug": 0}
@@ -101,7 +106,7 @@ def _is_block(output):
 # ------------------------------------------------------------
 # 单拓扑单任务执行（含资源监控 + 全维度采集）
 # ------------------------------------------------------------
-def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None):
+def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None, scale=1):
     """在指定拓扑上跑一个真实任务，采集全维度指标（含资源消耗）。"""
     from topology import topologies
 
@@ -121,6 +126,52 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None):
             os.remove(fp)
         elif os.path.isdir(fp):
             shutil.rmtree(fp, ignore_errors=True)
+
+    def _id_of(n):
+        # 由节点 id 推导稳定整数序号（用于 bug 差异性）
+        # 对缩放的复制节点（如 scramble_1-1-2），累加全部数字段，保证每份唯一
+        import re as _re
+        nid = str(n.get("id", ""))
+        nums = _re.findall(r'\d+', nid)
+        if nums:
+            return sum(int(x) for x in nums)
+        # 无数字的开发节点（linear/dag 单 develop）给固定 seed，保留基线缺陷能力
+        if "develop" in nid:
+            return 5
+        return 0
+
+    # 任务规模放大：scale>1 时，把 hybrid 的抢单节点 / scatter 的一窝蜂节点复制放大，
+    # 让「余下子任务一窝蜂瓜分」的并行差异在更大规模上显现（避免任务太小差异被忽略）。
+    def _scale_nodes(node_list, scale):
+        if scale <= 1:
+            return list(node_list)
+        scaled = []
+        scramble_seq = 0
+        scatter_seq = 0
+        for n in node_list:
+            nid = str(n.get("id", ""))
+            if nid.startswith("scramble_"):
+                scramble_seq += 1
+                base = nid.split("_")[-1]
+                # 首份保留原始，多份按 scale 复制并编号
+                for k in range(scale):
+                    idx = f"{base}-{scramble_seq}-{k+1}" if k > 0 else base
+                    cp = dict(n)
+                    cp["id"] = f"scramble_{idx}"
+                    scaled.append(cp)
+            elif nid.startswith("scatter_"):
+                scatter_seq += 1
+                base = nid.split("_")[-1]
+                for k in range(scale):
+                    idx = f"{base}-{scatter_seq}-{k+1}" if k > 0 else base
+                    cp = dict(n)
+                    cp["id"] = f"scatter_{idx}"
+                    scaled.append(cp)
+            else:
+                scaled.append(dict(n))
+        return scaled
+
+    nodes = _scale_nodes(nodes, scale)
 
     # 资源监控（绑定隔离目录）
     rm = ResourceMonitor(work_dir=work_dir).start()
@@ -145,7 +196,7 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None):
             steps += 1
             agents_used.add(n.get("role", "编排引擎"))
             out, meta = _exec_node(n, req, work_dir, use_llm=use_llm,
-                                    concurrency=active)
+                                    concurrency=active, bug_seed=_id_of(n))
             tokens += meta.get("token", 0)
             files += meta.get("files", 0)
             bugs += meta.get("bug", 0)
@@ -171,6 +222,23 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None):
             waves_used = len(waves)
             for wave in waves:
                 _run_batch([engine.nodes[nid] for nid in wave], 0)
+
+    elif strategy in ("hybrid", "scatter"):
+        # 混合调度 / 零散一窝蜂：按 phase 分组执行。
+        #   hybrid:  central(中央调控·内部先吃核心) → scramble(余下一窝蜂抢单·全并行) → quality(收口)
+        #   scatter: confirm(架构师确认无架构) → swarm(全部一窝蜂并行) → quality(收口)
+        phases = []
+        seen = set()
+        for n in nodes:
+            ph = n.get("phase", "swarm")
+            if ph not in seen:
+                seen.add(ph)
+                phases.append(ph)
+        waves_used = len(phases)
+        for ph in phases:
+            # 同一 phase 的节点全部并行（一窝蜂/瓜分）
+            batch = [n for n in nodes if n.get("phase", "swarm") == ph]
+            _run_batch(batch, 0)
 
     elif strategy == "event":
         events = {"user_request": True}
@@ -281,7 +349,7 @@ def _safe(s):
 # ------------------------------------------------------------
 # 顶层：跑真实任务 AB 对比
 # ------------------------------------------------------------
-def run_bench(tasks, topology_ids=None, use_llm=True, rounds=1):
+def run_bench(tasks, topology_ids=None, use_llm=True, rounds=1, scale=1):
     """在多个真实任务上做 AB 隔离对比。"""
     from topology import topologies
     if not topology_ids:
@@ -292,6 +360,7 @@ def run_bench(tasks, topology_ids=None, use_llm=True, rounds=1):
     print(f"  对比拓扑(AB组): {', '.join(topology_ids)}")
     print(f"  轮次: {rounds}")
     print(f"  LLM: {'启用' if use_llm else '模拟（无LLM，token按字符估算）'}")
+    print(f"  规模: {scale}x（抢单/一窝蜂节点放大，让并行差异显现）")
     print()
 
     for round_idx in range(1, rounds + 1):
@@ -302,7 +371,7 @@ def run_bench(tasks, topology_ids=None, use_llm=True, rounds=1):
             req_key = task.get("task_id", req[:30])
             print(f"  ⚙️  任务[{task.get('stage')}]: {task.get('title')}")
             for tid in topology_ids:
-                m = run_one_bench(req_key, req, tid, use_llm=use_llm)
+                m = run_one_bench(req_key, req, tid, use_llm=use_llm, scale=scale)
                 metrics.record_run(req_key, tid, m)
             if rounds == 1:
                 _print_ab_table(task, req_key, topology_ids)
@@ -345,6 +414,23 @@ def _print_ab_table(task, req_key, topology_ids):
         print(f"  | {label:<12} | " + " | ".join(f"{v:<8}" for v in vals) + " |")
 
 
+def _print_topos():
+    """列出全部可对比拓扑及适用任务性质（二级信息）。"""
+    from topology import topologies
+    print("🧩 可对比拓扑线路（拓扑对比基准）")
+    for t in topologies.list_topologies():
+        suit = t.get("suitable", "all")
+        suit_label = {"architected": "架构化任务", "scattered": "零散任务", "all": "通用"}.get(suit, suit)
+        print(f"  - {t['id']:<8} [{t['name']}]  {t['description']}")
+        print(f"      适用: {suit_label} | 节点数: {t['node_count']}")
+    print()
+    print("用法：")
+    print("  # 架构化任务（对比 linear/dag/hybrid）")
+    print("  python3 local-agent/topology/benchmark.py --task all --suit architected --scale 3")
+    print("  # 零散任务（对比 linear/scatter）")
+    print("  python3 local-agent/topology/benchmark.py --task all --suit scattered --scale 3")
+
+
 # ------------------------------------------------------------
 # CLI
 # ------------------------------------------------------------
@@ -358,8 +444,14 @@ def main():
     parser.add_argument("--list-tasks", action="store_true", help="列出真实任务")
     parser.add_argument("--summary", action="store_true", help="全维度汇总")
     parser.add_argument("--compare", default=None, help="查看某需求对比")
+    parser.add_argument("--scale", type=int, default=1, help="任务规模放大倍数（≥1，放大抢单/一窝蜂节点让差异显现）")
+    parser.add_argument("--suit", default=None, help="按任务性质差分：architected(架构化走hybrid) / scattered(零散走scatter)")
+    parser.add_argument("--list-topos", action="store_true", help="列出全部可对比拓扑及适用任务性质")
     args = parser.parse_args()
 
+    if args.list_topos:
+        _print_topos()
+        return
     if args.list_tasks:
         print(tasksource.show_tasks())
         return
@@ -380,11 +472,14 @@ def main():
         return
 
     # 选择真实任务
-    if args.task.startswith("stage:"):
+    if args.task.startswith("suit:"):
+        suit = args.task.split(":", 1)[1]
+        tasks = tasksource.list_real_tasks(suit_filter=suit)
+    elif args.task.startswith("stage:"):
         stage = args.task.split(":", 1)[1]
         tasks = tasksource.list_real_tasks(stage_filter=stage)
     elif args.task == "all":
-        tasks = tasksource.list_real_tasks()
+        tasks = tasksource.list_real_tasks(suit_filter=args.suit)
     else:
         tasks = [t for t in tasksource.list_real_tasks()
                  if t.get("task_id") == args.task]
@@ -400,8 +495,17 @@ def main():
     topology_ids = None
     if args.topologies:
         topology_ids = [t.strip() for t in args.topologies.split(",")]
+    elif args.suit:
+        # 按任务性质差分自动选拓扑
+        if args.suit == "architected":
+            topology_ids = ["linear", "dag", "hybrid"]
+        elif args.suit == "scattered":
+            topology_ids = ["linear", "scatter"]
+        else:
+            print(f"未知 --suit: {args.suit}，可选 architected/scattered")
+            return
 
-    run_bench(tasks, topology_ids, use_llm=not args.no_llm, rounds=args.rounds)
+    run_bench(tasks, topology_ids, use_llm=not args.no_llm, rounds=args.rounds, scale=args.scale)
 
 
 if __name__ == "__main__":

@@ -80,6 +80,7 @@ SAMPLE_TASKS = [
         "assignee": "架构·经理",
         "detail": "经理已按 DAG 分工（plan→lead→develop 分形），但未触发小组长细化与开发开工，"
                   "未生成对应小组 Issue 与接力卡。",
+        "suit": "architected",
     },
     {
         "title": "市场获客分层通用基建落地（工具/数据/渠道/客服/销售 五层）",
@@ -89,6 +90,7 @@ SAMPLE_TASKS = [
         "status": "todo",
         "assignee": "",
         "detail": "架构·总师已给出市场分层方案，但尚未分配对应角色执行，任务停在架构完未分配阶段。",
+        "suit": "architected",
     },
     {
         "title": "审核者前置助手 3 层时点接入总师决策链路",
@@ -98,6 +100,7 @@ SAMPLE_TASKS = [
         "status": "todo",
         "assignee": "架构·审核前置助手",
         "detail": "已分工给审核者前置助手，但未触发其 L1/L2/L3 决策补全工作。",
+        "suit": "architected",
     },
     {
         "title": "2500 并发池弹性伸缩（按积压任务数扩容/缩容 agent）",
@@ -107,11 +110,22 @@ SAMPLE_TASKS = [
         "status": "todo",
         "assignee": "",
         "detail": "架构已明确功能域任务池+按负载伸缩方案，未分配数据管理员/引擎角色落地。",
+        "suit": "architected",
+    },
+    {
+        "title": "文案/示例/文档链接补全（零散常规补全）",
+        "task_id": "tpl-scattered-tidbits",
+        "stage": "assigned_untriggered",
+        "source": "sample",
+        "status": "todo",
+        "assignee": "",
+        "detail": "零散常规任务：补全示例、修复笔误、完善文档链接等，无复杂架构，适合架构师确认后直接一窝蜂瓜分解决。",
+        "suit": "scattered",
     },
 ]
 
 
-def list_real_tasks(include_done=False, stage_filter=None):
+def list_real_tasks(include_done=False, stage_filter=None, suit_filter=None):
     """返回真实未完成任务列表。可只取某阶段。"""
     tasks = _try_load_data_tasks()
     if not tasks:
@@ -120,6 +134,8 @@ def list_real_tasks(include_done=False, stage_filter=None):
         tasks = [t for t in tasks if t.get("stage") != "done"]
     if stage_filter:
         tasks = [t for t in tasks if t.get("stage") == stage_filter]
+    if suit_filter:
+        tasks = [t for t in tasks if t.get("suit") == suit_filter]
     return tasks
 
 
@@ -145,7 +161,8 @@ def show_tasks(stage_filter=None):
     lines.append("")
     for i, t in enumerate(tasks, 1):
         lines.append(f"  {i}. [{t.get('stage')}] {t.get('title')} "
-                     f"(task_id={t.get('task_id')}, assignee={t.get('assignee') or '未分配'})")
+                     f"(task_id={t.get('task_id')}, suit={t.get('suit') or '-'}, "
+                     f"assignee={t.get('assignee') or '未分配'})")
     return "\n".join(lines)
 
 

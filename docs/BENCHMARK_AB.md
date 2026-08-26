@@ -105,3 +105,50 @@ python3 local-agent/topology/benchmark.py --compare "<task_id>"
 
 > 框架验证在沙盒 `--no-llm` 模式跑通（调度逻辑 + 全维度采集正确）；
 > 真实 LLM 效果对比在云 CI / 有凭据环境补跑，届时网络/内存/token 反映真实值。
+
+---
+
+## 8. 混合调度拓扑（Issue #41 优化 · 中央调控 + 一窝蜂抢单）
+
+> 承接用户补充诉求：*"event 不一定非得提前开工然后返工，可以是前面架构和设计还是之前方式，架构然后分工，预先分工之后，余下的被这样快速瓜分，相当于中央调控，企业内部先吃好的，下面丢外部抢单一样一窝蜂解决和补全……或者如果没有架构，就是常规的零散任务，直接架构师确认没什么复杂架构，适合一窝蜂解决，就直接往下丢。"*
+
+据此新增 **2 条拓扑线路**，按**任务性质差分**：
+
+| 拓扑 | 适用任务性质 | 核心语义 | 阶段 |
+|------|------------|---------|------|
+| `hybrid` 混合调度·中央调控 | 架构化任务 | **前段中央调控**（架构→分工，企业内部先吃核心）+ **后段一窝蜂抢单**（预先分工后，余下子任务像"外部抢单"一样同时丢出、全部并行解决补全） | central → scramble → quality |
+| `scatter` 零散·一窝蜂 | 零散任务 | 架构师快速确认"无复杂架构"→ **直接往下丢**，所有子任务一窝蜂并行解决补全 | confirm → swarm → quality |
+
+### 设计要点
+- **不依赖"提前开工+返工"**：hybrid 前段保持既有架构→分工方式（企业内先吃核心/高价值），不靠返工来体现差异；
+- **余下一窝蜂抢单**：架构确定 + 预先分工后，余下子任务同时丢出，全部并行、各自补全——这是"中央调控"与"外部抢单"的结合；
+- **差分处理**：架构化任务走 `hybrid`，无架构的零散任务走 `scatter`，两种模型结合但按任务性质**实际差分**分开。
+
+### 使用（规模可调，让差异显现）
+
+```bash
+# 列出全部拓扑及适用任务性质
+python3 local-agent/topology/benchmark.py --list-topos
+
+# 架构化任务：对比 linear/dag/hybrid（scale 放大抢单节点，并发/token/文件差异清晰）
+python3 local-agent/topology/benchmark.py --task suit:architected --suit architected --topologies linear,dag,hybrid --scale 3
+
+# 零散任务：对比 linear/scatter
+python3 local-agent/topology/benchmark.py --task suit:scattered --suit scattered --topologies linear,scatter --scale 3
+```
+
+### `--scale` 规模放大
+- 早期对比差异被忽略的根因是**任务节点固定（11 节点）、token/文件/agent 恒定**，差异维度全为 0 或不稳定；
+- `--scale N` 会把 hybrid 的抢单节点 / scatter 的一窝蜂节点按 N 倍复制放大，让**一窝蜂瓜分的并行优势（高并发/少波次/多文件/token 累积）与缺陷暴露（抢单子任务越多 bug 越多）在更大规模上清晰显现**；
+- 对比结果（scale=5）示例：
+
+| 维度 | linear | dag | hybrid |
+|------|--------|-----|--------|
+| 最大并发 | 1 | 3 | **40** |
+| 总步骤 | 11 | 11 | **49** |
+| 并行波次 | 11 | 9 | **3** |
+| token | 468 | 498 | **10717** |
+| bug数 | 1 | 1 | **7** |
+| 文件数 | 22 | 22 | **66** |
+
+> `linear`/`dag` 不放大节点，规模不变；`hybrid`/`scatter` 放大抢单/一窝蜂节点，规模越大差异越明显。
