@@ -481,6 +481,43 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_cache_stats_agent ON cache_stats(agent)",
     "CREATE INDEX IF NOT EXISTS idx_cache_stats_layer ON cache_stats(layer)",
+    # ---- 29. 标签管理（labels · 标签记录，实体打标/查询/审批全链路留痕）----
+    """
+    CREATE TABLE IF NOT EXISTS labels (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        label_id      TEXT NOT NULL,            -- 标签记录 id（lb-前缀）
+        entity        TEXT NOT NULL,            -- 关联实体 key（issue-12 / task gid / pr-x）
+        label_key     TEXT NOT NULL,            -- 规范标签 key（in_progress / done / p0..p9...）
+        value         TEXT DEFAULT '',          -- 标签值（进度百分比 progress_pct 等）
+        operator      TEXT DEFAULT '',          -- 操作者（一线直接打标 / 审批通过落标）
+        action        TEXT DEFAULT 'apply',     -- apply=打标 / remove=去标 / refresh=刷值
+        source        TEXT DEFAULT 'direct',    -- direct=一线直接 / proposal=提议审批 / auto=事件自动
+        note          TEXT DEFAULT '',          -- 说明
+        ts            TEXT,
+        UNIQUE(entity, label_key, action)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_labels_entity ON labels(entity)",
+    "CREATE INDEX IF NOT EXISTS idx_labels_key ON labels(label_key)",
+    # ---- 30. 标签提议（label_requests · 全员可提议，标签管理员审批）----
+    """
+    CREATE TABLE IF NOT EXISTS label_requests (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_id    TEXT NOT NULL,            -- 提议 id（lq-前缀）
+        entity        TEXT NOT NULL,            -- 目标实体（issue-12 / task gid）
+        label_key     TEXT NOT NULL,            -- 提议的规范标签
+        value         TEXT DEFAULT '',          -- 提议值
+        proposer      TEXT DEFAULT '',          -- 提议方（任何 agent/角色）
+        reason        TEXT DEFAULT '',          -- 提议理由
+        status        TEXT DEFAULT 'pending',   -- pending/approved/rejected
+        reviewed_by   TEXT DEFAULT '',          -- 审批方（数据管理员/标签管理员）
+        note          TEXT DEFAULT '',          -- 审批说明
+        created_at    TEXT,
+        updated_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_lblreq_status ON label_requests(status)",
+    "CREATE INDEX IF NOT EXISTS idx_lblreq_entity ON label_requests(entity)",
 ]
 
 

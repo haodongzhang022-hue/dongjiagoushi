@@ -53,6 +53,7 @@ ROLE_REGISTRY = {
     "架构·测试": TesterRole,
     "架构·数据管理员": DataAdminRole,
     "架构·监控哨兵": SentinelRole,
+    "架构·进度推手": "label.progress_pusher.ProgressPusherRole",
     # ---- 市场获客分层（通用基建）----
     "市场·销售": SalesRole,
     "市场·客服": SupportRole,
@@ -72,8 +73,23 @@ ROLE_REGISTRY = {
 
 
 def get_role(name):
-    """按角色名取角色实例；找不到返回 None。"""
+    """按角色名取角色实例；找不到返回 None。
+
+    支持懒加载：注册值可为角色类或 "module.Class" 字符串（避免循环导入，
+    如 架构·进度推手 → label.progress_pusher.ProgressPusherRole）。
+    """
     cls = ROLE_REGISTRY.get(name)
+    if cls is None:
+        return None
+    if isinstance(cls, str):
+        mod_name, _, cls_name = cls.rpartition(".")
+        try:
+            import importlib
+            mod = importlib.import_module(mod_name)
+            cls = getattr(mod, cls_name)
+            ROLE_REGISTRY[name] = cls  # 缓存为类，二次取不再解析
+        except Exception:
+            return None
     return cls() if cls else None
 
 

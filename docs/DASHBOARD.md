@@ -23,12 +23,6 @@
 |-------|------|---------|-------------|------|
 | [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7) | 🆕 init | v0.1.0 | 基于每个 Issue 的声明头 | 🟢 open |
 
-### 模块 `galton`
-
-| Issue | type | 模块版本 | 目标 / 更新 | 状态 |
-|-------|------|---------|-------------|------|
-| [#43](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/43) | 🆕 init | v0.1.0 | 高尔顿智能体板 | 🟢 open |
-
 ### 模块 `knowledge`
 
 | Issue | type | 模块版本 | 目标 / 更新 | 状态 |
@@ -71,12 +65,6 @@
 |-------|------|----------|-------------|------|
 | [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12) | 🆕 init | — | 将「经验记忆库 + 语义向量触发引擎」确立为独立模块，登记模块版本线 v0.1.0 根节点，纳入看板与版本管理闭环 | 🟢 open |
 
-### Agent `架构·开发`
-
-| Issue | type | Agent版本 | 目标 / 更新 | 状态 |
-|-------|------|----------|-------------|------|
-| [#43](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/43) | 🆕 init | v0.1.0 | 高尔顿智能体板 | 🟢 open |
-
 ### Agent `架构·开发/架构·产品/架构·评审/架构·测试`
 
 | Issue | type | Agent版本 | 目标 / 更新 | 状态 |
@@ -107,11 +95,11 @@
 | M1 | 顶层架构拓扑 | docs/ARCHITECTURE.md | 状态 `docs/ARCHITECTURE.md` · 线索 [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7) |
 | M2 | 可行性验证 | 参考仓库核验 + 官方文档核验 | 状态 `参考仓库源码核验 + 官方文档核验` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
 | M3 | 工程实施方案（第一版骨架） | 目录结构 + 模块文件 | 状态 `本仓库目录结构 + 各模块文件` · 线索 — |
-| M4 | 分工与协作规则 | AGENTS.md + settings.yml 扩展位 | 状态 `AGENTS.md + settings.yml 角色扩展位` · 线索 [#41](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/41), [#31](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/31), [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20), [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16), [#5](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/5), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
+| M4 | 分工与协作规则 | AGENTS.md + settings.yml 扩展位 | 状态 `AGENTS.md + settings.yml 角色扩展位` · 线索 [#46](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/46), [#31](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/31), [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20), [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16), [#5](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/5), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
 | M5 | 进度对齐（暂停点） | CP1/CP2/CP3 护栏 | 状态 `CP1/CP2/CP3 护栏` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
 | M6 | 索引建立 | docs/ 索引 + 产物索引 | 状态 `docs/ 索引 + 产物索引` · 线索 [#8](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/8), [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
 | M7 | 真实场景跑通验证 | 用 architect skill 跑真实需求 | 状态 `用架构师 skill 跑一个真实架构需求` · 线索 [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
-| M8 | Issue 声明与模块版本管理机制 | 声明头 + 类型表 + 版本线 | 状态 `声明头 + 类型表 + 版本线（见 docs/ISSUE_MANAGEMENT.md）` · 线索 [#33](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/33), [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20), [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16), [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12), [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7), [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
+| M8 | Issue 声明与模块版本管理机制 | 声明头 + 类型表 + 版本线 | 状态 `声明头 + 类型表 + 版本线（见 docs/ISSUE_MANAGEMENT.md）` · 线索 [#20](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/20), [#16](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/16), [#12](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/12), [#7](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/7), [#6](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/6), [#4](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/4) |
 
 ---
 
@@ -119,11 +107,10 @@
 
 | Issue | 模块 | 模块版本 | agent | agent版本 | type | 目标 | 依赖 | 状态 |
 |-------|------|---------|-------|----------|------|------|------|------|
-| [#43](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/43) | `galton` | v0.1.0 | `架构·开发` | v0.1.0 | init | 高尔顿智能体板 | #41 | 🟢 open |
+| [#51](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/51) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
+| [#46](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/46) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#42](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/42) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
-| [#41](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/41) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#39](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/39) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
-| [#33](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/33) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#31](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/31) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#26](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/26) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
 | [#25](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/25) | `—` | — | `—` | — | — | （未声明） | — | 🟢 open |
@@ -143,15 +130,14 @@
 
 ## 五、待办 / 阻塞点扫描
 
-当前 open Issue：**19** / 总 19。
+当前 open Issue：**18** / 总 18。
 
 | Issue | 标题 | 模块 | 阻塞线索 |
 |-------|------|------|----------|
-| [#43](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/43) | 高尔顿板 MVP 原型（Router+3Worker+Aggregator） | `galton` | — |
+| [#51](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/51) | 标签增强，进度增强 | `—` | — |
+| [#46](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/46) | 需要一个工作量可视化的功能 | `—` | — |
 | [#42](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/42) | 高尔顿板 MVP 原型（Router+3Worker+Aggregator） | `—` | — |
-| [#41](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/41) | 高尔顿智能体板 | `—` | ⏸ 暂停点 |
 | [#39](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/39) | 【测试】经理分配引擎测试 | `—` | — |
-| [#33](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/33) | 壳工程 | `—` | — |
 | [#31](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/31) | 层间协作 | `—` | — |
 | [#26](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/26) | 引入状态机 上位机定时器 | `—` | — |
 | [#25](https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/issues/25) | 防止系统无效努力 | `—` | — |
@@ -192,8 +178,8 @@
 
 | 维度 | 已覆盖版本线 | 说明 |
 |------|-------------|------|
-| 模块版本线 | `arch-skill`, `dashboard`, `galton`, `knowledge`, `local-agent`, `memory`, `multirole`, `testing` | 各模块独立演进（module_version） |
-| agent 版本线 | `—`, `架构·开发`, `架构·开发/架构·产品/架构·评审/架构·测试`, `架构·总师`, `架构·总师 / 架构·产品 / 架构·开发 / 架构·评审 / 架构·测试` | 各角色独立演进（agent_version） |
+| 模块版本线 | `arch-skill`, `dashboard`, `knowledge`, `local-agent`, `memory`, `multirole`, `testing` | 各模块独立演进（module_version） |
+| agent 版本线 | `—`, `架构·开发/架构·产品/架构·评审/架构·测试`, `架构·总师`, `架构·总师 / 架构·产品 / 架构·开发 / 架构·评审 / 架构·测试` | 各角色独立演进（agent_version） |
 | 框架自升级线 | `framework` | 跨模块/方法论/测试红线整体升级（type=upgrade，见 FRAMEWORK_UPGRADE.md） |
 
 ### 6.2 测试信号灯
