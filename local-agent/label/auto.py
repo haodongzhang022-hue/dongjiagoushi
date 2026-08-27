@@ -1,0 +1,124 @@
+# -*- coding: utf-8 -*-
+"""
+事件驱动自动打标引擎（AutoLabelEngine · Issue #51）
+=====================================================
+把「加标签」从**能力层（等人调）**升级为**自动化触发层（事件到达即自动打标）**。
+这是用户强调的『自动化程度较高的流水线』核心：不需要任何 agent 记得去调，
+事件到达命中规则即自动打标/刷值。
+
+内置事件→标签规则（EVENT_RULES）：
+  issue.open         → open
+  issue.update       → 刷进度标签 progress_pct（若给 goal/current）
+  requirement        → open
+  progress.advance   → in_progress + 进度百分比标签 progress_pct
+  task.done          → done
+  pr.merged          → merged + done
+  review.need_fix    → need_fix + blocked
+  sentinel.alert     → stale（停滞）
+
+进度百分比（人可读层）：
+  读 goal/current 折算 round(current/goal*100)；无量化时按状态估算
+  （todo→5 / in_progress→40 / review→90 / done→100）。
+  机器收敛判定仍用哨兵内部 distance（不丢"还剩多少"），百分比是给人俯瞰，两者互补。
+
+接入方式：
+  - 任意角色实例：role.auto_trigger(event, entity, goal_total, current)
+  - CLI 管线：python -m label.cli auto --event ... --entity ... --goal-total ...
+  - CI 事件钩子：.cnb.yml 在 issue.open/issue.update 事件自动调 scripts/auto-label.sh
+"""
+import os
+import sys
+
+_LOCAL_AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _LOCAL_AGENT_DIR not in sys.path:
+    sys.path.insert(0, _LOCAL_AGENT_DIR)
+
+
+class AutoLabelEngine:
+    """事件驱动自动打标引擎。触发规则集中维护 EVENT_RULES，命中即自动打标。"""
+
+    # 事件 → (主标签, 额外标签列表, 是否刷新进度百分比)
+    EVENT_RULES = {
+        "issue.open":        ("open",        [], False),
+        "issue.update":      (None,          [], True),   # 仅刷进度
+        "requirement":       ("open",        [], False),
+        "progress.advance":  ("in_progress", [], True),   # 进度推进→in_progress+百分比
+        "task.done":         ("done",        [], False),
+        "pr.merged":         ("merged",      ["done"], False),
+        "review.need_fix":   ("need_fix",    ["blocked"], False),
+        "sentinel.alert":    ("stale",       [], False),
+    }
+
+    # 无量化时按状态估算进度（人可读兜底）
+    ESTIMATE_PCT = {"todo": 5, "in_progress": 40, "review": 90, "done": 100}
+
+    def __init__(self, owner=None):
+        self.owner = owner
+        self._owner_name = self._resolve_owner_name(owner)
+
+    @staticmethod
+    def _resolve_owner_name(owner):
+        if owner is None:
+            return ""
+        if isinstance(owner, str):
+            return owner
+        return getattr(owner, "_owner_name", "") or getattr(owner, "name", "") or "system"
+
+    def _repo(self):
+        from data import repository as repo
+        return repo
+
+    def _operator(self):
+        return self._owner_name or "系统"
+
+    # ---- 进度百分比折算（人可读层）----
+    @staticmethod
+    def pct_from(goal_total, current):
+        """有量化：round(current/goal*100)；goal 无效→None。"""
+        if goal_total:
+            try:
+                return max(0, min(100, int(round(current / goal_total * 100))))
+            except (TypeError, ZeroDivisionError):
+                return None
+        return None
+
+    @staticmethod
+    def pct_estimate(status):
+        """无量化：按状态估算百分比（兜底，供人俯瞰）。"""
+        return AutoLabelEngine.ESTIMATE_PCT.get(status)
+
+    # ---- 事件触发主入口 ----
+    def trigger(self, event, entity, goal_total=None, current=None, status=None, note=""):
+        """事件到达即自动打标。返回本次自动打出的标签列表。"""
+        if event not in self.EVENT_RULES:
+            return {"ok": True, "event": event, "entity": entity,
+                    "applied": [], "reason": "无匹配规则，跳过"}
+        main, extra, refresh_pct = self.EVENT_RULES[event]
+        applied = []
+
+        # 主标签 + 额外标签
+        for key in ([main] if main else []) + list(extra):
+            self._repo().apply_label(entity, key, operator=self._operator(),
+                                     value="", action="apply", source="auto",
+                                     note=note or f"事件 {event} 自动打标")
+            applied.append(key)
+
+        # 刷新进度百分比（人可读层）
+        if refresh_pct or event in ("progress.advance", "issue.update"):
+            pct = self.pct_from(goal_total, current)
+            if pct is None and status:
+                pct = self.pct_estimate(status)
+            if pct is not None:
+                self._repo().apply_label(entity, "progress_pct",
+                                         operator=self._operator(),
+                                         value=str(pct), action="apply",
+                                         source="auto",
+                                         note=f"进度 {pct}% 自动刷新")
+                applied.append(f"progress_pct:{pct}%")
+
+        return {"ok": True, "event": event, "entity": entity, "applied": applied}
+
+    def rules(self):
+        """返回触发规则清单（供文档/监控引用）。"""
+        return {k: {"label": v[0], "extra": v[1], "refresh_pct": v[2]}
+                for k, v in self.EVENT_RULES.items()}

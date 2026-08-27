@@ -466,3 +466,148 @@ def prs_for_agent(agent_id, status=None):
         params.append(status)
     sql += " ORDER BY id"
     return [dict(r) for r in db.query(sql, params)]
+# ================= labels（标签管理 · Issue #51） =================
+
+def apply_label(entity, label_key, operator="", value="", action="apply",
+                source="direct", note=""):
+    """打标/去标/刷值（幂等 UPSERT：同一实体同一标签同一动作覆盖更新）。"""
+    label_id = f"lb-{abs(hash(entity + label_key + action)) % 1000000}"
+    now = db.now_iso()
+    db.execute(
+        """
+        INSERT INTO labels (label_id, entity, label_key, value, operator,
+                            action, source, note, ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(entity, label_key, action) DO UPDATE SET
+            value=excluded.value, operator=excluded.operator,
+            source=excluded.source, note=excluded.note, ts=excluded.ts
+        """,
+        (label_id, entity, label_key, value, operator, action, source, note, now),
+    )
+    return label_id
+
+
+def get_labels(entity):
+    """某实体的全部标签（按分类可俯瞰）。"""
+    rows = db.query(
+        "SELECT * FROM labels WHERE entity=? ORDER BY id", (entity,)
+    )
+    return [dict(r) for r in rows]
+
+
+def remove_label(entity, label_key, operator=""):
+    """去标：写一条 action=remove 覆盖（保留留痕而非物理删除）。"""
+    return apply_label(entity, label_key, operator=operator, action="remove",
+                       source="direct", note="移除标签")
+
+
+def list_labels(label_key=None, entity=None):
+    """按标签 key / 实体过滤查询标签记录。"""
+    sql = "SELECT * FROM labels WHERE 1=1"
+    params = []
+    if label_key:
+        sql += " AND label_key=?"
+        params.append(label_key)
+    if entity:
+        sql += " AND entity=?"
+        params.append(entity)
+    sql += " ORDER BY id DESC"
+    return [dict(r) for r in db.query(sql, params)]
+
+
+# ================= label_requests（标签提议 · 全员可提·管理员审批） =================
+
+def propose_label(entity, label_key, proposer, reason="", value=""):
+    """全员提议：为某实体提议加标签，进入审批队列。"""
+    request_id = f"lq-{abs(hash(entity + label_key + proposer)) % 1000000}"
+    now = db.now_iso()
+    db.execute(
+        """
+        INSERT INTO label_requests (request_id, entity, label_key, value,
+                                    proposer, reason, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        """,
+        (request_id, entity, label_key, value, proposer, reason, now, now),
+    )
+    return request_id
+
+
+def list_label_requests(status="pending"):
+    """查看标签提议队列（默认 pending，管理员审批）。"""
+    sql = "SELECT * FROM label_requests WHERE 1=1"
+    params = []
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    sql += " ORDER BY id"
+    return [dict(r) for r in db.query(sql, params)]
+
+
+def review_label_request(request_id, reviewer, decision="approved", note=""):
+    """管理员审批标签提议（approved→自动落标 / rejected→拒绝）。"""
+    now = db.now_iso()
+    db.execute(
+        """
+        UPDATE label_requests SET status=?, reviewed_by=?, note=?, updated_at=?
+        WHERE request_id=?
+        """,
+        (decision, reviewer, note, now, request_id),
+    )
+    req = db.query_one(
+        "SELECT * FROM label_requests WHERE request_id=?", (request_id,)
+    )
+    if req is None:
+        return {"ok": False, "reason": "提议不存在"}
+    if decision == "approved":
+        apply_label(req["entity"], req["label_key"], operator=reviewer,
+                    value=req["value"], source="proposal",
+                    note=req["reason"] or "管理员审批通过")
+    return {"ok": True, "request_id": request_id, "status": decision,
+            "entity": req["entity"], "label_key": req["label_key"]}
+
+
+# ================= MCP 管线：程序化进度/状态查询（不靠 AI 对话） =================
+
+def query_progress(task_id, agent_id=""):
+    """统一查询任务/agent 的进度：合并 goal_meters + progress 表，程序化暴露。
+
+    返回 { task_id, goal_total, current, distance, percent, event_count, latest_ts }，
+    供任何角色通过 MCP 接口直接获取，不依赖 AI 对话告知。
+    """
+    meters = db.query(
+        "SELECT * FROM goal_meters WHERE task_id=? ORDER BY id DESC LIMIT 1",
+        (task_id,),
+    )
+    meter = dict(meters[0]) if meters else None
+    progress_rows = db.query(
+        "SELECT COUNT(*) AS n, MAX(ts) AS latest FROM progress WHERE task_id=?",
+        (task_id,),
+    )
+    pinfo = dict(progress_rows[0]) if progress_rows else {}
+    goal_total = (meter or {}).get("goal_total") or 0
+    current = (meter or {}).get("current") or 0
+    percent = round(current / goal_total * 100) if goal_total else None
+    return {
+        "task_id": task_id,
+        "agent_id": (meter or {}).get("agent_id", agent_id),
+        "goal_total": goal_total,
+        "current": current,
+        "distance": max(0, goal_total - current),
+        "percent": percent,
+        "event_count": pinfo.get("n") or 0,
+        "latest_ts": pinfo.get("latest") or (meter or {}).get("ts") or "",
+    }
+
+
+def query_status(entity):
+    """统一查询实体状态标签（最近一条 status 类标签 + 全部标签）。"""
+    labels = get_labels(entity)
+    status_keys = [l for l in labels if l["label_key"] in
+                   ("open", "in_progress", "review", "done", "merged",
+                    "blocked", "stale", "verified", "invalid")]
+    latest = status_keys[-1]["label_key"] if status_keys else ""
+    return {
+        "entity": entity,
+        "status": latest,
+        "labels": labels,
+    }

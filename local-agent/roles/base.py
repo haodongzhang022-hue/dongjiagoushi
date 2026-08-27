@@ -75,6 +75,12 @@ class BaseRole:
             self.depth_ability = DepthAbility(owner=self)
         except Exception:
             self.depth_ability = None
+        # 懒加载标签管理全员能力（LabelAbility · Issue #51：查询/打标/提议/审批/自动打标）
+        try:
+            from label import LabelAbility
+            self.label_ability = LabelAbility(owner=self)
+        except Exception:
+            self.label_ability = None
 
     # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
@@ -254,6 +260,68 @@ class BaseRole:
         return self.dispatch_ability.deliver(
             task_key, agent_id, output, issue_ref=issue_ref, role=role or self.name)
 
+    # ------------------------------------------------------------
+    # 标签管理能力透传（全员通用 · Issue #51）
+    # ------------------------------------------------------------
+    def query_progress(self, task_id, agent_id=""):
+        """程序化查进度（MCP 管线，goal_meters+progress 合并），不靠 AI 对话。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.query_progress(task_id, agent_id=agent_id)
+
+    def query_status(self, entity):
+        """程序化查实体状态标签。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.query_status(entity)
+
+    def query_labels(self, entity):
+        """查实体全部标签。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.query_labels(entity)
+
+    def apply_label(self, entity, label_key, value="", action="apply", note=""):
+        """一线直接打标/去标/刷值（白名单角色，其余须提议审批）。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.apply_label(entity, label_key, value=value,
+                                              action=action, note=note)
+
+    def remove_label(self, entity, label_key, note=""):
+        """一线去标。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.remove_label(entity, label_key, note=note)
+
+    def propose_label(self, entity, label_key, reason="", value=""):
+        """全员提议加/改标签（标签管理员审批）。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.propose_label(entity, label_key, reason=reason,
+                                                value=value)
+
+    def review_label_request(self, request_id, decision="approved", note=""):
+        """标签管理员审批提议（approved→自动落标）。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.review_request(request_id, decision=decision,
+                                                 note=note)
+
+    def auto_trigger(self, event, entity, goal_total=None, current=None, note=""):
+        """事件驱动自动打标：事件到达即按规则打标，无需 agent 记得去调。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.auto_trigger(event, entity,
+                                               goal_total=goal_total,
+                                               current=current, note=note)
+    def pending_label_requests(self):
+        """查看待审批标签提议（标签管理员用）。"""
+        if self.label_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
+        return self.label_ability.pending_requests()
+
+
     def capability(self):
         """返回本角色的能力清单（含三大全员通用能力）。"""
         base = {"role": self.name}
@@ -263,6 +331,8 @@ class BaseRole:
             base["handle_ability"] = self.handle_ability.capability()
         if self.depth_ability is not None:
             base["depth_ability"] = self.depth_ability.capability()
+        if self.label_ability is not None:
+            base["label_ability"] = self.label_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----

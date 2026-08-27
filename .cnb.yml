@@ -94,7 +94,9 @@ main:
             bash tests/test_company_model.sh
             echo "==== 端到端小需求测试（mini-e2e：小需求端到端信号灯） ===="
             bash tests/test_mini_e2e.sh
-            echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
+            echo "==== 标签管理+进度自动化测试（label：标签能力/事件驱动自动打标/MCP管线/进度推手/全员挂载/越权拦截） ===="
+            bash local-agent/tests/test_label_automation.sh
+echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
             bash tests/test_doc_consistency.sh
     - name: build knowledge base
       stages:
@@ -154,13 +156,29 @@ main:
             echo "[dashboard] 看板无变化，跳过提交"
           fi
 
+# 事件驱动自动打标（Issue #51 · 标签自动化 MCP 管线）
+# 在 Issue 新增/更新时程序化自动打标签，无需任何 agent 记得去调。
+.auto_label: &auto_label
+  - name: auto label
+    stages:
+      - name: auto label
+        script: |
+          set -e
+          echo "[auto-label] 事件驱动自动打标（Issue #51）"
+          ENTITY="issue-${CNB_ISSUE_NUMBER:-0}"
+          bash scripts/auto-label.sh auto --event "issue.update" --entity "$ENTITY" --operator 系统
+
 # 兜底事件（仓库级事件在此处理）
 $:
   issue.comment@npc: *npc_task
   pull_request.comment@npc: *npc_task
   # Issue 增/改/删/重开时自动刷新看板
-  issue.open: *dashboard_refresh
-  issue.update: *dashboard_refresh
+  issue.open:
+    - *dashboard_refresh
+    - *auto_label
+  issue.update:
+    - *dashboard_refresh
+    - *auto_label
   issue.close: *dashboard_refresh
   issue.reopen: *dashboard_refresh
 

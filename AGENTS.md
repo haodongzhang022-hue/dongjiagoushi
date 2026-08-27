@@ -153,6 +153,39 @@
 > 召唤，又保证跨库权限足够。触发词：`@ 格式 / 跨仓库召唤 / 权限 / 写死角色名 /
 > 自适应定位 / handle`。
 
+### 标签管理 + 进度自动化全员化（LabelAbility · 通用复用能力 · 固定规则 · Issue #51）
+
+进度/标签是**高频复用的通用能力**，已统一开发为 `LabelAbility`
+（`local-agent/label/ability.py` + `auto.py` 事件引擎 + `cli.py` MCP 管线 +
+`progress_pusher.py` 进度推手角色），默认挂载到**所有角色基类** `BaseRole`——
+每个 agent 都能**程序化查进度/打标/提议**，并由**事件驱动自动打标**把自动化程度拉满
+（详见 `docs/LABEL_AUTOMATION.md`）：
+
+- **程序化优先（MCP 管线）**：任何角色获取进度/状态/标签走 `query_progress /
+  query_status / query_labels` 程序化接口（数据库查询），**不依赖 AI 对话告知**；
+  CLI `python -m label.cli progress/status/auto ...` 供脚本/CI 调用。
+- **全员可提议**：任何 agent 可 `propose_label` 为某 Issue 加/改标签/提需求 →
+  数据管理员（标签管理员）`review_request` 审批，approved 自动落标。
+- **一线直接打标**：开发/评审/测试/经理/总师/产品/秘书/数据管理员/小组长/进度推手
+  （白名单）可直接 `apply_label`；一线处理代码的 agent 最知进度，必须会调标签。
+- **事件驱动自动打标（自动化核心）**：`AutoLabelEngine` 8 类规则——issue.open→open、
+  issue.update→刷进度、requirement→open、progress.advance→in_progress+百分比、
+  task.done→done、pr.merged→merged+done、review.need_fix→need_fix+blocked、
+  sentinel.alert→stale。事件到达即自动打标，无需 agent 记得去调。
+- **进度百分比（人可读层）**：读 goal_meters 的 current/goal_total 折算 `progress_pct`
+  （0%/5%/.../100%），无量化按状态估算；**机器判定仍用哨兵内部 distance**，百分比是给
+  人俯瞰，两者互补。
+- **架构·进度推手**（专项角色）：进度标签 + 优先级（P0-P3 正交维度）+ 自动化喂料，
+  基于进度/优先级触发额外自动化（停滞喂哨兵打断 / 高优先级阻塞升级上报）。
+- **CI 事件接线**：`.cnb.yml` 在 issue.open/issue.update 事件自动调 `scripts/auto-label.sh`
+  程序化打标，Issue 一开/一改标签即自动上。
+- **规范标签集**：`LABEL_SPECS` 唯一规范来源，非规范即 INVALID_LABEL 拦截；
+  `DIRECT_OPERATORS` 白名单控制越权，全员只读 + 白名单直打 + 提议审批。
+
+> 标签机制全员化 ≠ 各自取名：打标必须走规范标签集 + 程序化 MCP 管线，一线最知进度
+> 必须会调标签，其余走提议审批；事件驱动自动打标让流水线自动化程度高。
+> 触发词：`进度标签 / 打标 / 优先级 / 百分比 / MCP管线 / 进度推手 / 自动化打标 / 停滞`。
+
 ### 同岗位多角色交互机制（peer collab · 固定规则）
 
 
