@@ -176,6 +176,7 @@
 - **事件驱动自动打标（自动化核心）**：`AutoLabelEngine` 11 类规则——issue.open→open、
   issue.update→刷进度、requirement→open、progress.advance→in_progress+百分比、
   task.done→done、pr.merged→merged+done、review.need_fix→need_fix+blocked、
+  **review.pass→merge_ready、review.merge→merged（评审通过/合并自动打标签，替代推送"评审结论"）**、
   sentinel.alert→stale、**deps.met→ready（前置依赖满足放行）**、
   **next.trigger→at_node+trigger_next（流水线自动触发下一步）**、
   **priority.set→p0..p9**。事件到达即自动打标，无需 agent 记得去调。
@@ -194,6 +195,13 @@
   高优先级阻塞升级上报）。
 - **CI 事件接线**：`.cnb.yml` 在 issue.open/issue.update 事件自动调 `scripts/auto-label.sh`
   程序化打标，Issue 一开/一改标签即自动上。
+- **评审/跨仓 CodeBuddy 打标签替代推送（★本 Issue #51 收口确认）**：评审结论不再靠"推送消息"表达，
+  统一走**打标签**——评审通过打 `merge_ready`、评审合并打 `merged`、评审需改打 `need_fix`（+blocked），
+  `AutoLabelEngine` 在 `review.pass / review.merge / review.need_fix` 事件自动落标，替代人工推送；
+  同样，**非本仓库的 CodeBuddy**（跨仓被召唤的 CodeBuddy，角色承载仓库非本仓）的评审/反馈
+  结论也一律**打标签替代推送**——`CodeBuddy` 已在 `DIRECT_OPERATORS` 白名单可直接 `apply_label`，
+  跨仓 CodeBuddy 落地到本仓 labels 表即完成留痕（写入/读取同走本仓标签库），不靠推送消息跨仓传结论。
+  凡是"结论/状态/处置"一律标签化留痕，推送只作为辅助通知，不作为结论载体。
 - **规范标签集**：`LABEL_SPECS` 唯一规范来源，非规范即 INVALID_LABEL 拦截；
   `DIRECT_OPERATORS` 白名单控制越权，全员只读 + 白名单直打 + 提议审批。
 

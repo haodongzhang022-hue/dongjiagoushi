@@ -93,6 +93,10 @@ class LabelAbility:
         "规范标签": "标签必须来自 LABEL_SPECS 规范集合，非规范即 INVALID_LABEL 拦截；"
                     "progress_pct 由进度推手/事件引擎自动折算，人可读层，机器判定仍用哨兵 distance。",
         "一线会操作": "一线处理代码的 agent 最知道进度，必须会调 apply_label/auto_trigger 及时刷新标签。",
+        "评审打标签替代推送": "评审结论不靠推送消息表达，统一走打标签：review.pass→merge_ready、"
+                          "review.merge→merged、review.need_fix→need_fix+blocked，AutoLabelEngine 事件自动落标。",
+        "跨仓CodeBuddy打标签替代推送": "非本仓库的 CodeBuddy（跨仓被召唤）的评审/反馈结论也一律打标签替代推送——"
+                          "CodeBuddy 在白名单可直接 apply_label，落地到本仓 labels 表即留痕，不靠推送跨仓传结论。",
     }
 
     def __init__(self, owner=None):

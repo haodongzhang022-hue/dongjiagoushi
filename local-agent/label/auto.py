@@ -14,6 +14,8 @@
   task.done          → done
   pr.merged          → merged + done
   review.need_fix    → need_fix + blocked
+  review.pass        → merge_ready（评审通过→打合并放行标签，替代推送"评审通过"）
+  review.merge       → merged（评审合并→打合并标签）
   sentinel.alert     → stale（停滞）
   deps.met           → ready（前置依赖满足，放行下一步）★新增
   next.trigger       → at_node + trigger_next（流水线自动触发下一步）★新增
@@ -49,6 +51,8 @@ class AutoLabelEngine:
         "task.done":         ("done",        [], False),
         "pr.merged":         ("merged",      ["done"], False),
         "review.need_fix":   ("need_fix",    ["blocked"], False),
+        "review.pass":       ("merge_ready", [], False),   # 评审通过→合并放行标签（打标签替代推送）
+        "review.merge":      ("merged",      [], False),   # 评审合并→合并标签
         "sentinel.alert":    ("stale",       [], False),
         # 前置依赖满足 → ready（放行下一步）
         "deps.met":          ("ready",       ["in_progress"], False),
