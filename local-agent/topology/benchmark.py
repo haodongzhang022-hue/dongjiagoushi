@@ -48,12 +48,17 @@ from topology.resource import ResourceMonitor, snapshot_files
 # ------------------------------------------------------------
 # 节点执行（真实逻辑 + 可注入 bug/完成度）
 # ------------------------------------------------------------
-def _exec_node(node, req, work_dir, use_llm=True, concurrency=1, bug_seed=0):
+def _exec_node(node, req, work_dir, use_llm=True, concurrency=1, bug_seed=0, cache_hit=False, cache_prefix_len=0):
     """执行单个节点，返回 (output_str, node_meta)。
 
     node_meta 记录该节点的 token 估算、产出文件数、是否产生 bug 信号。
     concurrency 为当前波次并行节点数——并行越高，共享上下文越长，
     token 消耗按上下文系数放大（贴近真实 LLM 并行调用的上下文累积成本）。
+
+    cache_hit=True 时（前缀缓存·水龙头蔓延）：共享前缀已命中缓存复用，
+      节点只付**增量差异部分** token（前缀字符不重复计费），
+      且共享上下文一致 → 出错面收窄，bug 风险下降。
+    cache_prefix_len 为已缓存的共享前缀字符数。
     """
     node_id = node.get("id", "unknown")
     role = node.get("role", "编排引擎")
@@ -69,17 +74,36 @@ def _exec_node(node, req, work_dir, use_llm=True, concurrency=1, bug_seed=0):
         except Exception:
             pass
 
+    # 前缀缓存命中时：共享前缀不放大、不重复计费（只按增量部分算，且不受并发放大拖累）
+    if cache_hit:
+        ctx_factor = 1  # 缓存命中节点只付增量，不再因高并发重复放大共享前缀
+        prefix_cost = 0  # 前缀已在集群首节点一次性付费
+        is_dev = ("develop" in node_id) or ("开发" in role)
+        if not use_llm:
+            delta = f"[模拟执行-缓存命中] {role} 增量处理 '{action}'"
+            token_est = max(1, int(len(delta) // 3 * ctx_factor))
+            # 缓存命中：共享上下文一致，bug 只可能出在增量部分，风险显著下降（除数 ×3）
+            bug = 1 if (is_dev and bug_seed > 0 and bug_seed % 15 == 0) else 0
+            return delta, {"token": token_est, "files": 1, "bug": bug, "cache_hit": 1, "prefix_saved": cache_prefix_len}
+        try:
+            from llm import get_backend
+            llm = get_backend()
+            result = llm.generate(f"【前缀已缓存】你是{role}，需求已载入。增量任务：{action}")
+            token_est = max(1, int(len(result) // 3 * ctx_factor))
+            bug = 1 if (is_dev and ("Bug" in result or "缺陷" in result)) else 0
+            return result, {"token": token_est, "files": 1, "bug": bug, "cache_hit": 1, "prefix_saved": cache_prefix_len}
+        except Exception as e:
+            return f"[执行异常] {e}", {"token": 1, "files": 1, "bug": 0, "cache_hit": 1, "prefix_saved": cache_prefix_len}
+
     ctx_factor = 1 + (concurrency - 1) * 0.12  # 并发越高中上下文越长
     if not use_llm:
         # 模拟输出：token ≈ 输出字符数/3 × 上下文系数，bug 按节点风险因子（不依赖外部库）
         text = f"[模拟执行] {role} 处理 '{req}' 完成，节点 {node_id}"
         token_est = max(1, int(len(text) // 3 * ctx_factor))
         # bug 按节点规模产生差异：抢单/一窝蜂节点越多、序号越大越容易暴露缺陷
-        # bug 判定基于 role 含"开发"（覆盖 develop/scramble/scatter/core_dev 等开发节点），
-        # 随 bug_seed 累积：规模越大（抢单/一窝蜂子任务越多），暴露缺陷越多
         is_dev = ("develop" in node_id) or ("开发" in role)
         bug = 1 if (is_dev and bug_seed > 0 and bug_seed % 5 == 0) else 0
-        return text, {"token": token_est, "files": 1, "bug": bug}
+        return text, {"token": token_est, "files": 1, "bug": bug, "cache_hit": 0, "prefix_saved": 0}
 
     try:
         from llm import get_backend
@@ -88,10 +112,9 @@ def _exec_node(node, req, work_dir, use_llm=True, concurrency=1, bug_seed=0):
         token_est = max(1, int(len(result) // 3 * ctx_factor))
         is_dev = ("develop" in node_id) or ("开发" in role)
         bug = 1 if (is_dev and ("Bug" in result or "缺陷" in result)) else 0
-        return result, {"token": token_est, "files": 1, "bug": bug}
+        return result, {"token": token_est, "files": 1, "bug": bug, "cache_hit": 0, "prefix_saved": 0}
     except Exception as e:
-        return f"[执行异常] {e}", {"token": 1, "files": 1, "bug": 0}
-
+        return f"[执行异常] {e}", {"token": 1, "files": 1, "bug": 0, "cache_hit": 0, "prefix_saved": 0}
 
 def _is_revert(output):
     return bool(output) and isinstance(output, str) and \
@@ -142,30 +165,26 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None, scale=
 
     # 任务规模放大：scale>1 时，把 hybrid 的抢单节点 / scatter 的一窝蜂节点复制放大，
     # 让「余下子任务一窝蜂瓜分」的并行差异在更大规模上显现（避免任务太小差异被忽略）。
+
     def _scale_nodes(node_list, scale):
         if scale <= 1:
             return list(node_list)
         scaled = []
-        scramble_seq = 0
-        scatter_seq = 0
+        seq = 0
         for n in node_list:
             nid = str(n.get("id", ""))
-            if nid.startswith("scramble_"):
-                scramble_seq += 1
+            # 抢单/一窝蜂/水龙头蔓延节点按 scale 复制放大，让差异显现
+            is_fanout = (nid.startswith("scramble_") or nid.startswith("scatter_")
+                         or nid.startswith("prefix_"))
+            if is_fanout:
+                seq += 1
+                prefix = nid.split("_")[0]  # scramble/scatter/prefix
                 base = nid.split("_")[-1]
                 # 首份保留原始，多份按 scale 复制并编号
                 for k in range(scale):
-                    idx = f"{base}-{scramble_seq}-{k+1}" if k > 0 else base
+                    idx = f"{base}-{seq}-{k+1}" if k > 0 else base
                     cp = dict(n)
-                    cp["id"] = f"scramble_{idx}"
-                    scaled.append(cp)
-            elif nid.startswith("scatter_"):
-                scatter_seq += 1
-                base = nid.split("_")[-1]
-                for k in range(scale):
-                    idx = f"{base}-{scatter_seq}-{k+1}" if k > 0 else base
-                    cp = dict(n)
-                    cp["id"] = f"scatter_{idx}"
+                    cp["id"] = f"{prefix}_{idx}"
                     scaled.append(cp)
             else:
                 scaled.append(dict(n))
@@ -185,18 +204,41 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None, scale=
     files = 0
     agents_used = set()
     waves_used = 0
-    max_concurrency = 0
+    # 缓存指标（前缀缓存·水龙头蔓延专用）
+    cache_hits = 0
+    cache_clusters = 0
+    prefix_saved_chars = 0
 
-    def _run_batch(batch_nodes, wave_no):
+    def _run_batch(batch_nodes, wave_no, cache_state=None):
+        """执行一批节点。cache_state 非空时启用前缀缓存（水龙头蔓延）。
+
+        cache_state: dict{共享前缀key: {"chars": 前缀字符数}}。
+          同一集群（同 role+req）内首节点付全量前缀，后续节点命中缓存增量蔓延。
+        """
         nonlocal steps, reverts, blocks, bugs, tokens, files, max_concurrency
+        nonlocal cache_hits, cache_clusters, prefix_saved_chars
         # 并发量 = 单波次内同时活跃的节点数（该波次真实并行度）
         active = len(batch_nodes)
         max_concurrency = max(max_concurrency, active)
         for n in batch_nodes:
             steps += 1
             agents_used.add(n.get("role", "编排引擎"))
+            # 前缀缓存判定：该节点是否命中已付费的共享前缀
+            cache_hit = False
+            cache_prefix_len = 0
+            if cache_state is not None:
+                key = f"{n.get('role','')}|{req[:24]}"
+                if key in cache_state:
+                    cache_hit = True
+                    cache_prefix_len = cache_state[key]["chars"]
+                    prefix_saved_chars += cache_prefix_len
+                    cache_hits += 1
+                else:
+                    cache_state[key] = {"chars": max(1, len(f"{n.get('role','')}|{req[:24]}"))}
+                    cache_clusters += 1
             out, meta = _exec_node(n, req, work_dir, use_llm=use_llm,
-                                    concurrency=active, bug_seed=_id_of(n))
+                                    concurrency=active, bug_seed=_id_of(n),
+                                    cache_hit=cache_hit, cache_prefix_len=cache_prefix_len)
             tokens += meta.get("token", 0)
             files += meta.get("files", 0)
             bugs += meta.get("bug", 0)
@@ -239,6 +281,48 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None, scale=
             # 同一 phase 的节点全部并行（一窝蜂/瓜分）
             batch = [n for n in nodes if n.get("phase", "swarm") == ph]
             _run_batch(batch, 0)
+
+    elif strategy == "prefix":
+        # 前缀缓存·水龙头蔓延：按 phase 分组执行。
+        #   prefix:  central(中央调控) → faucet(共享前缀水龙头·集群内串行蔓延) → quality(收口)
+        # 与 hybrid 的散沙抢单关键差异（用户 Issue #41 优化核心）：
+        #   hybrid/scatter 抢单阶段**全并行**——每节点独立携带完整共享前缀，
+        #     并发越高 token 线性放大、各自构造上下文 → 出错面大；
+        #   prefix 的 faucet 阶段把同 role 开发节点聚成共享前缀集群，**串行蔓延**——
+        #     首节点付全量前缀，后续节点命中缓存只付增量，token 从"按并发 N 放大"降为
+        #     "前缀1次+每节点增量"，共享上下文一致 → 出错面收窄（水龙头持续往下蔓延）。
+        phases = []
+        seen = set()
+        for n in nodes:
+            ph = n.get("phase", "faucet")
+            if ph not in seen:
+                seen.add(ph)
+                phases.append(ph)
+        waves_used = len(phases)
+        # 每个 phase 一个共享前缀缓存状态（faucet 阶段内同一集群共享前缀）
+        for ph in phases:
+            if ph == "faucet":
+                # 水龙头蔓延：同 role 开发节点共享前缀，串行执行、前缀只付一次
+                batch = [n for n in nodes if n.get("phase", "faucet") == ph]
+                # 按 share 分组（同 share 的集群共享前缀；当前 prefix_1..8 同 share="dev"）
+                groups = {}
+                order = []
+                for n in batch:
+                    share = n.get("share", "default")
+                    if share not in groups:
+                        groups[share] = []
+                        order.append(share)
+                    groups[share].append(n)
+                for share in order:
+                    group = groups[share]
+                    # 集群内串行蔓延：逐个节点执行，共享同一 cache_state（前缀只付一次）
+                    cache_state = {}
+                    for one in group:
+                        _run_batch([one], 0, cache_state=cache_state)
+            else:
+                # central / quality 阶段：正常执行（无前缀缓存）
+                batch = [n for n in nodes if n.get("phase", "faucet") == ph]
+                _run_batch(batch, 0)
 
     elif strategy == "event":
         events = {"user_request": True}
@@ -302,6 +386,11 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None, scale=
         "mem_delta_kb": resource.get("mem_delta_kb", 0),
         "net_sent_bytes": resource.get("net_sent_bytes", 0),
         "net_recv_bytes": resource.get("net_recv_bytes", 0),
+        # 前缀缓存指标（水龙头蔓延专用）
+        "cache_hits": cache_hits,
+        "cache_clusters": cache_clusters,
+        "prefix_saved_chars": prefix_saved_chars,
+        "cache_hit_rate": round(cache_hits / max(1, steps) * 100, 1),
     }
 
 
