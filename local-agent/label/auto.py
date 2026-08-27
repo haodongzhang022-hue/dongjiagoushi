@@ -15,6 +15,9 @@
   pr.merged          → merged + done
   review.need_fix    → need_fix + blocked
   sentinel.alert     → stale（停滞）
+  deps.met           → ready（前置依赖满足，放行下一步）★新增
+  next.trigger       → at_node + trigger_next（流水线自动触发下一步）★新增
+  priority.set       → p0..p9（P0-P9 大盘，value 存优先级）★新增
 
 进度百分比（人可读层）：
   读 goal/current 折算 round(current/goal*100)；无量化时按状态估算
@@ -47,6 +50,12 @@ class AutoLabelEngine:
         "pr.merged":         ("merged",      ["done"], False),
         "review.need_fix":   ("need_fix",    ["blocked"], False),
         "sentinel.alert":    ("stale",       [], False),
+        # 前置依赖满足 → ready（放行下一步）
+        "deps.met":          ("ready",       ["in_progress"], False),
+        # 流水线自动触发下一步 → at_node + trigger_next
+        "next.trigger":      ("at_node",     ["trigger_next"], False),
+        # 优先级设定（P0-P9 大盘，value 存 p0..p9）
+        "priority.set":      (None,          [], False),
     }
 
     # 无量化时按状态估算进度（人可读兜底）
@@ -88,13 +97,27 @@ class AutoLabelEngine:
         return AutoLabelEngine.ESTIMATE_PCT.get(status)
 
     # ---- 事件触发主入口 ----
-    def trigger(self, event, entity, goal_total=None, current=None, status=None, note=""):
-        """事件到达即自动打标。返回本次自动打出的标签列表。"""
+    def trigger(self, event, entity, goal_total=None, current=None, status=None,
+                note="", value=""):
+        """事件到达即自动打标。返回本次自动打出的标签列表。
+
+        value: 携带事件值（如 priority.set → "p3"、next.trigger → 下一步 issue 编号）。
+        """
         if event not in self.EVENT_RULES:
             return {"ok": True, "event": event, "entity": entity,
                     "applied": [], "reason": "无匹配规则，跳过"}
         main, extra, refresh_pct = self.EVENT_RULES[event]
         applied = []
+
+        # 优先级设定（P0-P9 大盘）：value 存 p0..p9 标签，主/附加不适用
+        if event == "priority.set":
+            priority = value or (note.split()[-1] if note else "")
+            if priority:
+                self._repo().apply_label(entity, priority, operator=self._operator(),
+                                         value=priority, action="apply",
+                                         source="auto", note=f"事件 {event} 自动设优先级 {priority}")
+                applied.append(f"priority:{priority}")
+            return {"ok": True, "event": event, "entity": entity, "applied": applied}
 
         # 主标签 + 额外标签
         for key in ([main] if main else []) + list(extra):

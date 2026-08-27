@@ -17,14 +17,23 @@
 
 ## 一、规范标签集（LABEL_SPECS · 唯一规范来源）
 
-| 分类 | 标签 |
-|------|------|
-| progress | blocked / in_progress / review / done / merged |
-| type | feature / bug / refactor / docs / infra / research |
-| priority | p0_critical / p1_high / p2_normal / p3_low |
-| status | open / stale / verified / invalid |
-| disposition | merge_ready / need_fix / need_review / need_human |
-| progress_pct | 0% / 5% / 10% / ... / 100%（人可读进度百分比） |
+| 分类 | 标签 | 说明 |
+|------|------|------|
+| progress | blocked / in_progress / review / done / merged | 任务进度态 |
+| type | feature / bug / refactor / docs / infra / research | 任务类型 |
+| priority | **p0 .. p9（P0-P9 大盘）** ★扩展 | 优先级，p0 最紧急 → p9 最不紧急，**正交维度** |
+| status | open / stale / verified / invalid | 状态 |
+| disposition | merge_ready / need_fix / need_review / need_human | 评审处置 |
+| deps | **depends_on** ★新增 | 前置依赖（value 存前置 Issue 编号） |
+| next | **next_step** ★新增 | 完成后下一步触发（value 存下一步 Issue 编号） |
+| pipeline | **at_node / trigger_next / gate** ★新增 | 流水线自动化关键节点 |
+| progress_pct | 0% / 5% / 10% / ... / 100%（人可读进度百分比） | 人可读进度 |
+
+> **解耦调用（★用户强调）**：LabelAbility 是**通用模块能力**，由所有角色基类
+> `BaseRole` 统一挂载，各角色**无需各自声明用法**，直接调用
+> `role.apply_label / query_progress / set_priority / set_depends / set_next_step /
+> set_pipeline_node` 等透传方法。单一规范来源在 `LABEL_SPECS`，各角色/迭代都从
+> 这里对齐，不产生版本差异——**解除耦合然后调用才是稳定方式**。
 
 **权限分层**：
 - **查询**：全员开放（走数据库，程序化 MCP 管线，不靠 AI 对话）
@@ -50,6 +59,9 @@
 | pr.merged | merged + done |
 | review.need_fix | need_fix + blocked |
 | sentinel.alert | stale（停滞） |
+| deps.met | ready + in_progress（前置依赖满足，放行下一步）★新增 |
+| next.trigger | at_node + trigger_next（流水线自动触发下一步）★新增 |
+| priority.set | p0..p9（P0-P9 大盘，value 存优先级）★新增 |
 
 **进度百分比（人可读层）**：读 `goal_meters` 的 current/goal_total 折算
 `round(current/goal*100)`；无量化时按状态估算（todo→5% / 进行→40% / 评审→90% / 完成→100%）。
@@ -63,9 +75,16 @@ python -m label.cli progress --task tk-xxx        # 查进度
 python -m label.cli status --entity issue-12       # 查状态标签
 python -m label.cli labels --entity issue-12       # 查全部标签
 python -m label.cli apply --entity issue-12 --label in_progress --operator 架构·开发  # 一线打标
-python -m label.cli propose --entity issue-12 --label p0_critical --operator 市场·销售 --reason 阻塞上线
+python -m label.cli propose --entity issue-12 --label p0 --operator 市场·销售 --reason 阻塞上线
 python -m label.cli review --request lq-xxx --operator 架构·数据管理员 --decision approved
 python -m label.cli auto --event progress.advance --entity issue-12 --goal-total 10 --current 4  # 事件自动
+# ★新增：结构化标签
+python -m label.cli depends --entity issue-12 --issue 11        # 前置依赖
+python -m label.cli next --entity issue-12 --issue 13           # 完成后下一步触发
+python -m label.cli priority --entity issue-12 --level p3       # 优先级 P0-P9 大盘
+python -m label.cli node --entity issue-12 --node at_node --value develop  # 流水线节点
+python -m label.cli deps --entity issue-12                      # 查前置依赖
+python -m label.cli nexts --entity issue-12                     # 查下一步触发
 ```
 
 任意角色实例（全员挂载）：
@@ -73,8 +92,15 @@ python -m label.cli auto --event progress.advance --entity issue-12 --goal-total
 role.query_progress("tk-xxx")            # 程序化查进度
 role.query_status("issue-12")            # 程序化查状态
 role.apply_label("issue-12", "in_progress")  # 一线直接打标
-role.propose_label("issue-12", "p0_critical", "阻塞上线")  # 全员提议
+role.propose_label("issue-12", "p0", "阻塞上线")  # 全员提议
 role.auto_trigger("progress.advance", "issue-12", 10, 4)   # 事件自动打标
+# ★新增：结构化标签（前置依赖 / 下一步 / 优先级 P0-P9 / 流水线节点）
+role.set_depends("issue-12", "11")             # 前置依赖
+role.set_next_step("issue-12", "13")           # 完成后下一步触发
+role.set_priority("issue-12", "p3")            # 优先级 P0-P9 大盘
+role.set_pipeline_node("issue-12", "at_node", "develop")  # 流水线节点
+role.dependencies("issue-12")                  # 查前置依赖
+role.next_steps("issue-12")                    # 查下一步触发
 ```
 
 ## 四、数据层增强

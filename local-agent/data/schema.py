@@ -487,7 +487,7 @@ SCHEMA_DDL = [
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         label_id      TEXT NOT NULL,            -- 标签记录 id（lb-前缀）
         entity        TEXT NOT NULL,            -- 关联实体 key（issue-12 / task gid / pr-x）
-        label_key     TEXT NOT NULL,            -- 规范标签 key（in_progress / done / p1_high...）
+        label_key     TEXT NOT NULL,            -- 规范标签 key（in_progress / done / p0..p9...）
         value         TEXT DEFAULT '',          -- 标签值（进度百分比 progress_pct 等）
         operator      TEXT DEFAULT '',          -- 操作者（一线直接打标 / 审批通过落标）
         action        TEXT DEFAULT 'apply',     -- apply=打标 / remove=去标 / refresh=刷值

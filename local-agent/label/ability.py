@@ -26,10 +26,17 @@
 规范标签集（LABEL_SPECS · 唯一规范来源，非规范即 INVALID_LABEL 拦截）：
   progress    : blocked / in_progress / review / done / merged
   type        : feature / bug / refactor / docs / infra / research
-  priority    : p0_critical / p1_high / p2_normal / p3_low
+  priority    : p0..p9（P0-P9 大盘：p0 最紧急 → p9 最不紧急，正交维度）★扩展
   status      : open / stale / verified / invalid
   disposition : merge_ready / need_fix / need_review / need_human
+  deps        : depends_on（前置依赖 Issue 编号，value 存编号）★新增
+  next        : next_step（完成后下一步触发 Issue 编号，value 存编号）★新增
+  pipeline    : pipeline 自动化关键节点标签（at_node / trigger_next / gate）★新增
   progress_pct: 0%..100%（人可读进度百分比，机器判定仍用哨兵 distance）
+
+解耦调用（★用户强调）：LabelAbility 是**通用模块能力**，由所有角色基类 BaseRole
+统一挂载，各角色**无需各自声明用法**，直接调用 role.apply_label/query_progress 等。
+单一规范来源在 LABEL_SPECS，各角色/迭代都从这里对齐，不产生版本差异。
 """
 import os
 import sys
@@ -46,12 +53,23 @@ class LabelAbility:
     """
 
     # ---- 规范标签集（唯一规范来源，防乱标）----
+    # P0-P9 大盘：p0 最紧急 → p9 最不紧急（正交维度，不与规模/拓扑耦合）
+    PRIORITY_SCALE = [f"p{i}" for i in range(10)]
+    # 流水线自动化关键节点标签（供 DAG/编排引擎快速读取调度位）
+    PIPELINE_NODE_LABELS = ["at_node", "trigger_next", "gate"]
+
     LABEL_SPECS = {
         "progress": ["blocked", "in_progress", "review", "done", "merged"],
         "type": ["feature", "bug", "refactor", "docs", "infra", "research"],
-        "priority": ["p0_critical", "p1_high", "p2_normal", "p3_low"],
+        "priority": PRIORITY_SCALE,                      # P0-P9 大盘
         "status": ["open", "stale", "verified", "invalid"],
         "disposition": ["merge_ready", "need_fix", "need_review", "need_human"],
+        # 前置依赖（depends_on）→ value 存前置 Issue 编号
+        "deps": ["depends_on"],
+        # 完成后下一步触发（next_step）→ value 存下一步 Issue 编号
+        "next": ["next_step"],
+        # 流水线自动化关键节点
+        "pipeline": PIPELINE_NODE_LABELS,
         "progress_pct": ["0", "5", "10", "15", "20", "25", "30", "35", "40",
                          "45", "50", "55", "60", "65", "70", "75", "80",
                          "85", "90", "95", "100"],
@@ -153,13 +171,53 @@ class LabelAbility:
         """查看待审批标签提议。"""
         return self._repo().list_label_requests(status="pending")
 
+    # ---- 结构化标签（前置依赖 / 下一步触发 / 优先级 P0-P9 / 流水线节点）----
+    def set_depends(self, entity, issue_no, note=""):
+        """打「前置依赖」标签：depends_on，value 存前置 Issue 编号。"""
+        return self.apply_label(entity, "depends_on", value=str(issue_no),
+                                note=note or "前置依赖")
+
+    def set_next_step(self, entity, issue_no, note=""):
+        """打「完成后下一步触发」标签：next_step，value 存下一步 Issue 编号。"""
+        return self.apply_label(entity, "next_step", value=str(issue_no),
+                                note=note or "完成后下一步触发")
+
+    def set_priority(self, entity, p_level, note=""):
+        """打优先级标签：p0..p9（P0-P9 大盘，p0 最紧急→p9 最不紧急，正交维度）。"""
+        if p_level not in self.PRIORITY_SCALE:
+            return {"ok": False, "error": "INVALID_PRIORITY", "priority": p_level,
+                    "valid": self.PRIORITY_SCALE}
+        return self.apply_label(entity, p_level, note=note or "P0-P9 优先级大盘")
+
+    def set_pipeline_node(self, entity, node, value="", note=""):
+        """打流水线自动化关键节点标签（at_node / trigger_next / gate）。"""
+        if node not in self.PIPELINE_NODE_LABELS:
+            return {"ok": False, "error": "INVALID_PIPELINE_NODE", "node": node,
+                    "valid": self.PIPELINE_NODE_LABELS}
+        return self.apply_label(entity, node, value=value,
+                                note=note or "流水线关键节点")
+
+    def dependencies(self, entity):
+        """查某实体的前置依赖（depends_on 标签列表）。"""
+        labels = self._repo().list_labels(label_key="depends_on", entity=entity)
+        return [l["value"] for l in labels if l.get("action", "apply") != "remove"]
+
+    def next_steps(self, entity):
+        """查某实体的完成后下一步触发（next_step 标签列表）。"""
+        labels = self._repo().list_labels(label_key="next_step", entity=entity)
+        return [l["value"] for l in labels if l.get("action", "apply") != "remove"]
+
     # ---- 事件驱动自动打标（AutoLabelEngine 透传）----
-    def auto_trigger(self, event, entity, goal_total=None, current=None, note=""):
-        """事件驱动自动打标：事件到达即按规则打标，无需 agent 记得去调。"""
+    def auto_trigger(self, event, entity, goal_total=None, current=None,
+                     note="", value=""):
+        """事件驱动自动打标：事件到达即按规则打标，无需 agent 记得去调。
+
+        value 携带事件值（priority.set → p0..p9 / next.trigger → 下一步 issue 编号）。
+        """
         from label.auto import AutoLabelEngine
         return AutoLabelEngine(owner=self).trigger(
             event=event, entity=entity, goal_total=goal_total,
-            current=current, note=note)
+            current=current, note=note, value=value)
 
     # ---- 权限判定 ----
     def _check_permission(self):
@@ -172,7 +230,11 @@ class LabelAbility:
             "desc": "标签管理 + 程序化进度/状态/标签查询（MCP 管线）+ 事件驱动自动打标",
             "methods": ["query_progress", "query_status", "query_labels",
                         "apply_label", "remove_label", "propose_label",
-                        "review_request", "auto_trigger"],
+                        "review_request", "auto_trigger",
+                        "set_depends", "set_next_step", "set_priority",
+                        "set_pipeline_node", "dependencies", "next_steps"],
+            "priority_scale": self.PRIORITY_SCALE,
+            "pipeline_nodes": self.PIPELINE_NODE_LABELS,
             "direct_operators": sorted(self.DIRECT_OPERATORS),
             "rules": self.RULES,
         }

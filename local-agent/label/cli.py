@@ -14,12 +14,19 @@
   python -m label.cli apply --entity issue-12 --label in_progress --operator 架构·开发
   python -m label.cli remove --entity issue-12 --label need_fix --operator 架构·评审
   # 提议（全员）
-  python -m label.cli propose --entity issue-12 --label p0_critical --operator 市场·销售 --reason 阻塞上线
+  python -m label.cli propose --entity issue-12 --label p0 --operator 市场·销售 --reason 阻塞上线
   # 审批（标签管理员）
   python -m label.cli review --request lq-xxx --operator 架构·数据管理员 --decision approved
   # 事件驱动自动打标
   python -m label.cli auto --event progress.advance --entity issue-12 --goal-total 10 --current 4
   python -m label.cli refresh --entity issue-12 --goal-total 5 --current 5
+  # 结构化标签：前置依赖 / 下一步触发 / 优先级 P0-P9 / 流水线节点
+  python -m label.cli depends --entity issue-12 --issue 11
+  python -m label.cli next --entity issue-12 --issue 13
+  python -m label.cli priority --entity issue-12 --level p3
+  python -m label.cli node --entity issue-12 --node at_node --value develop
+  python -m label.cli deps --entity issue-12       # 查前置依赖
+  python -m label.cli nexts --entity issue-12      # 查下一步触发
 """
 import argparse
 import os
@@ -96,6 +103,35 @@ def main(argv=None):
     sp.add_argument("--current", type=float, required=True)
     add_common(sp)
 
+    sp = sub.add_parser("depends", help="打前置依赖标签")
+    sp.add_argument("--entity", required=True)
+    sp.add_argument("--issue", required=True)
+    add_common(sp)
+
+    sp = sub.add_parser("next", help="打完成后下一步触发标签")
+    sp.add_argument("--entity", required=True)
+    sp.add_argument("--issue", required=True)
+    add_common(sp)
+
+    sp = sub.add_parser("priority", help="打优先级 P0-P9 大盘标签")
+    sp.add_argument("--entity", required=True)
+    sp.add_argument("--level", required=True)
+    add_common(sp)
+
+    sp = sub.add_parser("node", help="打流水线自动化关键节点标签")
+    sp.add_argument("--entity", required=True)
+    sp.add_argument("--node", required=True, choices=["at_node", "trigger_next", "gate"])
+    sp.add_argument("--value", default="")
+    add_common(sp)
+
+    sp = sub.add_parser("deps", help="查前置依赖")
+    sp.add_argument("--entity", required=True)
+    add_common(sp)
+
+    sp = sub.add_parser("nexts", help="查下一步触发")
+    sp.add_argument("--entity", required=True)
+    add_common(sp)
+
     args = p.parse_args(argv)
     if not args.cmd:
         p.print_help()
@@ -132,6 +168,18 @@ def main(argv=None):
         print(AutoLabelEngine(owner=args.operator).trigger(
             "issue.update", args.entity, goal_total=args.goal_total,
             current=args.current, note="CLI refresh"))
+    elif args.cmd == "depends":
+        print(ab.set_depends(args.entity, args.issue))
+    elif args.cmd == "next":
+        print(ab.set_next_step(args.entity, args.issue))
+    elif args.cmd == "priority":
+        print(ab.set_priority(args.entity, args.level))
+    elif args.cmd == "node":
+        print(ab.set_pipeline_node(args.entity, args.node, value=args.value))
+    elif args.cmd == "deps":
+        print("depends_on:", ab.dependencies(args.entity))
+    elif args.cmd == "nexts":
+        print("next_step:", ab.next_steps(args.entity))
 
 
 if __name__ == "__main__":

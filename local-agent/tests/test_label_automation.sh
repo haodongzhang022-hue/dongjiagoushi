@@ -45,14 +45,14 @@ TABLES=$(PY "import sys;sys.path.insert(0,'$REPO_ROOT/local-agent');from data im
 assert_eq "T-L1 labels/label_requests 表存在" "$TABLES" "True"
 
 # T-L2 规范标签集
-SPECS=$(PY "from label import LabelAbility; print(len(LabelAbility.VALID_LABELS)>=20, 'in_progress' in LabelAbility.VALID_LABELS, 'p0_critical' in LabelAbility.VALID_LABELS)")
-assert_eq "T-L2 规范标签集 20+ / 含 in_progress / p0_critical" "$SPECS" "True True True"
+SPECS=$(PY "from label import LabelAbility; print(len(LabelAbility.VALID_LABELS)>=30, 'in_progress' in LabelAbility.VALID_LABELS, 'p0' in LabelAbility.VALID_LABELS)")
+assert_eq "T-L2 规范标签集 30+ / 含 in_progress / p0(P0-P9大盘)" "$SPECS" "True True True"
 
 # T-L3 一线直接打标
 OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.apply_label('issue-51','in_progress'))")
 assert_pass "T-L3 开发直接打标 in_progress" "$OUT"
-OUT=$(PY "from roles.manager import ManagerRole; r=ManagerRole(); print(r.apply_label('issue-51','p1_high'))")
-assert_pass "T-L3 经理直接打标 p1_high" "$OUT"
+OUT=$(PY "from roles.manager import ManagerRole; r=ManagerRole(); print(r.apply_label('issue-51','p1'))")
+assert_pass "T-L3 经理直接打标 p1(P0-P9)" "$OUT"
 
 # T-L4 越权拦截
 OUT=$(PY "from roles.market import SalesRole; r=SalesRole(); print(r.apply_label('issue-51','done'))")
@@ -61,8 +61,8 @@ OUT=$(PY "from roles.market import SalesRole; r=SalesRole(); print(r.apply_label
 assert_fail "T-L4 非规范标签拦截" "$OUT"
 
 # T-L5 全员提议 + 管理员审批
-OUT=$(PY "from roles.market import SalesRole; r=SalesRole(); print(r.propose_label('issue-51','p0_critical','阻塞上线'))")
-assert_pass "T-L5 销售提议 p0_critical" "$OUT"
+OUT=$(PY "from roles.market import SalesRole; r=SalesRole(); print(r.propose_label('issue-51','p0','阻塞上线'))")
+assert_pass "T-L5 销售提议 p0(P0-P9)" "$OUT"
 REQ=$(PY "from label import LabelAbility; print(LabelAbility(owner='x').pending_requests()[0]['request_id'])")
 OUT=$(PY "from roles.data_admin import DataAdminRole; r=DataAdminRole(); print(r.review_label_request('$REQ','approved'))")
 assert_contains "T-L5 管理员审批通过自动落标" "$OUT" "approved"
@@ -92,7 +92,7 @@ OUT=$(cd local-agent && python3 -m label.cli status --entity issue-90)
 assert_contains "T-L8 CLI status 程序化查状态" "$OUT" "in_progress"
 OUT=$(cd local-agent && python3 -m label.cli apply --entity issue-91 --label done --operator 架构·评审)
 assert_contains "T-L8 CLI apply 一线打标" "$OUT" "done"
-OUT=$(cd local-agent && python3 -m label.cli propose --entity issue-92 --label p2_normal --operator 市场·销售 --reason 补充)
+OUT=$(cd local-agent && python3 -m label.cli propose --entity issue-92 --label p2 --operator 市场·销售 --reason 补充)
 assert_contains "T-L8 CLI propose 全员提议" "$OUT" "pending"
 OUT=$(cd local-agent && python3 -m label.cli apply --entity issue-93 --label done --operator 市场·销售)
 assert_contains "T-L8 CLI 越权拦截" "$OUT" "NO_PERMISSION"
@@ -100,8 +100,8 @@ assert_contains "T-L8 CLI 越权拦截" "$OUT" "NO_PERMISSION"
 # T-L9 进度推手角色
 OUT=$(PY "from label.progress_pusher import ProgressPusherRole; r=ProgressPusherRole(); print(r.push_progress('issue-100',goal_total=10,current=6))")
 assert_contains "T-L9 进度推手 push_progress" "$OUT" "progress_pct:60%"
-OUT=$(PY "from label.progress_pusher import ProgressPusherRole; r=ProgressPusherRole(); print(r.push_priority('issue-100','p1_high'))")
-assert_contains "T-L9 进度推手 push_priority" "$OUT" "p1_high"
+OUT=$(PY "from label.progress_pusher import ProgressPusherRole; r=ProgressPusherRole(); print(r.push_priority('issue-100','p1'))")
+assert_contains "T-L9 进度推手 push_priority" "$OUT" "p1"
 OUT=$(PY "from label.progress_pusher import ProgressPusherRole; r=ProgressPusherRole(); print(r.check_auto('issue-100'))")
 assert_contains "T-L9 进度推手 check_auto 自动化触发" "$OUT" "actions"
 
@@ -119,6 +119,42 @@ AGENTS=$(grep -c "架构·进度推手\|标签管理机制\|LabelAbility\|AutoLa
 [ "$AGENTS" -ge 1 ] && { PASS=$((PASS+1)); echo "  ✅ T-L12 AGENTS.md 标签机制固定规则"; } || { FAIL=$((FAIL+1)); FAILED_ITEMS+=("[T-L12] AGENTS.md 缺标签机制"); echo "  ❌ T-L12 AGENTS.md 缺标签机制"; }
 DOC=$(ls docs/LABEL_AUTOMATION.md 2>/dev/null || echo MISSING)
 assert_contains "T-L12 文档 LABEL_AUTOMATION.md" "$DOC" "LABEL_AUTOMATION"
+
+# T-L13 解耦调用：LabelAbility 是通用模块能力，全员统一挂载，不各自声明用法
+OUT=$(PY "from roles.base import BaseRole; from roles.product import ProductRole; from roles.developer import DeveloperRole; print(isinstance(ProductRole().label_ability, __import__('label').LabelAbility), isinstance(DeveloperRole().label_ability, __import__('label').LabelAbility), 'label_ability' in BaseRole.__init__.__code__.co_names)")
+assert_contains "T-L13 解耦：全员共用同一 LabelAbility 模块能力" "$OUT" "True True"
+# 各角色不各自声明用法，统一走 label_ability 透传方法
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(callable(getattr(r,'set_priority',None)), callable(getattr(r,'set_depends',None)), callable(getattr(r,'set_pipeline_node',None)))")
+assert_eq "T-L13 角色统一透传结构化标签方法" "$OUT" "True True True"
+
+# T-L14 前置依赖 / 下一步触发标签（depends_on / next_step，value 存 Issue 编号）
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.set_depends('issue-400','11'))")
+assert_contains "T-L14 打前置依赖 depends_on" "$OUT" "depends_on"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.set_next_step('issue-400','13'))")
+assert_contains "T-L14 打下一步触发 next_step" "$OUT" "next_step"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.dependencies('issue-400'), r.next_steps('issue-400'))")
+assert_contains "T-L14 查前置依赖/下一步" "$OUT" "['11'] ['13']"
+
+# T-L15 优先级 P0-P9 大盘（正交维度）
+OUT=$(PY "from label import LabelAbility; print(sorted(LabelAbility.PRIORITY_SCALE))")
+assert_contains "T-L15 P0-P9 全档位" "$OUT" "'p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.set_priority('issue-400','p0'), r.set_priority('issue-400','p9'))")
+assert_contains "T-L15 P0 与 P9 优先级可打" "$OUT" "'ok': True"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.set_priority('issue-400','p99'))")
+assert_fail "T-L15 非法优先级 p99 拦截" "$OUT"
+# 事件自动设优先级
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.auto_trigger('priority.set','issue-400',value='p3'))")
+assert_contains "T-L15 事件自动设优先级 P0-P9" "$OUT" "priority:p3"
+
+# T-L16 流水线自动化关键节点标签 + 事件自动触发
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.set_pipeline_node('issue-400','at_node','develop'))")
+assert_contains "T-L16 打流水线节点 at_node" "$OUT" "at_node"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.auto_trigger('deps.met','issue-400'))")
+assert_contains "T-L16 前置依赖满足→ready" "$OUT" "ready"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.auto_trigger('next.trigger','issue-400'))")
+assert_contains "T-L16 下一步自动触发→at_node+trigger_next" "$OUT" "trigger_next"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.set_pipeline_node('issue-400','bad'))")
+assert_fail "T-L16 非法流水线节点拦截" "$OUT"
 
 rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
 

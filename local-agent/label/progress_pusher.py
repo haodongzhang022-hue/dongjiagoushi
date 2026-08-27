@@ -46,11 +46,21 @@ class ProgressPusherRole(BaseRole):
         return applied
 
     def push_priority(self, entity, priority, reason=""):
-        """设定/调整优先级（P0/P1/P2/P3 统一字段，正交维度）。"""
-        if priority not in ("p0_critical", "p1_high", "p2_normal", "p3_low"):
-            return {"ok": False, "error": "INVALID_PRIORITY", "priority": priority,
-                    "valid": ["p0_critical", "p1_high", "p2_normal", "p3_low"]}
-        return self.apply_label(entity, priority, note=reason or "进度推手设优先级")
+        """设定/调整优先级（P0-P9 大盘：p0 最紧急→p9 最不紧急，正交维度）。"""
+        return self.set_priority(entity, priority, note=reason or "进度推手设优先级")
+
+    def push_depends(self, entity, issue_no):
+        """打前置依赖标签（depends_on → value 存前置 Issue 编号）。"""
+        return self.set_depends(entity, issue_no, note="进度推手标前置依赖")
+
+    def push_next_step(self, entity, issue_no):
+        """打完成后下一步触发标签（next_step → value 存下一步 Issue 编号）。"""
+        return self.set_next_step(entity, issue_no, note="进度推手标下一步触发")
+
+    def push_pipeline_node(self, entity, node, value=""):
+        """打流水线自动化关键节点标签（at_node/trigger_next/gate）。"""
+        return self.set_pipeline_node(entity, node, value=value,
+                                      note="进度推手标流水线节点")
 
     def check_auto(self, entity, task_id="", stall_rounds=3, priority=""):
         """自动化触发检查：进度停滞→1级打断重规划；高优先级阻塞→升级上报。
@@ -69,11 +79,14 @@ class ProgressPusherRole(BaseRole):
                             "entity": entity, "task_id": task_id,
                             "percent": pct, "distance": prog.get("distance"),
                             "note": "进度推手已刷新进度标签，停滞判定交给监控哨兵 distance"})
-        # 高优先级阻塞
-        has_p0 = any(l["label_key"] == "p0_critical" for l in labels)
-        if has_p0:
+        # 高优先级阻塞（P0-P9 大盘：P0/P1 为高优，需关注阻塞）
+        from label import LabelAbility
+        high_prio = [f"p{i}" for i in (0, 1)]
+        has_high = any(l["label_key"] in high_prio for l in labels)
+        if has_high:
+            prio_key = next((l["label_key"] for l in labels if l["label_key"] in high_prio), "p0")
             actions.append({"kind": "escalate",
-                            "entity": entity, "reason": "P0 高优先级任务需关注阻塞",
+                            "entity": entity, "reason": f"{prio_key.upper()} 高优先级任务需关注阻塞",
                             "action": "升级上报"})
         return {"entity": entity, "percent": pct, "actions": actions}
 
@@ -81,7 +94,8 @@ class ProgressPusherRole(BaseRole):
         return {
             "role": self.name,
             "contract": (
-                "进度标签(progress_pct) / 优先级(P0-P3) / 事件驱动自动打标 / "
-                "基于进度触发自动化(停滞喂哨兵打断 / 高优先级阻塞升级上报)"
+                "进度标签(progress_pct) / 优先级(P0-P9 大盘) / 前置依赖(depends_on) / "
+                "下一步触发(next_step) / 流水线节点(at_node/trigger_next/gate) / "
+                "事件驱动自动打标 / 基于进度触发自动化(停滞喂哨兵打断 / 高优先级阻塞升级上报)"
             ),
         }

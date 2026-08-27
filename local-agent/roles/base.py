@@ -308,18 +308,49 @@ class BaseRole:
         return self.label_ability.review_request(request_id, decision=decision,
                                                  note=note)
 
-    def auto_trigger(self, event, entity, goal_total=None, current=None, note=""):
-        """事件驱动自动打标：事件到达即按规则打标，无需 agent 记得去调。"""
+    def auto_trigger(self, event, entity, goal_total=None, current=None,
+                     note="", value=""):
+        """事件驱动自动打标：事件到达即按规则打标，无需 agent 记得去调。
+
+        value 携带事件值（priority.set → p0..p9 / next.trigger → 下一步 issue 编号）。
+        """
         if self.label_ability is None:
             raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
         return self.label_ability.auto_trigger(event, entity,
                                                goal_total=goal_total,
-                                               current=current, note=note)
+                                               current=current, note=note,
+                                               value=value)
     def pending_label_requests(self):
         """查看待审批标签提议（标签管理员用）。"""
         if self.label_ability is None:
             raise RuntimeError(f"角色 {self.name} 未加载标签管理能力")
         return self.label_ability.pending_requests()
+
+    # ---- 结构化标签（通用模块能力透传：前置依赖 / 下一步 / 优先级 P0-P9 / 流水线节点）----
+    def set_depends(self, entity, issue_no, note=""):
+        """打前置依赖标签（depends_on → value 存前置 Issue 编号）。"""
+        return self.label_ability.set_depends(entity, issue_no, note=note)
+
+    def set_next_step(self, entity, issue_no, note=""):
+        """打完成后下一步触发标签（next_step → value 存下一步 Issue 编号）。"""
+        return self.label_ability.set_next_step(entity, issue_no, note=note)
+
+    def set_priority(self, entity, p_level, note=""):
+        """打优先级标签（P0-P9 大盘：p0 最紧急→p9 最不紧急，正交维度）。"""
+        return self.label_ability.set_priority(entity, p_level, note=note)
+
+    def set_pipeline_node(self, entity, node, value="", note=""):
+        """打流水线自动化关键节点标签（at_node / trigger_next / gate）。"""
+        return self.label_ability.set_pipeline_node(entity, node, value=value,
+                                                    note=note)
+
+    def dependencies(self, entity):
+        """查某实体的前置依赖（depends_on 标签）。"""
+        return self.label_ability.dependencies(entity)
+
+    def next_steps(self, entity):
+        """查某实体的完成后下一步触发（next_step 标签）。"""
+        return self.label_ability.next_steps(entity)
 
 
     def capability(self):
