@@ -59,6 +59,11 @@ def main():
     # ---- 规模预设 + 强制入口（测试关键发现修复）----
     parser.add_argument("--prescale", action="store_true", help="对需求做规模预设（澄清阶段基准锚点）")
     parser.add_argument("--complexity", default=None, help="显式指定复杂度带：simple/medium/complex")
+    # ---- 融合路由接线（打通"规模→拓扑→执行"断点）----
+    parser.add_argument("--no-fusion", action="store_true", help="回退老行为：不走融合路由，硬编码 team.yaml dag")
+    parser.add_argument("--topo", default=None, help="显式指定拓扑：linear/dag/event/hybrid/scatter/agile/prefix（绕过规模评估）")
+    parser.add_argument("--subtasks", type=int, default=None, help="显式子任务数（融合路由规模信号）")
+
     parser.add_argument("--guard-entry", action="store_true", help="校验强制入口（是否必须经架构·秘书）")
     parser.add_argument("--direct-role", default=None, help="显式 @ 的角色（用于校验是否跳过秘书）")
     parser.add_argument("--prescale-records", action="store_true", help="列出规模预设留痕记录")
@@ -148,7 +153,14 @@ def main():
         parser.error("--req 必填（除非使用 --list-roles/--list-profiles/--resume/--clear）")
 
     if args.pipeline:
-        report = orchestrator.run_pipeline(args.req, backend=args.backend)
+        report = orchestrator.run_pipeline(
+            args.req,
+            backend=args.backend,
+            use_fusion=not args.no_fusion,
+            force_topology=args.topo,
+            complexity=args.complexity,
+            subtasks=args.subtasks,
+        )
         print("\n===== 交付报告 =====")
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
