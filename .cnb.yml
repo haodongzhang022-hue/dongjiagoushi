@@ -42,6 +42,8 @@ main:
             bash local-agent/tests/test_scale.sh
             echo "==== 规模预设+强制秘书入口测试（prescale-entry：澄清阶段预设/经验方案库/秘书不可跳过） ===="
             bash local-agent/tests/test_prescale_entry.sh
+            echo "==== 自适应 @ 定位能力测试（handle：不写死角色名/跨库权限定位/同仓复用防冗余） ===="
+            bash tests/test_handle_ability.sh
             echo "==== 上位机定时器+状态机引擎测试（engine：状态机合法转移/强制校验/定时器超时/上位机整合） ===="
             bash local-agent/tests/test_engine.sh
             echo "==== 数据管理层测试（data：数据库承载/内容存档/进度统计/消息管线/任务存储/数据管理员/2500并发） ===="
@@ -62,8 +64,16 @@ main:
             bash local-agent/tests/test_dispatcher.sh
             echo "==== 脉冲式信号探测器测试（probe：有条件就触发/路由到脚本/不轮询/不静默失败） ===="
             bash local-agent/tests/test_probe.sh
+            echo "==== 经理四层分发深度引擎测试（dispatch-engine：L1声明→L2分发→L3触发→L3.5接单→L4工作交付，验收口径=走到L4） ===="
+            bash local-agent/tests/test_dispatch_engine.sh
             echo "==== 升级模拟测试（ops·sim：全局唯一gid/任务池/小组长监督/任务拆分/1-3PR） ===="
             bash local-agent/tests/test_ops_sim.sh
+            echo "==== 拓扑对比测试（topology-comparison：多线路对比执行/指标累积/长时间判断） ===="
+            bash local-agent/tests/test_topology_comparison.sh
+            echo "==== 真实任务AB隔离对比测试（benchmark-ab：真实未完成任务的拓扑对比/9维度/资源监控/隔离） ===="
+            bash local-agent/tests/test_benchmark_ab.sh
+            echo "==== 混合调度与零散差分测试（topology-hybrid：中央调控+一窝蜂抢单 / 零散一窝蜂 / 规模可调 / 任务性质差分） ===="
+            bash local-agent/tests/test_topology_hybrid.sh
             echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="
             bash tests/test_company_model.sh
             echo "==== 端到端小需求测试（mini-e2e：小需求端到端信号灯） ===="

@@ -12,3 +12,9 @@ __pycache__/
 # 数据层运行时数据库（本地 sqlite 库，不进版本库）
 local-agent/data/runtime.db*
 local-agent/data/__pycache__/
+
+# 拓扑对比运行时指标（本地累积，不进版本库）
+local-agent/topology/_metrics/
+
+# 真实任务 AB 隔离对比运行时隔离目录（本地累积，不进版本库）
+local-agent/topology/_bench/
