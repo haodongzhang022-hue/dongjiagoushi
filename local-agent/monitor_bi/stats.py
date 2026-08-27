@@ -16,7 +16,6 @@ monitor_bi · 四维统计引擎（M1 · stats.py）
 
 复用现有 data 层（repository），不重造引擎；只做**聚合查询**，不改任何角色业务逻辑。
 """
-from data import repository as repo
 from monitor_bi.util import query as _query
 
 
