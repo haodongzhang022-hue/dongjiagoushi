@@ -2,13 +2,17 @@
 """
 角色基类：定义统一执行接口 + 全员通用能力挂载。
 
-两大全员能力（Issue #33 用户拍板）：
+三大全员能力：
   - **派发能力（DispatchAbility）**：全员可派发、可接单（L1→L4 四层深度闭环）；
   - **自适应 @ 定位能力（HandleAbility）**：根据当前触发仓库动态识别自身完整
-    @ 格式 + 跨库定位目标仓库有权限角色（不写死角色名/承载仓库/org）。
+    @ 格式 + 跨库定位目标仓库有权限角色（不写死角色名/承载仓库/org）；
+  - **七层协作深度能力（DepthAbility，Issue #47）**：L1表述→L2任务对接→L3开工
+    (含路由真实唤醒)→L4成果交互→L5进度可控·自动化维持→L6持续到结果→L7全自动到结果。
+    让路由**真唤醒**目标 agent（不是只描述），并可持续推进到结果。
 
 团队因此从「散兵」升级为「可协作体系」：每个 agent 既会「派活接单」，也能
-「跨仓库用对权限的 @ 召唤目标角色」，不再依赖写死的角色名。
+「跨仓库用对权限的 @ 召唤目标角色」，还能「七层深度推进到结果」，
+不再依赖写死的角色名，也不再停留于"嘴上说推进"。
 
 使用方式（任意角色实例上）：
     role = DeveloperRole()
@@ -18,6 +22,9 @@
     # --- 自适应 @ 定位 ---
     role.self_handle()                   # 自身完整 @ 格式（身份声明不写死）
     role.resolve("other/repo", "CodeBuddy")  # 跨库定位目标仓库有权限角色
+    # --- 七层协作深度（Issue #47）---
+    role.awake(task_key, "架构·产品", context=...)  # 路由真实唤醒（校验回执）
+    role.persist_to_result(task_key, milestones)    # 一套持续到结果（L6 秘书档位）
 """
 import os
 import sys
@@ -31,9 +38,10 @@ if _LOCAL_AGENT_DIR not in sys.path:
 class BaseRole:
     """所有角色继承。子类实现 SYSTEM_PROMPT 与 output_contract()。
 
-    默认挂载两大全员能力：
+    默认挂载三大全员能力：
       - 通用派发能力（DispatchAbility）：全员可派发、可接单；
-      - 自适应 @ 定位能力（HandleAbility）：自我识别 + 跨库权限定位。
+      - 自适应 @ 定位能力（HandleAbility）：自我识别 + 跨库权限定位；
+      - 七层协作深度能力（DepthAbility）：路由真唤醒 + L1-L7 持续推进到结果。
     """
 
     name = ""
@@ -61,6 +69,113 @@ class BaseRole:
             )
         except Exception:
             self.handle_ability = None
+        # 懒加载七层协作深度能力（Issue #47：路由真唤醒 + L1-L7 持续到结果）
+        try:
+            from depth import DepthAbility
+            self.depth_ability = DepthAbility(owner=self)
+        except Exception:
+            self.depth_ability = None
+
+    # ------------------------------------------------------------
+    # 七层协作深度能力透传（全员通用 · Issue #47）
+    # ------------------------------------------------------------
+    def express(self, task_key, to_agent, message, from_agent=None):
+        """L1 表述层：向目标角色传达信息（是否真唤醒由 L3 校验）。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.express(task_key, to_agent, message,
+                                          from_agent=from_agent)
+
+    def connect(self, task_key, issue_ref="", role="架构·开发", domain="通用",
+                title="", detail="", repo=""):
+        """L2 任务对接层：任务落到 Issue + 匹配到 agent。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.connect(task_key, issue_ref=issue_ref,
+                                          role=role, domain=domain,
+                                          title=title, detail=detail, repo=repo)
+
+    def awake(self, task_key, target_agent, context="", issue_ref="", from_agent=None):
+        """L3 路由真实唤醒：投递接力卡并校验目标 agent 是否真回执 [接单]。
+
+        解决"路由其实并没有真实现唤醒"——未回执 = 未唤醒，须重触发或升级。
+        """
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.awake(task_key, target_agent,
+                                        context=context, issue_ref=issue_ref,
+                                        from_agent=from_agent)
+
+    def ack_wake(self, task_key, role="", note="", agent_id=None):
+        """L3 被唤醒方回执：确认接管，标记路由真实唤醒成立。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.ack_wake(task_key, role=role, note=note,
+                                           agent_id=agent_id)
+
+    def start_work(self, task_key, role="", note="", agent_id=None):
+        """L3 开工：接单后正式开工。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.start_work(task_key, role=role, note=note,
+                                             agent_id=agent_id)
+
+    def interact(self, task_key, consumer_agent, artifact, producer_agent=None,
+                 feedback=None):
+        """L4 成果交互：产出交付给消费方，消费方可回读并反馈（双向）。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.interact(task_key, consumer_agent, artifact,
+                                           producer_agent=producer_agent,
+                                           feedback=feedback)
+
+    def track_round(self, task_key, target, goal_total, current, note="",
+                    agent_id=None, role=""):
+        """L5 进度可控 + 轮次触发：写进度尺。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.track_round(task_key, target, goal_total,
+                                              current, note=note,
+                                              agent_id=agent_id, role=role)
+
+    def auto_guard(self, task_key, rule="stall_escalate", timeout_rounds=3,
+                   agent_id=None):
+        """L5 自动化规则维持流程：哨兵收敛/超时重触发/停滞升级。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.auto_guard(task_key, rule=rule,
+                                             timeout_rounds=timeout_rounds,
+                                             agent_id=agent_id)
+
+    def persist_to_result(self, task_key, milestones, role="",
+                          need_human_gate=False, agent_id=None):
+        """L6 持续到结果：一套自动化按里程碑推进到结果（秘书目标档位）。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.persist_to_result(
+            task_key, milestones, role=role, need_human_gate=need_human_gate,
+            agent_id=agent_id)
+
+    def auto_run_to_result(self, task_key, milestones, role="", max_rounds=10,
+                           agent_id=None):
+        """L7 全自动到结果：无需人工中断，全自动闭环（体系目标档位）。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.auto_run_to_result(
+            task_key, milestones, role=role, max_rounds=max_rounds,
+            agent_id=agent_id)
+
+    def depth_of(self, task_key):
+        """查询任务当前已达深度层。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.depth_of(task_key)
+
+    def depth_overview(self):
+        """按七层深度俯瞰所有任务（二级信息）。"""
+        if self.depth_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        return self.depth_ability.depth_overview()
 
     # ------------------------------------------------------------
     # 自适应 @ 定位能力透传（全员通用）
@@ -140,12 +255,14 @@ class BaseRole:
             task_key, agent_id, output, issue_ref=issue_ref, role=role or self.name)
 
     def capability(self):
-        """返回本角色的能力清单（含两大全员通用能力）。"""
+        """返回本角色的能力清单（含三大全员通用能力）。"""
         base = {"role": self.name}
         if self.dispatch_ability is not None:
             base["dispatch_ability"] = self.dispatch_ability.capability()
         if self.handle_ability is not None:
             base["handle_ability"] = self.handle_ability.capability()
+        if self.depth_ability is not None:
+            base["depth_ability"] = self.depth_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----

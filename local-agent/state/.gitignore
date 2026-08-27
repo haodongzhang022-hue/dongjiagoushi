@@ -9,3 +9,5 @@ prescale_records.json
 dev_*.json
 prod_*.json
 test_*.json
+# 秘书感知决策缓存分片（运行时产物，不纳入版本库）
+secretary_sense/

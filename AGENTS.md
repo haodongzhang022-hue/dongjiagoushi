@@ -99,6 +99,35 @@
 > 派发能力全员化 ≠ 无序派发：派发有边界（职责域）、有留痕（gid + 进度尺 + 交付）、
 > 有监督（哨兵收敛判定 + 经理统一协调跨岗位）。
 
+### 七层协作深度能力全员化（DepthAbility · 通用复用能力 · 固定规则 · Issue #47）
+
+协作不能只停在"表述/描述"，要能**真唤醒对端 + 持续推进到结果**。已统一开发为通用
+能力 `DepthAbility`（`local-agent/depth/`，含 `engine.py` 引擎 + `ability.py` 封装），
+默认挂载到**所有角色基类** `BaseRole`——每个 agent 都能把协作推到可核验的深度，
+不再"嘴上说在推进"（详见 `docs/DEPTH_MODEL.md`）：
+
+- **七层深度阶梯**：L1 表述（到对应角色拿信息）→ L2 任务对接（Issue + agent 匹配）→
+  L3 开工（**路由真实唤醒**）→ L4 成果交互（双向）→ L5 进度可控·自动化规则维持 →
+  L6 持续到结果 → L7 全自动到结果。**默认档位**：多数 agent 停 L5；**秘书目标 L6**、
+  **体系目标 L7**。
+- **路由真实唤醒（awake，Issue #47 核心）**：路由不是"传达完就完"——`awake()` 投
+  接力卡后**校验目标 agent 是否真回执 `[接单]`**，未回执 `awakened=False` = 路由未
+  真实唤醒，须重触发或升级，不静默放行。
+- **防跳层**：某层操作前须先完成前置深度（`require_depth`），不跳层空谈"到结果"。
+- **自动化规则维持**（L5 `auto_guard`）：收敛检查 / 超时重触发 / 停滞升级，持续维持
+  流程推进，不靠人肉盯。
+- **持续到结果**：秘书/派发方推到 L6（`persist_to_result`，收尾确认）；体系级推到
+  L7（`auto_run_to_result`，全自动无需人工中断）。
+- **全员可用**：任意角色 `express/connect/awake/ack_wake/start_work/interact/
+  track_round/auto_guard/persist_to_result/auto_run_to_result/depth_of/depth_overview`
+  直接调用；`capability()` 含 `depth_ability` 声明。
+- **秘书专项收口**：`SecretaryRole.route_wake()`（路由真实唤醒）+ `persist_to_result()`
+  （L6 秘书目标档位）。
+
+> 深度能力全员化 ≠ 只给秘书/经理：协作能走多深是**通用能力**，做好后以独立模块
+> 能力存在，给每个 agent 对接并让其会用；路由必须真唤醒（awake 校验回执），
+> 不能"只描述没唤醒"。
+
 ### 自适应 @ 定位能力全员化（HandleAbility · 通用复用能力 · 固定规则）
 
 跨库 / 跨仓召唤谁，**不得写死**角色名或承载仓库（如 `youkaifaxilieagent`），因为
@@ -295,12 +324,17 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── REVIEW_DISPOSITION.md           # 统一审查处置标签机制（适合合并/推进/改bug/调研/交人/会诊/投票）
   ├── PEER_COLLAB_CLOSURE.md          # 同岗协作收尾闭环（会诊→审核者前置→人类 全自动）
   ├── DISPATCH_DEPTH.md               # 分发递进深度模型（L1声明→L4工作交付，经理锁 L4）
+  ├── DEPTH_MODEL.md                   # 七层协作深度模型（L1表述→L7全自动到结果；路由真实唤醒）
   ├── DISPATCH_ABILITY.md             # 派发能力全员化（通用复用能力，全员可派发可接单）
   ├── HANDLE_ABILITY.md               # 自适应 @ 定位能力（不写死角色名/跨库权限/同仓复用）
   ├── CACHE_ARCHITECTURE.md           # 全链路缓存架构（LLM→角色壳→编排→末端→数据 5 层复用）
   ├── CACHE_MONITOR.md                # 缓存命中监控（按 agent 量化效果/浪费判定）
   ├── ROUTER.md                       # 融合路由接线层（规模→拓扑→可执行节点集，run_pipeline 动态执行）
   └── templates/issue-template.md     # Issue 结构化声明模板
+local-agent/depth/                    # 七层协作深度能力包（DepthAbility 全员能力 · Issue #47）
+  ├── engine.py                        # 七层深度引擎（L1表述→L7全自动到结果，可执行）
+  ├── ability.py                       # DepthAbility 能力封装（express/awake/persist/auto_run）
+  └── __init__.py                      # 导出 DepthAbility
 local-agent/dispatch/                 # 通用派发能力包（DispatchAbility 全员能力）
   ├── ability.py                      # 通用派发能力类（L1→L4 + 接单闭环）
   └── __init__.py                     # 导出 DispatchAbility

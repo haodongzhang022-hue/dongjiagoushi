@@ -116,3 +116,26 @@ class SecretaryRole(BaseRole):
         """秘书成果测试兜底接管（开发说完成但测试跑不通 → 接管 → 交人继续开发）。"""
         from . import secretary_sense
         return secretary_sense.takeover(dev_done_report, test_result, **kw)
+
+    # ------------------------------------------------------------
+    # 七层协作深度能力（Issue #47：路由真实唤醒 + 秘书到 L6 持续到结果）
+    # 由 BaseRole 全员挂载 DepthAbility 提供；此处秘书显式收口为「路由唤醒 → 持续到结果」。
+    # ------------------------------------------------------------
+    def route_wake(self, task_key, target_role, context="", issue_ref=""):
+        """秘书路由真实唤醒：向目标角色投递接力卡并校验是否真回执。
+
+        解决 Issue #47 核心痛点："路由其实并没有真实现唤醒"——秘书路由 @产品
+        后必须确认目标 agent 真的回执 [接单]，而不是只描述/传达。未回执 = 未唤醒，
+        返回 {awakened: False}，秘书须重触发或升级。
+        """
+        return self.awake(task_key, target_role, context=context,
+                          issue_ref=issue_ref, from_agent=self.name)
+
+    def persist_to_result(self, task_key, milestones, role="", need_human_gate=True):
+        """秘书目标档位 L6：一套自动化持续到结果（收尾确认后交付）。
+
+        秘书作为看门人/引导者，路由后要能一套持续到结果——不是"传完就完"，
+        而是驱动对端角色持续工作到产出可交付结果（默认需收尾确认，属 L6）。
+        """
+        return super().persist_to_result(task_key, milestones, role=role or self.name,
+                                         need_human_gate=need_human_gate)
