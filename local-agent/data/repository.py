@@ -611,3 +611,96 @@ def query_status(entity):
         "status": latest,
         "labels": labels,
     }
+
+
+# ================= token_usage（token 消耗记录 · BI M2） =================
+
+def upsert_token_usage(msg_id, agent_id="", role="", topic="", project="",
+                       token_count=0, method="estimate", ts=""):
+    """登记一条 token 消耗记录（按 msg_id 唯一去重，防重复计算）。
+
+    method: estimate=估算 / real=真实回传。
+    """
+    db.execute(
+        """
+        INSERT INTO token_usage (msg_id, agent_id, role, topic, project, token_count, method, ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(msg_id) DO UPDATE SET
+            agent_id=excluded.agent_id, role=excluded.role, topic=excluded.topic,
+            project=excluded.project, token_count=excluded.token_count,
+            method=excluded.method, ts=excluded.ts
+        """,
+        (msg_id, agent_id, role, topic, project, token_count, method, ts or db.now_iso()),
+    )
+    return msg_id
+
+
+def get_token_usage(msg_id):
+    row = db.query_one("SELECT * FROM token_usage WHERE msg_id=?", (msg_id,))
+    return dict(row) if row else None
+
+
+def list_token_usage(dim="", dim_value="", limit=1000):
+    """按维度（agent_id/role/topic/project）筛选 token 记录。"""
+    if dim and dim_value:
+        rows = db.query(
+            f"SELECT * FROM token_usage WHERE {dim}=? ORDER BY ts DESC LIMIT ?",
+            (dim_value, limit),
+        )
+    else:
+        rows = db.query("SELECT * FROM token_usage ORDER BY ts DESC LIMIT ?", (limit,))
+    return [dict(r) for r in rows]
+
+
+def token_total():
+    row = db.query_one("SELECT SUM(token_count) AS total FROM token_usage")
+    return row["total"] or 0 if row else 0
+
+
+def count_token_records():
+    row = db.query_one("SELECT COUNT(*) AS n FROM token_usage")
+    return row["n"] if row else 0
+
+
+# ================= code_changes（代码变化统计 · BI M3） =================
+
+def upsert_code_change(commit_id, agent_id="", project="", added=0, deleted=0, ts=""):
+    """登记一条代码变化记录（按 commit_id 唯一去重）。"""
+    db.execute(
+        """
+        INSERT INTO code_changes (commit_id, agent_id, project, added, deleted, ts)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(commit_id) DO UPDATE SET
+            agent_id=excluded.agent_id, project=excluded.project,
+            added=excluded.added, deleted=excluded.deleted, ts=excluded.ts
+        """,
+        (commit_id, agent_id, project, added, deleted, ts or db.now_iso()),
+    )
+    return commit_id
+
+
+def get_code_change(commit_id):
+    row = db.query_one("SELECT * FROM code_changes WHERE commit_id=?", (commit_id,))
+    return dict(row) if row else None
+
+
+def list_code_changes(dim="", dim_value="", limit=1000):
+    """按维度（agent_id/project）筛选代码变化记录。"""
+    if dim and dim_value:
+        rows = db.query(
+            f"SELECT * FROM code_changes WHERE {dim}=? ORDER BY ts DESC LIMIT ?",
+            (dim_value, limit),
+        )
+    else:
+        rows = db.query("SELECT * FROM code_changes ORDER BY ts DESC LIMIT ?", (limit,))
+    return [dict(r) for r in rows]
+
+
+def code_total():
+    row = db.query_one("SELECT COALESCE(SUM(added),0) AS added, COALESCE(SUM(deleted),0) AS deleted FROM code_changes")
+    return {"added": row["added"] or 0, "deleted": row["deleted"] or 0} if row else {"added": 0, "deleted": 0}
+
+
+def count_code_records():
+    row = db.query_one("SELECT COUNT(*) AS n FROM code_changes")
+    return row["n"] if row else 0
