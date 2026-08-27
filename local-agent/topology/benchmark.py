@@ -277,6 +277,23 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None, scale=
             for wave in waves:
                 _run_batch([engine.nodes[nid] for nid in wave], 0)
 
+    elif strategy in ("agile", "slim"):
+        # 敏捷承接·极简体系（agile）★ 占比最高的最小任务（micro/small）专用
+        #   只保留 产品→开发→审查→交付 四节点，去掉重型公司流程（防过度设计）。
+        #   依赖关系 product→develop→review→deliver，用 DagEngine 按 depends_on 计算波次。
+        #   cache-first 主线：共享需求前缀只构造一次，后续节点命中缓存只付增量 token。
+        engine = DagEngine(name=topology_id, description=topo["description"], nodes=nodes)
+        ok, err = engine.validate()
+        if not ok:
+            blocks += 1
+        else:
+            waves = engine.waves()
+            waves_used = len(waves)
+            # 跨波次共享前缀缓存状态：同一 role 的需求前缀只付一次，后续节点命中缓存增量蔓延
+            cache_state = {}
+            for wave in waves:
+                _run_batch([engine.nodes[nid] for nid in wave], 0, cache_state=cache_state)
+
     elif strategy in ("hybrid", "scatter"):
         # 混合调度 / 零散一窝蜂：按 phase 分组执行。
         #   hybrid:  central(中央调控·内部先吃核心) → scramble(余下一窝蜂抢单·全并行) → quality(收口)
