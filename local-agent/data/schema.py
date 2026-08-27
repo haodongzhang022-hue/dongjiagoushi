@@ -518,6 +518,41 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_lblreq_status ON label_requests(status)",
     "CREATE INDEX IF NOT EXISTS idx_lblreq_entity ON label_requests(entity)",
+    # ---- 31. token 消耗记录（token_usage · BI 大屏 token 分析 M2）----
+    # 按消息唯一去重（msg_id UNIQUE），method 标记估算(estimate)/真实(real)，
+    # 支持按 agent/岗位/对话/项目 四维聚合 + 时间趋势（AC-2）。
+    """
+    CREATE TABLE IF NOT EXISTS token_usage (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        msg_id        TEXT NOT NULL UNIQUE,     -- 关联消息唯一 id（防重复计算）
+        agent_id      TEXT DEFAULT '',          -- 归属 agent
+        role          TEXT DEFAULT '',          -- 归属岗位（秘书/产品/开发...）
+        topic         TEXT DEFAULT '',          -- 对话/会话标识
+        project       TEXT DEFAULT '',          -- 关联项目（issue/task gid）
+        token_count   INTEGER DEFAULT 0,        -- token 数
+        method        TEXT DEFAULT 'estimate',  -- estimate=估算 / real=真实回传
+        ts            TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_token_agent ON token_usage(agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_token_role ON token_usage(role)",
+    "CREATE INDEX IF NOT EXISTS idx_token_project ON token_usage(project)",
+    "CREATE INDEX IF NOT EXISTS idx_token_ts ON token_usage(ts)",
+    # ---- 32. 代码变化统计（code_changes · BI 大屏代码变化统计 M3）----
+    # 按 commit 归集 +/- 行（AC-4），可归集到项目/agent 呈现贡献分布。
+    """
+    CREATE TABLE IF NOT EXISTS code_changes (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        commit_id     TEXT NOT NULL UNIQUE,     -- 关联 commit id
+        agent_id      TEXT DEFAULT '',          -- 归属 agent
+        project       TEXT DEFAULT '',          -- 关联项目
+        added         INTEGER DEFAULT 0,        -- 新增行数
+        deleted       INTEGER DEFAULT 0,        -- 删除行数
+        ts            TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_code_agent ON code_changes(agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_code_project ON code_changes(project)",
 ]
 
 

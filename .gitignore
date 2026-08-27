@@ -21,3 +21,5 @@ local-agent/topology/_bench/
 
 # 高尔顿板运行时产物（worker 输出/汇总，不进版本库）
 local-agent/galton/_runtime/
+# BI 大屏运行时生成物（monitor_bi render 命令产物）
+docs/BI_DASHBOARD.md
