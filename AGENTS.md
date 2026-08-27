@@ -198,7 +198,7 @@
 
 ### 前期辅助与架构师渐进（规模预设 · 3 阶段）固定规则
 - **规模预设前置（可执行引擎）**：秘书/产品/架构师/调研在**需求澄清阶段**先按体量预设 `team_size + collab_plan + risk_level` + 检索经验方案库，作为增减基准锚点；架构明确后由**架构·经理按架构做增量修正**，不做从零规划。**已落地可执行引擎 `local-agent/scale/prescale.py`**（`prescale(req) → {team_size, collab_plan, risk_level, source}` + 经验方案库 `search_pattern` + 增量修正 `adjust_by_architect` + 强制留痕 `prescale_records`），并有测试断言『需求进入处理前必须先有预设记录』，红灯可查到底预没预设。
-- **规模金字塔 → 承接体系（固定规则 · Issue #41 纠偏）**：任务从最小到最大按规模分层承接，**小任务占比最高、最该优化**。micro/small（单任务修改/低复杂度）→ **简化体系·敏捷**（产品→开发→审查，不做重分工）；medium（中等）→ **加架构师**；large（高复杂度）→ **公司结构拉满**（DAG 全角色+分形+找工具/对齐）；huge（极高复杂度/大型）→ **完整体系** + 动态扩容 + 水龙头蔓延 + 带蔓延关系回传合并。**缓存命中为主线（cache-first）横贯所有档位**（micro/small 最简共享需求前缀 → huge 水龙头蔓延聚合）。已落地 `topology/fusion.py`（`TIER_SYSTEM` + `evaluate_scale` 含 micro 档）+ `topology/topologies.py` `agile` 极简拓扑。
+- **规模金字塔 → 承接体系（固定规则 · Issue #41 纠偏）**：任务从最小到最大按规模分层承接，**小任务占比最高、最该优化**。micro/small（单任务修改/低复杂度）→ **简化体系·敏捷**（产品→开发→审查，不做重分工）；medium（中等）→ **加架构师**；large（高复杂度）→ **公司结构拉满**（DAG 全角色+分形+找工具/对齐）；huge（极高复杂度/大型）→ **完整体系** + 动态扩容 + 水龙头蔓延 + 带蔓延关系回传合并。**缓存命中为主线（cache-first）横贯所有档位**（micro/small 最简共享需求前缀 → huge 水龙头蔓延聚合）。已落地 `topology/fusion.py`（`TIER_SYSTEM` + `evaluate_scale` 含 micro 档）+ `topology/topologies.py` `agile` 极简拓扑；并由 `topology/router.py` 接线层接入真实执行链路——`run_pipeline` 按规模动态选择并执行对应拓扑（agile 4 节点 / dag 11 / prefix 17 / scatter 15），不再硬编码 team.yaml dag（详见 `docs/ROUTER.md`）。
 - **架构师 3 阶段渐进**（避免一轮直出最大框架出错）：**阶段1 粗纲**（功能架构顶层框架）→ **阶段2 功能域**（逐模块填充实现架构）→ **阶段3 细纲**（接口/数据结构/伪代码细纲供开发接）。每阶段独立检查点，错误在早期暴露修正。
 
 ## 全局唯一编号（gid · 精准定位，二次触发同一实体）
@@ -299,6 +299,7 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── HANDLE_ABILITY.md               # 自适应 @ 定位能力（不写死角色名/跨库权限/同仓复用）
   ├── CACHE_ARCHITECTURE.md           # 全链路缓存架构（LLM→角色壳→编排→末端→数据 5 层复用）
   ├── CACHE_MONITOR.md                # 缓存命中监控（按 agent 量化效果/浪费判定）
+  ├── ROUTER.md                       # 融合路由接线层（规模→拓扑→可执行节点集，run_pipeline 动态执行）
   └── templates/issue-template.md     # Issue 结构化声明模板
 local-agent/dispatch/                 # 通用派发能力包（DispatchAbility 全员能力）
   ├── ability.py                      # 通用派发能力类（L1→L4 + 接单闭环）

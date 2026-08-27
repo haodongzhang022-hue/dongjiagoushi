@@ -119,7 +119,8 @@ def _fractal_develop(plan, req, llm, card, team):
     return card["output"]
 
 
-def run_pipeline(req, backend=None, llm=None, use_dag=True):
+def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
+             force_topology=None, complexity=None, subtasks=None, concurrency=None):
     """执行团队流水线到交付。默认走 DAG 调度；use_dag=False 回退线性。
 
     返回交付报告 dict。
@@ -133,12 +134,39 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
     # 2 次定团队规模·留痕：秘书澄清阶段第 1 次预设，经理按架构第 2 次增量修正
     scale_twice = {}
 
+    # ---- 融合路由：use_fusion=True 时按规模选拓扑动态执行（打通"规模→拓扑→执行"断点）----
+    dag_nodes = team["pipeline"]["dag"]["nodes"]
+    fusion_info = None
+    if use_fusion:
+        from topology import router as _router
+        try:
+            routed = _router.route_pipeline(
+                req, preset=scale_twice.get("first"),
+                complexity=complexity, subtasks=subtasks, concurrency=concurrency,
+                force=force_topology,
+            )
+            dag_nodes = routed["nodes"]
+            fusion_info = {
+                "selected": routed["selected"],
+                "tier": routed["tier"],
+                "system": routed["system"],
+                "reason": routed["reason"],
+                "node_count": len(routed["nodes"]),
+                "estimated": routed["estimated"],
+            }
+            report["fusion"] = fusion_info
+            print(f"\n▶ [融合路由] 规模={routed['tier']} 承接体系={routed['system']} "
+                  f"→ 拓扑={routed['selected']}（{len(routed['nodes'])} 节点）")
+            print(f"   依据: {routed['reason']}")
+        except Exception as _e:
+            print(f"[融合路由] 失败回退 team.yaml dag: {_e}")
+
     # ---- 构建 DAG ----
     if use_dag and "dag" in team.get("pipeline", {}):
         dag = DagEngine(
             name=team["pipeline"]["name"],
             description=team["pipeline"].get("description", ""),
-            nodes=team["pipeline"]["dag"]["nodes"],
+            nodes=dag_nodes,
         )
         ok, err = dag.validate()
         if not ok:
