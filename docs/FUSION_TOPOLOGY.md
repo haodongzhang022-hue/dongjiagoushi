@@ -117,3 +117,57 @@ bash local-agent/tests/test_topology_fusion.sh
 ✅ agile 缓存命中为主线（cache-first）   ✅ 融合场景缓存方案含水龙头蔓延
 ✅ overview 二级信息可用（含 micro）     ✅ CLI overview 运行
 ```
+
+---
+
+## 补充 · 复杂度递进式精简体系（Complexity-Slim · 角色子集 + 占比量化）
+
+> 上层「规模金字塔→承接体系」负责**选体系/选拓扑**，本层 `topology/slim.py` 与其互补（非重复），
+> 为每个金字塔档位给出**最小角色子集**（以能完成目标为准）+ **占比量化**（越小占比越高、越精简）。
+> 二者协同：金字塔选承接体系，slim 定该体系的精确角色清单与占比，缓存命中为主线贯穿。
+
+### 角色子集精简（金字塔档位 → 最小角色清单）
+
+| 档位 | 承接体系 | 角色子集（最小可用） | 协作形态 | 占比 |
+|------|----------|---------------------|----------|------|
+| **micro** | agile | `[架构·开发]` | 单名开发直做，改完即交付 | 40% |
+| **small** | agile | `[产品, 开发]` | 敏捷开发，无架构/评审冗余 | 30% |
+| **medium** | architected | `[产品, 总师, 开发, 评审]` | 架构接力 | 15% |
+| **large** | company | `[秘书, 经理, 产品, 总师, 小组长, 开发, 评审, 测试]` | 公司式分工，结构拉满 | 10% |
+| **huge** | full | 完整体系 + `[监控哨兵, 数据管理员]` | 完整体系+动态扩容+水龙头蔓延 | 5% |
+
+> **以能完成目标为准**：只建到能完成目标的角色，绝不为小任务拉满团队。
+> **越小占比越高越精简**：micro 40% 占比最高、最该优化精简（单名开发省去全部协作开销）。
+
+### 缓存命中为主线（贯穿所有档位，聚合程度递增）
+
+| 档位 | 缓存主线 |
+|------|----------|
+| micro | 单 agent 连续改同一处 → 复用同一上下文缓存，仅付增量差异 token（占比最高，省得最多） |
+| small | 产品+开发共享需求前缀，开发接手复用澄清前缀，命中增量蔓延 |
+| medium | 按 role 聚共享前缀（架构结论→开发复用），评审复用开发产出前缀 |
+| large | 按功能域/小组聚合共享前缀为集群，同 role 只构造一次，多部门天然并行 |
+| huge | 共享前缀聚合为集群（缓存命中为索引）→ 水龙头蔓延，带蔓延关系回传合并，动态扩容复用集群前缀 |
+
+### 新增模块与接入
+
+| 模块 | 载体 | 职责 |
+|------|------|------|
+| **精简体系引擎** | `topology/slim.py` | `slim_route(tier)` 返回角色子集/协作/缓存主线/占比 + `overview` 全档俯视图 |
+| **融合接入** | `topology/fusion.py` | 惰性加载 slim；`select_topology` 各分支结果带 `slim` 角色子集；新增 `fusion.slim_route` 便捷 API + CLI `--slim` |
+| **导出** | `topology/__init__.py` | 导出 `slim` |
+| **测试** | `local-agent/tests/test_topology_slim.sh` | 13 项信号灯 |
+
+### 用法
+
+```bash
+# 精简体系路由（角色子集 + 占比 + 缓存主线）
+python3 local-agent/topology/fusion.py --slim --tier micro
+
+# 全档俯视图（人类俯瞰）
+python3 local-agent/topology/slim.py --overview
+
+# 融合路由结果直接带 slim 角色子集
+python3 -c "import sys;sys.path.insert(0,'local-agent');from topology import fusion;r=fusion.route(complexity=0,subtasks=1,concurrency=1);print(r['slim']['roles'], r['slim']['ratio'])"
+# → ['架构·开发'] 0.4
+```

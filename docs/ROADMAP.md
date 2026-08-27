@@ -47,6 +47,8 @@
 | M38 | 拓扑对比框架 · 多线路对比 + 长时间累积判断 | ✅ | `local-agent/topology/`：3 条拓扑（linear/dag/event）+ 对比执行器 + 指标持久化 + 长时间累积 + `test_topology_comparison.sh` 4 组测试 + `docs/TOPOLOGY_COMPARISON.md`（Issue #41）|
 | M39 | 真实任务 AB 隔离对比 · 全维度指标（并发/速度/完成度/bug/token/文件/agent/资源） | ✅ | `local-agent/topology/benchmark.py`：真实任务源（架构完未分配/经理分工未触发）+ AB 隔离（独立工作目录）+ 17 维度采集（并发/速度/完成度/bug/token/文件/agent/CPU/内存/网络）+ 零依赖资源监控（resource.py）+ `test_benchmark_ab.sh` 4 组测试全绿 + `docs/BENCHMARK_AB.md`（Issue #41）|
 | M40 | 全链路缓存优化 + 缓存命中监控（LLM context caching→角色壳→编排层→末端→数据层 5 层复用 + 按 agent 量化效果/浪费判定） | ✅ | `llm/cache.py`（context caching 透传 + generate() 修复）+ `roles/shell_cache.py`（共享壳前缀）+ `orchestrator.py`（跨节点复用）+ `prefix_cache.py`（extend 上游前缀）+ `data/cache_stats` 表 + `topology/cache_monitor.py`（按 agent 命中率/浪费判定/持久化）+ `test_cache_layer.sh` 7 组全绿 + 修复 max_concurrency 未初始化 bug（`docs/CACHE_ARCHITECTURE.md` / `docs/CACHE_MONITOR.md`，Issue #41）|
+| M41 | 规模金字塔→承接体系（micro/small→agile敏捷简化体系·产品→开发→审查 / medium→加架构师 / large→公司拉满 / huge→完整体系+水龙头蔓延 + 缓存命中为主线 cache-first 横贯所有档位） | ✅ | `topology/fusion.py`（evaluate_scale 新增 micro 档 + TIER_SYSTEM 承接体系 + 各分支选承接体系拓扑；build_plan cache-first 主线横贯）+ `topology/topologies.py` `agile` 极简拓扑 + `test_topology_fusion.sh` 12 项全绿（`docs/FUSION_TOPOLOGY.md`，Issue #41）|
+| M42 | 复杂度递进式精简体系（Complexity-Slim：金字塔档位→最小角色子集 + 占比量化 + 缓存命中为主线贯穿，越小占比越高越精简，以能完成目标为准） | ✅ | `topology/slim.py`（slim_route 角色子集/协作/缓存主线/占比 + overview 全档俯视图）+ `topology/fusion.py` 接入 slim（各分支结果带角色子集 + fusion.slim_route 便捷 API + CLI --slim）+ `topology/__init__.py` 导出 slim + `test_topology_slim.sh` 13 项全绿 + fusion 回归 12/12（`docs/FUSION_TOPOLOGY.md`，Issue #41）|
 ## 架构八步模板
 
 见 [docs/templates/architect-report.md](templates/architect-report.md)，每次做真实架构设计时按此模板产出。

@@ -107,6 +107,26 @@ COMPANY_TOPOLOGY = "dag"      # large 公司结构拉满（DAG 生产拓扑）
 FULL_TOPOLOGY = "prefix"      # huge 完整体系 + 水龙头蔓延（融合）
 SCATTER_TOPOLOGY = "scatter"  # 散沙一窝蜂（零散无架构任务仍可用）
 
+# 复杂度递进式精简体系（惰性加载，避免循环导入副作用）
+_slim = None
+def _get_slim():
+    global _slim
+    if _slim is None:
+        import os as _os, sys as _sys
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        _pkg = _os.path.dirname(_here)   # local-agent/ 包根
+        if _pkg not in _sys.path:
+            _sys.path.insert(0, _pkg)
+        from topology import slim as _s
+        _slim = _s
+    return _slim
+
+
+def _slim_for(tier):
+    """按金字塔档位取精简体系（角色子集/占比/协作/缓存主线）。"""
+    slim = _get_slim()
+    return slim.slim_route(tier)
+
 
 # ---------------------------------------------------------------------------
 # 规模评估（把任务规模信号归一化成分层档位）
@@ -212,6 +232,7 @@ def select_topology(scale, available=None):
             "reason": "极高复杂度/大型 → 完整体系 + 公司规模最大 + 动态扩容 + 水龙头蔓延 + 带蔓延关系的回传合并",
             "alternatives": ["hybrid", "prefix", "scramble"],
             "plan": plan,
+            "slim": _slim_for(scale["tier"]),
         }
 
     # 2) 散沙型高并发 → 直接用新框架（scatter 一窝蜂），不设中央深度设计
@@ -224,6 +245,7 @@ def select_topology(scale, available=None):
             "reason": "任务性质=散沙型高并发（零散/无架构依赖/并发大）→ 直接用新框架一窝蜂并行解决",
             "alternatives": ["scatter", "scramble", "prefix"],
             "plan": plan,
+            "slim": _slim_for(scale["tier"]),
         }
 
     # 3) micro（单任务修改）→ 简化体系（agile：产品→开发→审查）★ 最高频最该优化
@@ -236,6 +258,7 @@ def select_topology(scale, available=None):
             "reason": "单任务修改（占比最高）→ 简化体系·敏捷开发（产品→开发→审查），不做重分工，cache-first 共享需求前缀",
             "alternatives": [AGILE_TOPOLOGY, "scatter", "linear"],
             "plan": plan,
+            "slim": _slim_for(scale["tier"]),
         }
 
     # 4) small（低复杂度）→ 敏捷开发（简化体系，仍轻量）
@@ -248,6 +271,7 @@ def select_topology(scale, available=None):
             "reason": "低复杂度 → 敏捷开发（简化体系·产品→开发→审查），轻量承接，cache-first",
             "alternatives": [AGILE_TOPOLOGY, "scatter", "linear"],
             "plan": plan,
+            "slim": _slim_for(scale["tier"]),
         }
 
     # 5) medium → 加架构师（dag）
@@ -259,6 +283,7 @@ def select_topology(scale, available=None):
             "reason": "中等复杂度 → 加架构师（产品→架构→开发→评审→测试），架构把关",
             "alternatives": ["dag", "event"],
             "plan": plan,
+            "slim": _slim_for(scale["tier"]),
         }
 
     # 6) large → 公司结构拉满（dag 全角色 + 分形 + 找工具/对齐）
@@ -269,6 +294,7 @@ def select_topology(scale, available=None):
         "reason": "高复杂度 → 公司结构拉满（DAG 全角色 + 分形多小组 + 找工具/对齐），承载大型任务",
         "alternatives": ["dag", "event", "hybrid"],
         "plan": plan,
+        "slim": _slim_for(scale["tier"]),
     }
 
 
@@ -422,6 +448,15 @@ def overview(scales=None):
     }
 
 
+# ---------------------------------------------------------------------------
+# 复杂度递进式精简体系路由（便捷 API）：直接返回角色子集 + 占比 + 缓存命中主线
+# ---------------------------------------------------------------------------
+def slim_route(tier="micro"):
+    """按金字塔档位返回精简体系（角色子集/占比/协作/缓存命中主线）。"""
+    slim = _get_slim()
+    return slim.slim_route(tier)
+
+
 # CLI 入口
 if __name__ == "__main__":
     import sys
@@ -438,6 +473,14 @@ if __name__ == "__main__":
         k = _arg("--concurrency", 5)
         res = route(complexity=c, subtasks=s, concurrency=k, verbose=True)
         print(json.dumps(res, ensure_ascii=False, indent=2))
+    elif "--slim" in args:
+        def _sarg(name, default=None):
+            for i, a in enumerate(args):
+                if a == name and i + 1 < len(args):
+                    return args[i + 1]
+            return default
+        res = slim_route(_sarg("--tier", "micro"))
+        print(json.dumps(res, ensure_ascii=False, indent=2))
     elif "--overview" in args:
         samples = [
             evaluate_scale(complexity=0, subtasks=1, concurrency=1, is_scattered=False),  # micro
@@ -450,3 +493,4 @@ if __name__ == "__main__":
     else:
         print("用法: python3 topology/fusion.py --route --complexity N --subtasks N --concurrency N")
         print("      python3 topology/fusion.py --overview")
+        print("      python3 topology/fusion.py --slim --tier micro")

@@ -30,6 +30,6 @@
     python3 local-agent/topology/benchmark.py --summary
 """
 
-from . import topologies, metrics, resource, tasksource, cache_monitor, fusion
+from . import topologies, metrics, resource, tasksource, cache_monitor, fusion, slim
 
-__all__ = ["topologies", "metrics", "resource", "tasksource", "cache_monitor", "fusion"]
+__all__ = ["topologies", "metrics", "resource", "tasksource", "cache_monitor", "fusion", "slim"]

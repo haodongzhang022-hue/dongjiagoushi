@@ -76,6 +76,10 @@ main:
             bash local-agent/tests/test_topology_hybrid.sh
             echo "==== 高尔顿板 MVP 原型测试（galton：Router+3Worker+1Aggregator 球路由→加工→合并闭环） ===="
             bash local-agent/tests/test_galton.sh
+            echo "==== 融合拓扑规则引擎测试（topology-fusion：规模金字塔→承接体系 + 缓存命中为主线 + 融合触发门控 + 四套方案） ===="
+            bash local-agent/tests/test_topology_fusion.sh
+            echo "==== 复杂度递进式精简体系测试（topology-slim：金字塔档位→最小角色子集 + 占比量化 + 缓存命中主线贯穿） ===="
+            bash local-agent/tests/test_topology_slim.sh
             echo "==== 前缀缓存·水龙头蔓延测试（prefix-cache：共享前缀聚合/缓存命中索引/降token降bug） ===="
             bash local-agent/tests/test_prefix_cache.sh
             echo "==== 全链路缓存层+缓存命中监控测试（cache-layer：LLM context caching/generate修复/角色壳前缀/编排层复用/数据层cache_stats表/按agent量化效果与浪费判定） ===="
