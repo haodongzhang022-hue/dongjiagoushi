@@ -115,8 +115,10 @@
 │   │   ├── webhook.py                   #   🆕 多源 Webhook 接收端（POST /webhook/<source>，本地/手机/虚拟机/沙盒/上位机）
 │   │   ├── sources.py                   #   🆕 多源适配器注册 + 本地电脑适配器（云端-本地协同）
 │   │   └── host_helper.py               #   🆕 本地上位机辅助角色（预设功能，之后接入真实上位机）
-│   ├── topology/                        # 🆕 拓扑对比框架（多线路对比执行/指标累积/长时间判断，见 docs/TOPOLOGY_COMPARISON.md）
-│   │   ├── topologies.py                  #   3 条拓扑线路定义（linear/dag/event）
+│   ├── topology/                        # 🆕 拓扑对比框架 + 融合拓扑规则引擎（见 docs/TOPOLOGY_COMPARISON.md / docs/FUSION_TOPOLOGY.md）
+│   │   ├── topologies.py                  #   7 条拓扑线路定义（linear/dag/event/hybrid/scatter/agile/prefix）
+│   │   ├── fusion.py                      #   🆕 融合拓扑规则引擎（规模金字塔→承接体系：agile/architected/company/full，缓存命中为主线）
+│   │   ├── metrics.py                     #   全维度对比指标收集与持久化（并发/速度/完成度/bug/token/文件/agent/资源）
 │   │   ├── metrics.py                     #   全维度对比指标收集与持久化（并发/速度/完成度/bug/token/文件/agent/资源）
 │   │   ├── resource.py                    #   🆕 资源消耗监控（CPU/内存/网络/文件，零第三方依赖）
 │   │   ├── tasksource.py                  #   🆕 真实任务源（架构完未分配/经理分工未触发的真实待办）
