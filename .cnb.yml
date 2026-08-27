@@ -96,6 +96,8 @@ main:
             bash tests/test_mini_e2e.sh
             echo "==== 标签管理+进度自动化测试（label：标签能力/事件驱动自动打标/MCP管线/进度推手/全员挂载/越权拦截） ===="
             bash local-agent/tests/test_label_automation.sh
+            echo "==== 评审→测试 任务转交闭环测试（handoff：评审通过必须真实转交测试@架构·测试+[触发]唤醒并校验回执；测试接手[接单]+开工+进度尺推进；未通过走回转开发） ===="
+            bash local-agent/tests/test_review_tester_handoff.sh
 echo "==== 文档-实现一致性测试（doc-consistency，防漂移） ===="
             bash tests/test_doc_consistency.sh
     - name: build knowledge base
