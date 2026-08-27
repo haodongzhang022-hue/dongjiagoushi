@@ -50,7 +50,9 @@ fi
 
 # B-03: 全维度指标采集（9 个关键维度都要有）
 echo "--- B-03: 全维度指标采集 ---"
-OUT=$($BENCH --compare "$($BENCH --list-tasks 2>&1 | grep -oP 'task_id=\K[a-z0-9-]+' | head -1)" 2>&1) || true
+# B-03 对比 B-02 实际运行的 architected_unassigned 任务（避免选到未生成数据的任务）
+TASK_ID=$($BENCH --list-tasks 2>&1 | grep "architected_unassigned" | grep -oP 'task_id=\K[a-z0-9-]+' | head -1)
+OUT=$($BENCH --compare "$TASK_ID" 2>&1) || true
 if echo "$OUT" | grep -q "并发" && echo "$OUT" | grep -q "耗时" \
    && echo "$OUT" | grep -q "完成" && echo "$OUT" | grep -q "bug" \
    && echo "$OUT" | grep -q "token" && echo "$OUT" | grep -q "文件" \
