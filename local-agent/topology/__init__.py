@@ -11,6 +11,7 @@
   - `tasksource`  真实任务源（架构完未分配 / 经理分工未触发的真实待办）
   - `runner`      基础对比执行器（同需求跑不同拓扑）
   - `benchmark`   增强 AB 隔离对比执行器（真实任务 + 全维度 + 资源监控）
+  - `cache_monitor` 缓存命中监控（按 agent 量化效果/浪费判定）
 
 用法（推荐用 benchmark）：
     # 列出真实任务
@@ -23,6 +24,6 @@
     python3 local-agent/topology/benchmark.py --summary
 """
 
-from . import topologies, metrics, resource, tasksource
+from . import topologies, metrics, resource, tasksource, cache_monitor
 
-__all__ = ["topologies", "metrics", "resource", "tasksource"]
+__all__ = ["topologies", "metrics", "resource", "tasksource", "cache_monitor"]

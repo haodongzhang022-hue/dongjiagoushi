@@ -64,6 +64,17 @@ def _exec_node(node, req, work_dir, use_llm=True, concurrency=1, bug_seed=0, cac
     role = node.get("role", "编排引擎")
     action = node.get("action", "")
 
+    # 按 agent 记录节点层缓存命中监控（供 cache_monitor 量化每个 agent 效果）
+    try:
+        from llm import cache as _cache
+        _cache.record_cache_event(
+            agent=role, layer="node", cache_hit=1 if cache_hit else 0,
+            prefix_chars=cache_prefix_len if cache_hit else 0,
+            saved_tokens=max(0, cache_prefix_len // 3) if cache_hit else 0,
+        )
+    except Exception:
+        pass
+
     # 模拟在隔离目录产生一个节点级产出文件（真实文件产出统计）
     if work_dir:
         os.makedirs(work_dir, exist_ok=True)
@@ -204,6 +215,7 @@ def run_one_bench(req_key, req, topology_id, use_llm=True, base_dir=None, scale=
     files = 0
     agents_used = set()
     waves_used = 0
+    max_concurrency = 0
     # 缓存指标（前缀缓存·水龙头蔓延专用）
     cache_hits = 0
     cache_clusters = 0
@@ -536,10 +548,18 @@ def main():
     parser.add_argument("--scale", type=int, default=1, help="任务规模放大倍数（≥1，放大抢单/一窝蜂节点让差异显现）")
     parser.add_argument("--suit", default=None, help="按任务性质差分：architected(架构化走hybrid) / scattered(零散走scatter)")
     parser.add_argument("--list-topos", action="store_true", help="列出全部可对比拓扑及适用任务性质")
+    parser.add_argument("--monitor-cache", action="store_true",
+                        help="显示缓存命中监控（按 agent × 层量化效果/浪费判定）")
+    parser.add_argument("--monitor-persist", action="store_true",
+                        help="把缓存命中监控持久化到 cache_stats 表")
     args = parser.parse_args()
 
     if args.list_topos:
         _print_topos()
+        return
+    if args.monitor_cache:
+        from topology import cache_monitor
+        print(cache_monitor.monitor_report(persist=args.monitor_persist))
         return
     if args.list_tasks:
         print(tasksource.show_tasks())

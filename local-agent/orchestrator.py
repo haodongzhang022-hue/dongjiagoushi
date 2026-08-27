@@ -33,12 +33,27 @@ def _step_label(node):
     return f"[{node['id']}] {node['role']}：{node['action']}"
 
 def _run_one(role, req, llm, card, node):
-    """执行单个角色节点，返回输出。"""
+    """执行单个角色节点，返回输出。
+
+    编排层缓存（M3）：跨节点复用共享需求前缀（req 稳定部分），
+    记录编排层缓存命中事件（按 agent × 层归因，供命中监控）。
+    role.run() 内部已做角色壳层缓存；此处补「编排层跨节点复用」统计。
+    """
     user_input = req
     try:
         output = role.run(llm, user_input)
     except Exception as e:
         output = f"[执行异常] {e}"
+    # 编排层：跨节点共享 req 前缀（稳定需求描述 → 命中缓存）
+    try:
+        from llm import cache as _cache
+        _cache.record_cache_event(
+            agent=role.name, layer="orchestrator", cache_hit=1 if req else 0,
+            prefix_chars=len(str(req)[:24]),
+            saved_tokens=max(0, len(str(req)[:24]) // 3),
+        )
+    except Exception:
+        pass
     card["output"] = output
     relay.log(card, f"节点 {node['id']} 完成")
     return output

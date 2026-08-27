@@ -461,6 +461,26 @@ SCHEMA_DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_probe_miss_type ON probe_misses(event_type)",
+    # ---- 28. 缓存命中监控留痕（cache_stats · 全链路缓存优化 Issue #41）----
+    # 记录每个 agent × 层的缓存命中/未命中/命中率/节省 token，供「架构·数据管理员」
+    # 统一统计与人类俯瞰，量化缓存效果、判定是否有浪费（命中率高=无浪费）。
+    """
+    CREATE TABLE IF NOT EXISTS cache_stats (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent         TEXT NOT NULL,            -- 角色/agent（如 架构·开发）
+        layer         TEXT DEFAULT '',          -- llm / shell / orchestrator / node
+        cache_hits    INTEGER DEFAULT 0,        -- 命中缓存次数
+        cache_misses  INTEGER DEFAULT 0,        -- 未命中次数
+        cache_hit_rate REAL DEFAULT 0,          -- 命中率 %
+        prefix_chars  INTEGER DEFAULT 0,        -- 复用前缀字符数
+        saved_tokens  INTEGER DEFAULT 0,        -- 因命中缓存节省的 token 估算
+        req_key       TEXT DEFAULT '',          -- 关联需求/任务 key
+        gid           TEXT DEFAULT '',          -- 关联实体 gid
+        created_at    TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cache_stats_agent ON cache_stats(agent)",
+    "CREATE INDEX IF NOT EXISTS idx_cache_stats_layer ON cache_stats(layer)",
 ]
 
 

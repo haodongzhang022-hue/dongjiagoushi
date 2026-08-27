@@ -141,3 +141,33 @@ def analyze(nodes, req, per_char_div=3):
         "token_saved_pct": round((scatter_tokens - faucet_tokens) / max(1, scatter_tokens) * 100, 1),
         "cache_hit_rate": round(cache_hits_total / max(1, node_count) * 100, 1),
     }
+
+
+# ------------------------------------------------------------
+# M4：末端接入上游共享前缀（extend_shared_prefix）
+# ------------------------------------------------------------
+def extend_shared_prefix(prefix, upstream_prefix):
+    """把上游（角色壳层）共享前缀接入末端集群前缀。
+
+    全链路复用：末端的节点前缀不再只是「角色 + req」，而是叠加
+    上游壳层/编排层的共享前缀，命中则这些稳定 token 一并复用，不重复计费。
+    返回拼接后的前缀。
+    """
+    if not upstream_prefix:
+        return prefix
+    # 去重拼接：若上游前缀已包含在末端前缀中则不重复
+    if upstream_prefix in prefix:
+        return prefix
+    return (upstream_prefix + "\n" + prefix).strip()
+
+
+def analyze_with_upstream(nodes, req, upstream_prefix="", per_char_div=3):
+    """带上游共享前缀的全链路缓存分析。
+
+    与 analyze() 相同，但前缀叠加上游共享前缀，命中节省更多。
+    返回 analyze() 的结构 + upstream 维度。
+    """
+    base = analyze(nodes, req, per_char_div)
+    base["upstream_prefix_chars"] = len(upstream_prefix or "")
+    base["extended"] = bool(upstream_prefix)
+    return base

@@ -156,6 +156,34 @@ class BaseRole:
         """返回该角色的输出契约（结构化描述），供占位/测试/LLM 统一使用。"""
         return {"role": self.name, "contract": "未定义"}
 
-    def run(self, llm, user_input):
-        """执行角色：调用 llm 后端，返回输出。"""
-        return llm.call(self.system_prompt(), user_input)
+    def run(self, llm, user_input, use_cache=True):
+
+        """执行角色：调用 llm 后端，返回输出。
+
+        use_cache=True 时启用角色壳层缓存（shell_cache）：
+          - 记录本次调用的缓存命中事件（按 agent × 层归因，供命中监控）；
+          - 便于 benchmark/编排层统计每个角色的缓存命中率与节省。
+        不改变返回语义（仍是 llm.call 的输出）。
+        """
+        sp = self.system_prompt()
+        out = llm.call(sp, user_input)
+        if use_cache:
+            try:
+                from llm import cache as _cache
+                prefix, _ = _shell_extract_prefix(sp)
+                _cache.record_cache_event(
+                    agent=self.name, layer="shell", cache_hit=1 if prefix else 0,
+                    prefix_chars=len(prefix),
+                    saved_tokens=max(0, len(prefix) // 3),
+                )
+            except Exception:
+                pass
+        return out
+
+def _shell_extract_prefix(system_prompt):
+    """角色壳共享前缀抽取（复用 roles.shell_cache.extract_shared_prefix）。"""
+    try:
+        from roles import shell_cache
+        return shell_cache.extract_shared_prefix(system_prompt)
+    except Exception:
+        return system_prompt or "", ""

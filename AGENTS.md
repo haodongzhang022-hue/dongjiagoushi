@@ -294,6 +294,8 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── DISPATCH_DEPTH.md               # 分发递进深度模型（L1声明→L4工作交付，经理锁 L4）
   ├── DISPATCH_ABILITY.md             # 派发能力全员化（通用复用能力，全员可派发可接单）
   ├── HANDLE_ABILITY.md               # 自适应 @ 定位能力（不写死角色名/跨库权限/同仓复用）
+  ├── CACHE_ARCHITECTURE.md           # 全链路缓存架构（LLM→角色壳→编排→末端→数据 5 层复用）
+  ├── CACHE_MONITOR.md                # 缓存命中监控（按 agent 量化效果/浪费判定）
   └── templates/issue-template.md     # Issue 结构化声明模板
 local-agent/dispatch/                 # 通用派发能力包（DispatchAbility 全员能力）
   ├── ability.py                      # 通用派发能力类（L1→L4 + 接单闭环）
