@@ -35,6 +35,7 @@ echo "======================================================"
 
 # 隔离数据库：用临时 DB 避免污染主库
 export DB_PATH="$REPO_ROOT/.tmp-label-test.db"
+
 rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
 export PYTHONPATH="$REPO_ROOT/local-agent:$REPO_ROOT/local-agent/roles"
 
@@ -155,6 +156,21 @@ OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.
 assert_contains "T-L16 下一步自动触发→at_node+trigger_next" "$OUT" "trigger_next"
 OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.set_pipeline_node('issue-400','bad'))")
 assert_fail "T-L16 非法流水线节点拦截" "$OUT"
+
+
+# T-L17 评审打标签替代推送（本 Issue #51 收口）：评审结论走打标签，不靠推送
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.auto_trigger('review.pass','issue-rp'))")
+assert_contains "T-L17 review.pass→merge_ready 打标签替代推送" "$OUT" "merge_ready"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.auto_trigger('review.merge','issue-rm'))")
+assert_contains "T-L17 review.merge→merged 打合并标签" "$OUT" "merged"
+OUT=$(PY "from roles.developer import DeveloperRole; r=DeveloperRole(); print(r.auto_trigger('review.need_fix','issue-rn'))")
+assert_contains "T-L17 review.need_fix→need_fix+blocked 打标签" "$OUT" "blocked"
+
+# T-L18 跨仓 CodeBuddy 打标签替代推送：非本仓 CodeBuddy 也可直接打标落库本仓 labels
+OUT=$(PY "from label import LabelAbility; r=LabelAbility(owner='CodeBuddy'); print(r.apply_label('issue-xc','merge_ready'))")
+assert_contains "T-L18 跨仓 CodeBuddy 打 merge_ready 标签" "$OUT" "merge_ready"
+OUT=$(PY "from label import LabelAbility; r=LabelAbility(owner='CodeBuddy'); print(r.query_labels('issue-xc'))")
+assert_contains "T-L18 跨仓 CodeBuddy 打标已落库可查询" "$OUT" "merge_ready"
 
 rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
 
