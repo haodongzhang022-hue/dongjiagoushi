@@ -228,7 +228,70 @@ SCATTER_NODES = [
 
 
 # ------------------------------------------------------------
-# 拓扑注册表
+
+# ------------------------------------------------------------
+# 线路 5.5：敏捷承接·极简体系（agile）★ 最高频任务专用
+# ------------------------------------------------------------
+# 用户 Issue #41 纠偏核心："小任务其实占比最高，这个才最适合体系承接，但需要
+#   简化的体系，类似于只剩下产品和开发，审查了，复杂度低的基本就是敏捷开发。"
+#   最小任务（单任务修改 / 单个开发即可完成）占所有任务比例最高，最该精雕细琢。
+#
+# 本拓扑就是"简化体系（敏捷开发）"的落地：**只保留 产品→开发→审查 三个最小角色**，
+#   去掉秘书/架构/经理/小组长/找工具/对齐/测试等重型角色 —— 不为高频小任务
+#   背载完整公司流程（防过度设计）。流程：
+#     product  需求澄清/翻译意图/确认修改点（单点，微任务仅此一步接手）
+#     develop  实现/自测（单开发即可完成的修改）
+#     review   轻量审查（质量兜底，不引入重型五维/测试矩阵）
+#   缓存命中为主线：product→develop→review 共享需求前缀，前缀只构造一次，
+#   后续节点命中缓存只付增量 token —— 小任务虽小，也要复用共享上下文（cache-first）。
+# 适用：micro / small 档（单任务修改、低复杂度敏捷开发）。
+# ------------------------------------------------------------
+AGILE_NODES = [
+    # ① 产品（接手 + 澄清 + 确认修改点）——单开发任务的极简接手层
+    {"id": "product",   "role": "架构·产品", "action": "需求澄清/翻译意图/确认修改点", "depends_on": [], "phase": "intake", "share": "ctx"},
+    # ② 开发（单开发即可完成的修改/实现 + 自测）——占比最高的最小执行单元
+    {"id": "develop",   "role": "架构·开发", "action": "实现/自测（单开发完成的修改）", "depends_on": ["product"], "phase": "implement", "share": "ctx"},
+    # ③ 审查（轻量质量兜底，不引入重型五维/测试矩阵）
+    {"id": "review",    "role": "架构·评审", "action": "轻量审查/复评（小任务快速验收）", "depends_on": ["develop"], "phase": "review", "share": "ctx"},
+    # 交付（编排引擎收口）
+    {"id": "deliver",   "role": "编排引擎",  "action": "汇总交付报告", "depends_on": ["review"], "phase": "deliver"},
+]
+
+# 线路 6：前缀缓存·水龙头蔓延（prefix）
+# 特点：用户 Issue #41 优化核心——把「一盘散沙争抢」改造成「有序快领」。
+#      共享提示词前缀聚合为集群，以**缓存命中为索引**：
+#        - 同一集群内节点共享前缀，前缀只构造一次（首节点付全量），
+#          后续节点命中缓存只付增量差异 token —— 形成"水龙头持续往下蔓延"；
+#        - 不同集群间无共享前缀，天然并行。
+#      对比对象：scramble（散沙·全并行·每节点独立携带完整前缀）的**优化版**。
+# 适用：架构化任务的余下一窝蜂抢单 / 零散一窝蜂 —— 用缓存前缀复用替代各自重构造。
+# ------------------------------------------------------------
+PREFIX_NODES = [
+    # ── 前段中央调控（与 hybrid 相同：架构→分工，企业内先吃核心）──
+    {"id": "secretary",  "role": "架构·秘书", "action": "入口/诉求接收/路由", "depends_on": [], "phase": "central"},
+    {"id": "clarify",    "role": "架构·产品", "action": "需求澄清/翻译意图/拆需求", "depends_on": ["secretary"], "phase": "central"},
+    {"id": "architect",  "role": "架构·总师", "action": "架构设计/确认版本/校验", "depends_on": ["clarify"], "phase": "central"},
+    {"id": "plan",       "role": "架构·经理", "action": "任务拆解/预先分工/定核心vs余量", "depends_on": ["architect"], "phase": "central"},
+    {"id": "core_lead",  "role": "架构·小组长", "action": "核心部分细化/内部消化", "depends_on": ["plan"], "phase": "central"},
+    {"id": "core_dev",   "role": "架构·开发",  "action": "核心模块实现/自测（内部）", "depends_on": ["core_lead"], "phase": "central"},
+
+    # ── 后段：前缀缓存·水龙头蔓延（替代散沙抢单）──
+    # 同一 role 的抢单节点共享同一前缀，前缀只构造一次，后续节点命中缓存增量蔓延
+    {"id": "prefix_1", "role": "架构·开发", "action": "【水龙头】余量子任务 A 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+    {"id": "prefix_2", "role": "架构·开发", "action": "【水龙头】余量子任务 B 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+    {"id": "prefix_3", "role": "架构·开发", "action": "【水龙头】余量子任务 C 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+    {"id": "prefix_4", "role": "架构·开发", "action": "【水龙头】余量子任务 D 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+    {"id": "prefix_5", "role": "架构·开发", "action": "【水龙头】余量子任务 E 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+    {"id": "prefix_6", "role": "架构·开发", "action": "【水龙头】余量子任务 F 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+    {"id": "prefix_7", "role": "架构·开发", "action": "【水龙头】余量子任务 G 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+    {"id": "prefix_8", "role": "架构·开发", "action": "【水龙头】余量子任务 H 增量蔓延", "depends_on": ["plan"], "phase": "faucet", "share": "dev"},
+
+    # ── 质量与交付：统一收口（与 hybrid 相同）──
+    {"id": "review",  "role": "架构·评审", "action": "五维评审/复评", "depends_on": ["core_dev","prefix_1","prefix_2","prefix_3","prefix_4","prefix_5","prefix_6","prefix_7","prefix_8"], "phase": "quality"},
+    {"id": "test",    "role": "架构·测试", "action": "测试矩阵/信号灯", "depends_on": ["review"], "phase": "quality"},
+    {"id": "deliver", "role": "编排引擎",  "action": "汇总交付报告", "depends_on": ["test"], "phase": "quality"},
+]
+
 # ------------------------------------------------------------
 TOPOLOGIES = {
     "linear": {
@@ -263,6 +326,22 @@ TOPOLOGIES = {
         "strategy": "scatter",
         "suitable": "scattered",
     },
+    "agile": {
+        "name": "敏捷承接·极简体系",
+        "description": "简化体系（敏捷开发）：只保留产品→开发→审查三最小角色，去掉重型公司流程。占比最高的最小任务（单开发可完成）专用，cache-first 共享需求前缀。",
+        "nodes": AGILE_NODES,
+        "strategy": "agile",
+        "suitable": "agile",
+        "cache_first": True,
+    },
+    "prefix": {
+        "name": "前缀缓存·水龙头蔓延",
+        "description": "共享提示词前缀聚合为集群，以缓存命中为索引，前缀只构造一次、后续节点增量蔓延（替代散沙争抢，降token降bug）。",
+        "nodes": PREFIX_NODES,
+        "strategy": "prefix",
+        "suitable": "architected",
+        "optimizes": "hybrid",
+    },
 }
 
 
@@ -286,3 +365,4 @@ def get_topology(tid):
     if tid not in TOPOLOGIES:
         raise ValueError(f"未知拓扑：{tid}，可选：{list(TOPOLOGIES.keys())}")
     return TOPOLOGIES[tid]
+

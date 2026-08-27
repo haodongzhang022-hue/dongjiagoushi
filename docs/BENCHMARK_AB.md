@@ -152,3 +152,74 @@ python3 local-agent/topology/benchmark.py --task suit:scattered --suit scattered
 | 文件数 | 22 | 22 | **66** |
 
 > `linear`/`dag` 不放大节点，规模不变；`hybrid`/`scatter` 放大抢单/一窝蜂节点，规模越大差异越明显。
+
+---
+
+## 9. 前缀缓存·水龙头蔓延（prefix · Issue #41 优化补强）
+
+> 承接用户补充诉求：*"框架方向对，但 bug 比较多、token 消耗也多，所以其实还可以尝试优化——近似区域下的，适合把有共享提示词头的聚合一下，以缓存命中为索引，把一盘散沙争抢，变成有序快领。相当于不是一次扔出都去抢，而是以缓存前缀形成水龙头，持续往下蔓延。"*
+
+### 9.1 痛点定位（用户指出的真问题）
+
+现有 `hybrid`/`scatter` 的抢单/一窝蜂阶段是**全并行**：每个抢单节点**独立携带完整共享上下文**。
+
+- **token 大**：`benchmark` 中 `ctx_factor = 1 + (concurrency-1)*0.12`，并发 40 时每节点上下文放大到 5.7 倍。共享前缀被每个节点重复付费。
+- **bug 多**：每节点独立重新构造上下文，出错面大、共享部分不一致，越大的抢单规模越易暴露缺陷。
+
+这是典型的**散沙争抢**代价：一次扔出都去抢，各自重造前缀。
+
+### 9.2 优化方案（水龙头蔓延）
+
+新增 **`prefix`（前缀缓存·水龙头蔓延）** 拓扑 + **`prefix_cache`** 聚合模块：
+
+| 维度 | scatter/hybrid（散沙·全并行） | prefix（水龙头·蔓延） |
+|------|------------------------------|----------------------|
+| 抢单/一窝蜂阶段 | 全部节点同时并行 | 同 role 共享前缀节点**串行蔓延** |
+| 共享前缀 | 每节点独立携带完整前缀 | 前缀只构造一次（首节点付全量） |
+| 后续节点 | 每节点重复付前缀 token | **命中缓存**只付增量差异 token |
+| token | 按并发 N 线性放大 | 前缀 1 次 + 每节点增量 |
+| bug | 各自独立构造上下文，出错面大 | 共享上下文一致，仅增量部分可能出错 |
+| 本质 | 一盘散沙争抢 | 以缓存前缀形成水龙头，持续往下蔓延 |
+
+### 9.3 核心机制（以缓存命中为索引）
+
+```
+散沙:  [节点1: 前缀+增量A] [节点2: 前缀+增量B] [节点3: 前缀+增量C]  ← 前缀×3
+水龙头: [节点1: 前缀+增量A] →[缓存命中]→ [节点2: 增量B] →[缓存命中]→ [节点3: 增量C]  ← 前缀×1
+```
+
+- **聚合**：`prefix_cache.extract_prefixes` 把共享同一前缀（同 role + 同需求）的节点聚成集群。
+- **缓存命中索引**：`_run_batch(cache_state=...)` 以「共享前缀 key」为索引——集群首节点付全量前缀，后续节点命中缓存只付增量。
+- **水龙头蔓延**：同一集群内节点按顺序一个接一个在前缀缓存上增量推进；不同集群间无共享前缀，天然并行。
+
+### 9.4 新增模块与指标
+
+| 模块/指标 | 载体 | 说明 |
+|----------|------|------|
+| 前缀聚合模块 | `local-agent/topology/prefix_cache.py` | `extract_prefixes` 聚合 / `analyze` 静态对比 / `token_cost_of_cluster` 增量 token |
+| prefix 拓扑 | `local-agent/topology/topologies.py` | central → faucet → quality 三阶段，faucet 串行蔓延 |
+| 缓存指标 | `benchmark.py` / `metrics.py` | `cache_hits` / `cache_clusters` / `prefix_saved_chars` / `cache_hit_rate` |
+| 测试 | `local-agent/tests/test_prefix_cache.sh` | T1~T4：注册/聚合/命中率/AB 降 token 降 bug |
+
+### 9.5 使用
+
+```bash
+# 对比散沙(hybrid) vs 水龙头(prefix)，规模放大让优化差异清晰
+python3 local-agent/topology/benchmark.py --task suit:architected --suit architected \
+  --topologies hybrid,prefix --scale 5
+
+# 查看前缀聚合静态分析
+python3 -c "import sys;sys.path.insert(0,'local-agent');from topology import prefix_cache;print(prefix_cache.analyze(...))"
+
+# 跑测试信号灯（云 CI 有 python3 环境）
+bash local-agent/tests/test_prefix_cache.sh
+```
+
+### 9.6 判定口径
+
+- `token_usage`：水龙头蔓延应**显著低于**散沙（前缀只付一次）；
+- `bug_count`：水龙头蔓延应**不高于**散沙（共享上下文一致）；
+- `cache_hit_rate`：越高说明前缀复用越充分（水龙头蔓延效率越高）；
+- `prefix_saved_chars`：前缀节省字符量，量化 token 降幅。
+
+> 框架验证在沙盒 `--no-llm` 模式（调度逻辑 + 缓存聚合逻辑正确）；真实 LLM 效果对比在云 CI / 有凭据环境补跑，届时 token/网络反映真实值。

@@ -37,6 +37,7 @@ ALL_DIMENSIONS = [
     "agents_used", "reverts", "blocks", "output_ok",
     "latency_ratio", "cpu_avg_pct", "mem_delta_kb",
     "net_sent_bytes", "net_recv_bytes",
+    "cache_hits", "cache_clusters", "prefix_saved_chars", "cache_hit_rate",
 ]
 
 
@@ -120,6 +121,10 @@ DIMENSION_LABELS = {
     "mem_delta_kb": ("内存KB", "down"),
     "net_sent_bytes": ("网络发送B", "down"),
     "net_recv_bytes": ("网络接收B", "down"),
+    "cache_hits": ("缓存命中数", "up"),
+    "cache_clusters": ("前缀集群数", "-"),
+    "prefix_saved_chars": ("前缀节省字符", "up"),
+    "cache_hit_rate": ("缓存命中率%", "up"),
 }
 
 

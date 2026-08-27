@@ -115,13 +115,17 @@
 │   │   ├── webhook.py                   #   🆕 多源 Webhook 接收端（POST /webhook/<source>，本地/手机/虚拟机/沙盒/上位机）
 │   │   ├── sources.py                   #   🆕 多源适配器注册 + 本地电脑适配器（云端-本地协同）
 │   │   └── host_helper.py               #   🆕 本地上位机辅助角色（预设功能，之后接入真实上位机）
-│   ├── topology/                        # 🆕 拓扑对比框架（多线路对比执行/指标累积/长时间判断，见 docs/TOPOLOGY_COMPARISON.md）
-│   │   ├── topologies.py                  #   3 条拓扑线路定义（linear/dag/event）
+│   ├── topology/                        # 🆕 拓扑对比框架 + 融合拓扑规则引擎（见 docs/TOPOLOGY_COMPARISON.md / docs/FUSION_TOPOLOGY.md）
+│   │   ├── topologies.py                  #   7 条拓扑线路定义（linear/dag/event/hybrid/scatter/agile/prefix）
+│   │   ├── fusion.py                      #   🆕 融合拓扑规则引擎（规模金字塔→承接体系：agile/architected/company/full，缓存命中为主线）
+│   │   ├── metrics.py                     #   全维度对比指标收集与持久化（并发/速度/完成度/bug/token/文件/agent/资源）
 │   │   ├── metrics.py                     #   全维度对比指标收集与持久化（并发/速度/完成度/bug/token/文件/agent/资源）
 │   │   ├── resource.py                    #   🆕 资源消耗监控（CPU/内存/网络/文件，零第三方依赖）
 │   │   ├── tasksource.py                  #   🆕 真实任务源（架构完未分配/经理分工未触发的真实待办）
 │   │   ├── runner.py                      #   基础对比执行器 CLI（同一需求跑不同拓扑）
-│   │   └── benchmark.py                   #   🆕 增强AB隔离对比执行器（真实任务+全维度+资源监控）
+│   │   ├── benchmark.py                   #   🆕 增强AB隔离对比执行器（真实任务+全维度+资源监控）
+│   │   ├── prefix_cache.py                #   🆕 前缀缓存聚合（共享提示词前缀/缓存命中索引/水龙头蔓延，降token降bug）
+│   │   └── cache_monitor.py               #   🆕 缓存命中监控（按 agent 量化效果/浪费判定，见 docs/CACHE_MONITOR.md）
 │   ├── dispatch_engine.py              # 🆕 经理四层分发深度引擎（L1声明→L2分发→L3触发→L3.5接单→L4工作交付，验收口径=走到L4，见 docs/DISPATCH_DEPTH.md）
 │   ├── dispatch/                        # 🆕 通用派发能力包（派发工作全员化 · 可复用模块，见 docs/DISPATCH_ABILITY.md）
 │   │   ├── ability.py                   #   DispatchAbility 通用能力类（全员可派发 L1→L4 + 可接单[接单]/进度尺/交付）
@@ -138,6 +142,7 @@
 │   │   └── analyst.py                   #   插件角色示例（架构·数据分析师）
 │   ├── roles/                           # 25 个角色模块（秘书/产品/总师/总师助理/经理/小组长/开发/评审/对齐/找工具/测试/数据管理员/监控哨兵 + 市场层5 + 公司化三战线7）
 │   └── llm/                             # 多模型后端抽象（OpenAI 兼容/CLI 兜底占位）
+│       └── cache.py                     #   🆕 LLM 层 context caching（缓存头透传 + generate() 修复 + 命中监控）
 ├── docs/
 │   └── FRAMEWORK_V2.md                  # 🆕 体系五维增强架构设计（DAG/分形/市场分层/入口路由/多宿主）
 │   └── PLATFORM_ADAPTERS.md             # 🆕 跨平台适配方案（cnb.cool / deepseek harness / MCP 蜂群）
