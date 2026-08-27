@@ -17,6 +17,7 @@ monitor_bi · 四维统计引擎（M1 · stats.py）
 复用现有 data 层（repository），不重造引擎；只做**聚合查询**，不改任何角色业务逻辑。
 """
 from data import repository as repo
+from monitor_bi.util import query as _query
 
 
 # ---- 四维常量 ----
@@ -151,22 +152,14 @@ def drill_down(dim, key, limit=50):
         for r in q:
             items.append({"kind": "message", **dict(r)})
     elif dim == "project":
-        # project 归集到 task 维度（从 progress 表）
+        # project 维度：统一从 messages.topic 下钻（与 workload_4d 汇总口径一致）
         q = _query(
-            "SELECT task_id, agent_id, event, detail, ts FROM progress "
-            "WHERE task_id=? ORDER BY ts DESC LIMIT ?",
+            "SELECT msg_id, from_agent, to_agent, topic, payload, ts FROM messages "
+            "WHERE topic=? ORDER BY ts DESC LIMIT ?",
             (key, limit),
         )
         for r in q:
-            items.append({"kind": "progress", **dict(r)})
+            items.append({"kind": "message", **dict(r)})
     return items
 
 
-# ---- 内部辅助 ----
-from data import db
-
-
-def _query(sql, args=None):
-    """统一查询入口，返回 dict 列表。"""
-    rows = db.query(sql, args) if args else db.query(sql)
-    return [dict(r) for r in rows]

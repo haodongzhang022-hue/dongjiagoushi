@@ -13,11 +13,10 @@ monitor_bi · 异常监控（M4 · anomaly.py）
 
 输出统一 Anomaly 结构：{entity, type, reason, severity}。
 """
-from collections import defaultdict
 
 from data import db
 from monitor_bi import stats
-from monitor_bi.token import token_share_imbalance
+
 
 # 复用 sentinel 判定原因映射
 SENTINEL_TYPE_MAP = {
@@ -86,17 +85,21 @@ def imbalance_anomalies(thresholds=None):
     t = thresholds or DEFAULT_IMBALANCE
     anomalies = []
 
-    # 1) 单 agent 工作量占比失衡（基于 token 消耗分布 + progress 事件分布）
-    share = token_share_imbalance(threshold=t["top_share_threshold"])
-    if share.get("imbalanced"):
-        anomalies.append({
-            "entity": share["top_agent"],
-            "type": "imbalance",
-            "reason": f"分工失衡：单 agent({share['top_agent']}) 工作量占比 {share['top_share']*100:.0f}% > 阈值 {t['top_share_threshold']*100:.0f}%",
-            "severity": "medium",
-            "source": "bi-imbalance",
-            "detail": f"top_share={share['top_share']}, total={share['total']}",
-        })
+    # 1) 单 agent 工作量占比失衡（基于 workload_4d 的工作量分布：progress + messages + archives）
+    agent_stats = stats.workload_4d("agent")
+    total_work = sum(a["total"] for a in agent_stats)
+    if agent_stats and total_work > 0:
+        top = agent_stats[0]
+        top_share = top["total"] / total_work
+        if top_share > t["top_share_threshold"]:
+            anomalies.append({
+                "entity": top["key"],
+                "type": "imbalance",
+                "reason": f"分工失衡：单 agent({top['key']}) 工作量占比 {top_share*100:.0f}% > 阈值 {t['top_share_threshold']*100:.0f}%",
+                "severity": "medium",
+                "source": "bi-imbalance",
+                "detail": f"top_share={top_share:.3f}, total={total_work}",
+            })
 
     # 2) 同岗位量差失衡（按 role 聚合工作量，取 max/min 比值）
     role_stats = stats.workload_4d("role")

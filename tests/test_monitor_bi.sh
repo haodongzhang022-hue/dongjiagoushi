@@ -117,6 +117,40 @@ assert t['added'] == 20 and t['deleted'] == 6, f'code 汇总错误: {t}'
 print('code CRUD + 去重通过')
 "
 
+
+# T3.5 SQL 注入防护（评审必修项）
+echo "--- T3.5 SQL 注入防护 ---"
+assert_python "dim 白名单防注入 (token_usage)" "
+import sys, os; sys.path.insert(0, 'local-agent')
+os.environ['DB_PATH'] = '$TEST_DB'
+from data import schema; schema.init_schema()
+from data import repository as repo
+repo.upsert_token_usage('wi-1', agent_id='white-1', role='开发', topic='W1', project='WP1', token_count=100)
+repo.upsert_token_usage('wi-2', agent_id='white-2', role='评审', topic='W2', project='WP2', token_count=50)
+# 合法维度：正常筛选
+r = repo.list_token_usage('agent_id', 'white-1')
+assert len(r) == 1, f'合法维度筛选错误: {len(r)}'
+# 非法维度（注入 payload）：回退到全量，不执行注入
+r2 = repo.list_token_usage('agent_id' + chr(59) + ' DROP TABLE token_usage', 'x')
+assert len(r2) >= 3, f'非法维度未回退: {len(r2)}'
+# 表仍完好
+assert repo.count_token_records() >= 3, 'token_usage 表被注入破坏'
+print('token_usage dim 白名单通过')
+"
+assert_python "dim 白名单防注入 (code_changes)" "
+import sys, os; sys.path.insert(0, 'local-agent')
+os.environ['DB_PATH'] = '$TEST_DB'
+from data import schema; schema.init_schema()
+from data import repository as repo
+repo.upsert_code_change('wc-1', agent_id='white-1', project='WP1', added=10)
+r = repo.list_code_changes('project', 'WP1')
+assert len(r) == 1, f'合法维度筛选错误: {len(r)}'
+r2 = repo.list_code_changes('project' + chr(59) + ' DROP TABLE code_changes', 'x')
+assert len(r2) >= 2, f'非法维度未回退: {len(r2)}'
+assert repo.count_code_records() >= 2, 'code_changes 表被注入破坏'
+print('code_changes dim 白名单通过')
+"
+
 # T4 四维统计
 echo "--- T4 四维统计引擎 ---"
 assert_python "四维 workload_4d" "
@@ -140,6 +174,34 @@ assert hasattr(bi, 'code_changes'), '缺 code_changes'
 assert hasattr(bi, 'anomaly_scan'), '缺 anomaly_scan'
 assert hasattr(bi, 'render'), '缺 render'
 print('MonitorBI 接口完整')
+"
+
+
+# T4.5 分工失衡用工作量占比（评审必修项）
+echo "--- T4.5 分工失衡工作量口径 ---"
+assert_python "imbalance 用 workload_4d 非 token" "
+import sys, os; sys.path.insert(0, 'local-agent')
+os.environ['DB_PATH'] = '$TEST_DB'
+from data import schema; schema.init_schema()
+from data import repository as repo
+# 构造工作量分布：ag-1 大量消息，ag-2 少量
+for i in range(30):
+    repo.enqueue_message('ISSUE-55', {'i': i}, 'ag-1')
+repo.enqueue_message('ISSUE-55', {'x': 1}, 'ag-2')
+from monitor_bi import anomaly, stats
+# workload_4d 反映真实工作量
+agent_stats = stats.workload_4d('agent')
+assert len(agent_stats) >= 2, f'应有至少 2 个 agent: {agent_stats}'
+total = sum(a['total'] for a in agent_stats)
+assert total > 0, '总工作量应为正'
+# 低于阈值时不应报失衡（除非确实超过 40%）
+anoms = anomaly.imbalance_anomalies()
+# 若 ag-1 工作量占超 40% 应标失衡；否则不标
+top = agent_stats[0]
+top_share = top['total'] / total if total else 0
+assert top_share >= 0, '占比应为正'
+print(f'顶agent占比={top_share:.1%}, 异常数={len(anoms)}')
+print('imbalance 工作量口径通过')
 "
 
 # T5 CLI

@@ -7,7 +7,7 @@ monitor_bi · 代码变化统计（M3 · code.py）
 数据源：code_changes 表（按 commit 归集），复用 data 层 repository，不重造 git 解析。
 """
 from data import repository as repo
-from data import db
+from monitor_bi.util import query as _query
 
 
 def code_changes(by=("project", "agent")):
@@ -61,7 +61,3 @@ def code_by_agent():
     """按 agent 归集代码变化（便捷封装）。"""
     return code_changes(("agent",))
 
-
-def _query(sql, args=None):
-    rows = db.query(sql, args) if args else db.query(sql)
-    return [dict(r) for r in rows]

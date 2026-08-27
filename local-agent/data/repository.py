@@ -640,11 +640,18 @@ def get_token_usage(msg_id):
     return dict(row) if row else None
 
 
+# token_usage 表允许的筛选维度白名单（防 SQL 注入）
+_TOKEN_DIMS = ("agent_id", "role", "topic", "project")
+
+
 def list_token_usage(dim="", dim_value="", limit=1000):
-    """按维度（agent_id/role/topic/project）筛选 token 记录。"""
-    if dim and dim_value:
+    """按维度（agent_id/role/topic/project）筛选 token 记录。
+
+    dim 必须是白名单内的列名，否则忽略筛选（防 SQL 注入）。
+    """
+    if dim in _TOKEN_DIMS and dim_value:
         rows = db.query(
-            f"SELECT * FROM token_usage WHERE {dim}=? ORDER BY ts DESC LIMIT ?",
+            "SELECT * FROM token_usage WHERE {} = ? ORDER BY ts DESC LIMIT ?".format(dim),
             (dim_value, limit),
         )
     else:
@@ -684,11 +691,18 @@ def get_code_change(commit_id):
     return dict(row) if row else None
 
 
+# code_changes 表允许的筛选维度白名单（防 SQL 注入）
+_CODE_DIMS = ("agent_id", "project")
+
+
 def list_code_changes(dim="", dim_value="", limit=1000):
-    """按维度（agent_id/project）筛选代码变化记录。"""
-    if dim and dim_value:
+    """按维度（agent_id/project）筛选代码变化记录。
+
+    dim 必须是白名单内的列名，否则忽略筛选（防 SQL 注入）。
+    """
+    if dim in _CODE_DIMS and dim_value:
         rows = db.query(
-            f"SELECT * FROM code_changes WHERE {dim}=? ORDER BY ts DESC LIMIT ?",
+            "SELECT * FROM code_changes WHERE {} = ? ORDER BY ts DESC LIMIT ?".format(dim),
             (dim_value, limit),
         )
     else:

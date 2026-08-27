@@ -12,11 +12,9 @@ monitor_bi · token 分析（M2 · token.py）
 
 复用现有 data 层 token_usage 表 + repository 接口，不重造。
 """
-import json
-from collections import defaultdict
 
 from data import repository as repo
-from data import db
+from monitor_bi.util import query as _query
 
 
 # ---- 默认估算系数（可注入覆盖） ----
@@ -104,7 +102,3 @@ def token_share_imbalance(threshold=0.4):
         "imbalanced": share > threshold,
     }
 
-
-def _query(sql, args=None):
-    rows = db.query(sql, args) if args else db.query(sql)
-    return [dict(r) for r in rows]
