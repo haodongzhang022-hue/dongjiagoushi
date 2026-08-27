@@ -15,6 +15,7 @@ from .reviewer import ReviewerRole
 from .version_keeper import VersionKeeperRole
 from .tool_finder import ToolFinderRole
 from .tester import TesterRole
+from .deliverer import DelivererRole
 from .data_admin import DataAdminRole
 from .sentinel import SentinelRole
 from .secretary import SecretaryRole
@@ -51,6 +52,7 @@ ROLE_REGISTRY = {
     "架构·对齐": VersionKeeperRole,
     "架构·找工具": ToolFinderRole,
     "架构·测试": TesterRole,
+    "架构·交付": DelivererRole,
     "架构·数据管理员": DataAdminRole,
     "架构·监控哨兵": SentinelRole,
     "架构·进度推手": "label.progress_pusher.ProgressPusherRole",
