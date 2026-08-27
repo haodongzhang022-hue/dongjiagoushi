@@ -175,6 +175,35 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
                     }
                     print(f"   [第1次定规模] 秘书澄清预设: team_size={pre['team_size']} "
                           f"collab={pre['collab_plan']} risk={pre['risk_level']} (source={pre['source']})")
+                    # ---- 规模匹配落位澄清阶段（非第一步、非优先级）----
+                    # 秘书→产品澄清时评估项目层级 → 匹配承接体系/拓扑/角色子集，作为后续协作基准；
+                    # 经理再按架构做增量修正，不做从零规划、不二次评估（对齐 Issue #41 纠偏）。
+                    try:
+                        from roles import secretary_sense as _sense
+                        sm = _sense.scale_match(
+                            req, complexity=getattr(nd, "complexity", None),
+                            subtasks=getattr(nd, "subtasks", None),
+                            concurrency=getattr(nd, "concurrency", None),
+                        )
+                        scale_twice["first"].update({
+                            "tier": sm["tier"],
+                            "system": sm["system"],
+                            "topology": sm["topology"],
+                            "roles": sm["roles"],
+                        })
+                        report["scale_match"] = {
+                            "stage": "秘书澄清阶段(规模匹配)",
+                            "tier": sm["tier"],
+                            "system": sm["system"],
+                            "topology": sm["topology"],
+                            "roles": sm["roles"],
+                            "reason": sm["reason"],
+                        }
+                        print(f"   [规模匹配] 秘书澄清评估项目层级: tier={sm['tier']} "
+                              f"system={sm['system']} topology={sm['topology']} "
+                              f"roles={len(sm['roles'])}个")
+                    except Exception as _e:
+                        print(f"   [规模匹配] 跳过(能力不可用): {_e}")
 
                 # ---- 2 次定团队规模·经理按架构第 2 次增量修正 ----
                 if nid == "plan" or nd["role"] == "架构·经理":
@@ -262,6 +291,20 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True):
                 }
                 print(f"   [第1次定规模] 秘书澄清预设: team_size={_pre['team_size']} "
                       f"collab={_pre['collab_plan']} risk={_pre['risk_level']} (source={_pre['source']})")
+                # ---- 规模匹配落位澄清阶段（非第一步、非优先级）----
+                try:
+                    from roles import secretary_sense as _sense
+                    _sm = _sense.scale_match(_req_text if "_req_text" in dir() else req)
+                    report["scale_match"] = {
+                        "stage": "秘书澄清阶段(规模匹配)",
+                        "tier": _sm["tier"], "system": _sm["system"],
+                        "topology": _sm["topology"], "roles": _sm["roles"],
+                        "reason": _sm["reason"],
+                    }
+                    print(f"   [规模匹配] 秘书澄清评估项目层级: tier={_sm['tier']} "
+                          f"system={_sm['system']} topology={_sm['topology']}")
+                except Exception as _e:
+                    print(f"   [规模匹配] 跳过: {_e}")
             if nid == "plan" or nd["role"] == "架构·经理":
                 if scale_twice.get("first"):
                     _base = scale_twice["first"]
