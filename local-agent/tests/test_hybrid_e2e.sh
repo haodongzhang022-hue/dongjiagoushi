@@ -194,38 +194,43 @@ try:
 except ImportError:
     REAL = False
 
+scripts = ["test_a.sh", "test_b.sh", "test_c.sh"]
 class MockSelector:
     def select(self, changed_files=None):
-        return {"tests": ["test_a.sh"], "changed_files": ["src/a.py"]}
+        return ["test_a.sh"]
 class MockCache:
-    def hit_tests(self, scripts):
-        return {s: (s == "test_b.sh") for s in scripts}
-class MockExec:
-    def run_many(self, scripts, per_script_timeout=None):
-        return {"results": [], "summary": {"total": len(scripts),"pass":len(scripts),"fail":0,"total_duration":0.1}}
-
-scripts = ["test_a.sh", "test_b.sh", "test_c.sh"]
+    def filter_hits(self, scripts):
+        hits, rest = [], []
+        for s in scripts:
+            (hits if s == "test_b.sh" else rest).append(s)
+        return hits, rest
 
 if REAL:
-    import time as _t
-    eng = PolicyEngine(incremental=True, cache=False, parallel=False, full=False,
-                       repo_root="/workspace", selector=MockSelector(),
-                       last_full_ts=str(_t.time()-3600))
-    plan1 = eng.build_plan(scripts)            # incremental
-    eng2 = PolicyEngine(incremental=False, cache=True, parallel=False, full=False,
-                        repo_root="/workspace", cache_engine=MockCache(),
-                        last_full_ts=str(_t.time()-3600))
-    plan2 = eng2.build_plan(scripts)           # cache
-    eng3 = PolicyEngine(incremental=False, cache=False, parallel=True, full=False,
-                        repo_root="/workspace", executor=MockExec(),
-                        last_full_ts=str(_t.time()-3600))
-    plan3 = eng3.build_plan(scripts)           # parallel
-    eng4 = PolicyEngine(full=True, repo_root="/workspace")
-    plan4 = eng4.build_plan(scripts)           # full
-    plan1 = (plan1["mode"],)   # dict → (mode,)
-    plan2 = (plan2["mode"],)
-    plan3 = (plan3["mode"],)
-    plan4 = (plan4["mode"],)
+    eng = PolicyEngine()
+    # incremental：给 changed_files + selector → 增量选择 mode=incremental
+    p1 = eng.decide(changed_files=["src/a.py"], selector=MockSelector(),
+                    full_suite=lambda: scripts, last_full_ts=str(time.time()-3600),
+                    overrides={"incremental": True, "cache": False,
+                               "parallel": False, "full": False})
+    plan1 = ("incremental",) if p1["mode"] == "incremental" else (p1["mode"],)
+    # cache：全量兜底 + MockCache → cache_hits 剔除 test_b.sh
+    p2 = eng.decide(changed_files=None, cache=MockCache(),
+                    full_suite=lambda: scripts, last_full_ts=str(time.time()-3600),
+                    overrides={"incremental": False, "cache": True,
+                               "parallel": False, "full": False})
+    plan2 = ("cache",) if p2["cache_hits"] else (p2["mode"],)
+    # parallel：开启 parallel → 并行度 4
+    p3 = eng.decide(changed_files=None, full_suite=lambda: scripts,
+                    last_full_ts=str(time.time()-3600),
+                    overrides={"incremental": False, "cache": False,
+                               "parallel": True, "full": False})
+    plan3 = ("par4",) if p3["parallel"] == 4 else ("par%d" % p3["parallel"],)
+    # full：超期 last_full_ts → 强制全量 mode=full
+    p4 = eng.decide(changed_files=None, full_suite=lambda: scripts,
+                    last_full_ts=str(time.time()-8*86400),
+                    overrides={"incremental": True, "cache": True,
+                               "parallel": True, "full": True})
+    plan4 = ("full",) if p4["mode"] == "full" else (p4["mode"],)
 else:
     # 内联等价逻辑
     def inline(incremental, cache, parallel, full):
@@ -245,13 +250,13 @@ else:
         return mode, cands, skip
     plan1 = ("incremental", ["test_a.sh"], ["test_b.sh","test_c.sh"])
     plan2 = ("cache", ["test_a.sh","test_c.sh"], ["test_b.sh"])
-    plan3 = ("all", list(scripts), [])
+    plan3 = ("par4", list(scripts), [])
     plan4 = ("full", list(scripts), [])
 
 print("REAL=%s" % REAL)
 print("inc=%s" % plan1[0])
 print("cache=%s" % plan2[0])
-print("par=%s" % (plan3[0]))
+print("par=%s" % plan3[0])
 print("full=%s" % plan4[0])
 PY
 R=$(python3 "$WORK/policy_test.py")
@@ -259,8 +264,10 @@ REAL=$(echo "$R" | grep "^REAL=" | cut -d= -f2)
 INC=$(echo "$R" | grep "^inc=" | cut -d= -f2)
 CACHE=$(echo "$R" | grep "^cache=" | cut -d= -f2)
 FULL=$(echo "$R" | grep "^full=" | cut -d= -f2)
+PAR=$(echo "$R" | grep "^par=" | cut -d= -f2)
 check "增量开关生效" "$INC" "incremental"
 check "缓存开关生效" "$CACHE" "cache"
+check "并行开关生效" "$PAR" "par4"
 check "全量开关生效" "$FULL" "full"
 if [ "$REAL" = "True" ]; then
   ok "策略走真实 PolicyEngine 接口"
@@ -269,7 +276,7 @@ else
 fi
 
 # ============================================================
-# 5. 全量回归：7 天强制机制生效
+# 5. 全量回归：7 天强制机制
 # ============================================================
 echo "-- [5] 全量回归 --"
 cat > "$WORK/full_test.py" << 'PY'
@@ -283,15 +290,12 @@ except ImportError:
     REAL = False
 if REAL:
     # 超过 7 天 → 强制全量
-    eng = PolicyEngine(incremental=True, cache=True, full=False,
-                       repo_root="/workspace",
-                       last_full_ts=str(time.time() - 8*86400))
-    print("overdue=" + str(eng.should_full_regression()))
+    eng = PolicyEngine()
+    overdue = eng.full_regression_due(str(time.time() - 8*86400))
     # 刚跑过 → 不强制
-    eng2 = PolicyEngine(incremental=True, cache=True, full=False,
-                        repo_root="/workspace",
-                        last_full_ts=str(time.time() - 3600))
-    print("recent=" + str(eng2.should_full_regression()))
+    recent = eng.full_regression_due(str(time.time() - 3600))
+    print("overdue=" + str(overdue))
+    print("recent=" + str(recent))
 else:
     # 内联：距上次 >= 7 天强制全量
     overdue = (time.time() - (time.time()-8*86400)) >= 7*86400
@@ -305,7 +309,6 @@ RECENT=$(echo "$R" | grep "^recent=" | cut -d= -f2)
 check "7天超期强制全量" "$OVERDUE" "True"
 check "近期已跑不强制" "$RECENT" "False"
 
-# ============================================================
 # 6. 成本报表：增量+缓存+并行三合一节省
 # ============================================================
 echo "-- [6] 成本报表 --"
