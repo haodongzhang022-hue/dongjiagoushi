@@ -1,16 +1,18 @@
 {
   "$schema": "https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/raw/main/local-agent/hybrid/registry.schema.json",
-  "version": "v2.0",
-  "generated_at": "2026-08-28T00:00:00Z",
-  "description": "集中测试注册表 — 声明仓库全部 CPU 密集测试脚本，映射到覆盖的源码模块与依赖关系，供增量测试选择器消费。",
+  "version": "v2.1",
+  "generated_at": "2026-08-28T06:17:34Z",
+  "description": "集中测试注册表 — 声明仓库全部 CPU 密集测试脚本，映射到覆盖的源码模块与依赖关系，供增量测试选择器消费。v2.1 修复角色模块覆盖缺失、统一路径前缀、补依赖分析。",
   "tests": {
     "local-agent/tests/test_router_integration.sh": {
       "name": "test_router_integration",
       "covers": [
-        "topology/router.py",
-        "topology/fusion.py",
-        "topology/topologies.py",
-        "data/admin.py"
+        "local-agent/data/admin.py",
+        "local-agent/graph.py",
+        "local-agent/orchestrator.py",
+        "local-agent/topology/fusion.py",
+        "local-agent/topology/router.py",
+        "local-agent/topology/topologies.py"
       ],
       "depends_on": [
         "local-agent/tests/test_scale.sh"
@@ -22,13 +24,13 @@
     "local-agent/tests/test_scale.sh": {
       "name": "test_scale",
       "covers": [
-        "scale/spec.py",
-        "scale/profile.py",
-        "scale/store.py",
-        "scale/broker.py",
-        "scale/engine.py",
-        "scale/pool.py",
-        "scale/plugin.py"
+        "local-agent/scale/broker.py",
+        "local-agent/scale/engine.py",
+        "local-agent/scale/plugin.py",
+        "local-agent/scale/pool.py",
+        "local-agent/scale/profile.py",
+        "local-agent/scale/spec.py",
+        "local-agent/scale/store.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 4.5,
@@ -38,11 +40,11 @@
     "local-agent/tests/test_prescale_entry.sh": {
       "name": "test_prescale_entry",
       "covers": [
-        "scale/prescale.py",
-        "scale/engine.py",
-        "scale/profile.py",
-        "orchestrator.py",
-        "roles/base.py"
+        "local-agent/orchestrator.py",
+        "local-agent/roles/base.py",
+        "local-agent/scale/engine.py",
+        "local-agent/scale/prescale.py",
+        "local-agent/scale/profile.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.8,
@@ -52,10 +54,10 @@
     "local-agent/tests/test_engine.sh": {
       "name": "test_engine",
       "covers": [
-        "engine/state_machine.py",
-        "engine/host.py",
-        "engine/timer.py",
-        "scale/store.py"
+        "local-agent/engine/host.py",
+        "local-agent/engine/state_machine.py",
+        "local-agent/engine/timer.py",
+        "local-agent/scale/store.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -65,11 +67,13 @@
     "local-agent/tests/test_data_layer.sh": {
       "name": "test_data_layer",
       "covers": [
-        "data/db.py",
-        "data/schema.py",
-        "data/admin.py",
-        "data/repository.py",
-        "data/cli.py"
+        "local-agent/data/admin.py",
+        "local-agent/data/cli.py",
+        "local-agent/data/db.py",
+        "local-agent/data/repository.py",
+        "local-agent/data/schema.py",
+        "local-agent/roles/data_admin.py",
+        "local-agent/scale/plugin.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 5.0,
@@ -79,9 +83,10 @@
     "local-agent/tests/test_collab.sh": {
       "name": "test_collab",
       "covers": [
-        "collab/engine.py",
-        "collab/peer.py",
-        "data/admin.py"
+        "local-agent/collab/engine.py",
+        "local-agent/collab/peer.py",
+        "local-agent/collab/store.py",
+        "local-agent/data/admin.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.5,
@@ -91,10 +96,10 @@
     "local-agent/tests/test_peer_collab.sh": {
       "name": "test_peer_collab",
       "covers": [
-        "collab/peer.py",
-        "collab/engine.py",
-        "orchestrator.py",
-        "data/admin.py"
+        "local-agent/collab/engine.py",
+        "local-agent/collab/peer.py",
+        "local-agent/data/admin.py",
+        "local-agent/orchestrator.py"
       ],
       "depends_on": [
         "local-agent/tests/test_collab.sh"
@@ -106,12 +111,13 @@
     "local-agent/tests/test_peer_closure.sh": {
       "name": "test_peer_closure",
       "covers": [
-        "collab/closure.py",
-        "collab/peer.py",
-        "collab/human_gate.py",
-        "collab/precursor.py",
-        "data/admin.py",
-        "sentinel/peer_guard.py"
+        "local-agent/collab/closure.py",
+        "local-agent/collab/decisions.py",
+        "local-agent/collab/human_gate.py",
+        "local-agent/collab/peer.py",
+        "local-agent/collab/precursor.py",
+        "local-agent/data/admin.py",
+        "local-agent/sentinel/peer_guard.py"
       ],
       "depends_on": [
         "local-agent/tests/test_peer_collab.sh"
@@ -123,10 +129,10 @@
     "local-agent/tests/test_disposition.sh": {
       "name": "test_disposition",
       "covers": [
-        "collab/disposition.py",
-        "collab/peer.py",
-        "roles/base.py",
-        "data/admin.py"
+        "local-agent/collab/disposition.py",
+        "local-agent/collab/peer.py",
+        "local-agent/data/admin.py",
+        "local-agent/roles/base.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.2,
@@ -136,10 +142,11 @@
     "local-agent/tests/test_sentinel.sh": {
       "name": "test_sentinel",
       "covers": [
-        "sentinel/engine.py",
-        "sentinel/detect.py",
-        "sentinel/store.py",
-        "data/admin.py"
+        "local-agent/data/admin.py",
+        "local-agent/roles/base.py",
+        "local-agent/sentinel/detect.py",
+        "local-agent/sentinel/engine.py",
+        "local-agent/sentinel/store.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 4.2,
@@ -149,12 +156,13 @@
     "local-agent/tests/test_external_source.sh": {
       "name": "test_external_source",
       "covers": [
-        "dispatcher/source.py",
-        "dispatcher/sources.py",
-        "dispatcher/security.py",
-        "dispatcher/host_helper.py",
-        "dispatcher/rules.py",
-        "data/schema.py"
+        "local-agent/data/schema.py",
+        "local-agent/dispatcher/host_helper.py",
+        "local-agent/dispatcher/rules.py",
+        "local-agent/dispatcher/security.py",
+        "local-agent/dispatcher/source.py",
+        "local-agent/dispatcher/sources.py",
+        "local-agent/dispatcher/webhook.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.5,
@@ -164,12 +172,16 @@
     "local-agent/tests/test_dispatcher.sh": {
       "name": "test_dispatcher",
       "covers": [
-        "dispatcher/engine.py",
-        "dispatcher/queue.py",
-        "dispatcher/rules.py",
-        "dispatcher/source.py",
-        "dispatcher/webui.py",
-        "data/schema.py"
+        "local-agent/data/db.py",
+        "local-agent/data/schema.py",
+        "local-agent/dispatcher/engine.py",
+        "local-agent/dispatcher/guard.py",
+        "local-agent/dispatcher/queue.py",
+        "local-agent/dispatcher/reject.py",
+        "local-agent/dispatcher/rules.py",
+        "local-agent/dispatcher/source.py",
+        "local-agent/dispatcher/webui.py",
+        "local-agent/sentinel/detect.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.3,
@@ -179,9 +191,10 @@
     "local-agent/tests/test_probe.sh": {
       "name": "test_probe",
       "covers": [
-        "dispatcher/probe.py",
-        "dispatcher/engine.py",
-        "data/schema.py"
+        "local-agent/data/schema.py",
+        "local-agent/dispatcher/engine.py",
+        "local-agent/dispatcher/probe.py",
+        "local-agent/dispatcher/sources.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 1.8,
@@ -191,10 +204,11 @@
     "local-agent/tests/test_dispatch_engine.sh": {
       "name": "test_dispatch_engine",
       "covers": [
-        "dispatch_engine.py",
-        "dispatch/ability.py",
-        "data/admin.py",
-        "roles/base.py"
+        "local-agent/data/admin.py",
+        "local-agent/dispatch/ability.py",
+        "local-agent/dispatch_engine.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/manager.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -204,10 +218,10 @@
     "local-agent/tests/test_depth_engine.sh": {
       "name": "test_depth_engine",
       "covers": [
-        "depth/engine.py",
-        "depth/ability.py",
-        "data/admin.py",
-        "roles/base.py"
+        "local-agent/data/admin.py",
+        "local-agent/depth/ability.py",
+        "local-agent/depth/engine.py",
+        "local-agent/roles/base.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.8,
@@ -217,10 +231,11 @@
     "local-agent/tests/test_ops_sim.sh": {
       "name": "test_ops_sim",
       "covers": [
-        "ops.py",
-        "gid.py",
-        "data/admin.py",
-        "sentinel/engine.py"
+        "local-agent/data/admin.py",
+        "local-agent/data/schema.py",
+        "local-agent/gid.py",
+        "local-agent/ops.py",
+        "local-agent/sentinel/engine.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -230,9 +245,9 @@
     "local-agent/tests/test_topology_comparison.sh": {
       "name": "test_topology_comparison",
       "covers": [
-        "topology/benchmark.py",
-        "topology/topologies.py",
-        "topology/runner.py"
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/runner.py",
+        "local-agent/topology/topologies.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.5,
@@ -242,9 +257,9 @@
     "local-agent/tests/test_benchmark_ab.sh": {
       "name": "test_benchmark_ab",
       "covers": [
-        "topology/benchmark.py",
-        "topology/runner.py",
-        "topology/topologies.py"
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/runner.py",
+        "local-agent/topology/topologies.py"
       ],
       "depends_on": [
         "local-agent/tests/test_topology_comparison.sh"
@@ -256,10 +271,10 @@
     "local-agent/tests/test_topology_hybrid.sh": {
       "name": "test_topology_hybrid",
       "covers": [
-        "topology/benchmark.py",
-        "topology/topologies.py",
-        "topology/runner.py",
-        "topology/tasksource.py"
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/runner.py",
+        "local-agent/topology/tasksource.py",
+        "local-agent/topology/topologies.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -269,7 +284,7 @@
     "local-agent/tests/test_galton.sh": {
       "name": "test_galton",
       "covers": [
-        "galton/engine.py"
+        "local-agent/galton/engine.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.5,
@@ -279,8 +294,8 @@
     "local-agent/tests/test_topology_fusion.sh": {
       "name": "test_topology_fusion",
       "covers": [
-        "topology/fusion.py",
-        "topology/topologies.py"
+        "local-agent/topology/fusion.py",
+        "local-agent/topology/topologies.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.2,
@@ -290,9 +305,9 @@
     "local-agent/tests/test_topology_slim.sh": {
       "name": "test_topology_slim",
       "covers": [
-        "topology/slim.py",
-        "topology/fusion.py",
-        "topology/topologies.py"
+        "local-agent/topology/fusion.py",
+        "local-agent/topology/slim.py",
+        "local-agent/topology/topologies.py"
       ],
       "depends_on": [
         "local-agent/tests/test_topology_fusion.sh"
@@ -304,10 +319,11 @@
     "local-agent/tests/test_secretary_sense.sh": {
       "name": "test_secretary_sense",
       "covers": [
-        "roles/secretary_sense.py",
-        "roles/base.py",
-        "orchestrator.py",
-        "data/schema.py"
+        "local-agent/data/schema.py",
+        "local-agent/orchestrator.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/secretary.py",
+        "local-agent/roles/secretary_sense.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.5,
@@ -317,9 +333,9 @@
     "local-agent/tests/test_prefix_cache.sh": {
       "name": "test_prefix_cache",
       "covers": [
-        "topology/prefix_cache.py",
-        "topology/topologies.py",
-        "topology/benchmark.py"
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/prefix_cache.py",
+        "local-agent/topology/topologies.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.0,
@@ -329,11 +345,13 @@
     "local-agent/tests/test_cache_layer.sh": {
       "name": "test_cache_layer",
       "covers": [
-        "llm/cache.py",
-        "llm/base.py",
-        "roles/shell_cache.py",
-        "data/db.py",
-        "topology/cache_monitor.py"
+        "local-agent/data/db.py",
+        "local-agent/llm/base.py",
+        "local-agent/llm/cache.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/shell_cache.py",
+        "local-agent/topology/cache_monitor.py",
+        "local-agent/topology/prefix_cache.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -343,12 +361,17 @@
     "local-agent/tests/test_label_automation.sh": {
       "name": "test_label_automation",
       "covers": [
-        "label/ability.py",
-        "label/auto.py",
-        "label/cli.py",
-        "label/progress_pusher.py",
-        "data/db.py",
-        "roles/base.py"
+        "local-agent/data/db.py",
+        "local-agent/label/ability.py",
+        "local-agent/label/auto.py",
+        "local-agent/label/cli.py",
+        "local-agent/label/progress_pusher.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/data_admin.py",
+        "local-agent/roles/developer.py",
+        "local-agent/roles/manager.py",
+        "local-agent/roles/market.py",
+        "local-agent/roles/product.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.2,
@@ -358,10 +381,10 @@
     "local-agent/tests/test_review_tester_handoff.sh": {
       "name": "test_review_tester_handoff",
       "covers": [
-        "roles/base.py",
-        "roles/reviewer.py",
-        "roles/tester.py",
-        "data/admin.py"
+        "local-agent/data/admin.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/reviewer.py",
+        "local-agent/roles/tester.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.0,
@@ -371,10 +394,12 @@
     "local-agent/tests/test_local_agent.sh": {
       "name": "test_local_agent",
       "covers": [
-        "roles/__init__.py",
-        "roles/base.py",
-        "run.py",
-        "fractal.py"
+        "local-agent/fractal.py",
+        "local-agent/graph.py",
+        "local-agent/orchestrator.py",
+        "local-agent/roles/__init__.py",
+        "local-agent/roles/base.py",
+        "local-agent/run.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -384,10 +409,10 @@
     "local-agent/tests/test_dispatch_ability.sh": {
       "name": "test_dispatch_ability",
       "covers": [
-        "dispatch/ability.py",
-        "roles/base.py",
-        "data/admin.py",
-        "dispatch_engine.py"
+        "local-agent/data/admin.py",
+        "local-agent/dispatch/ability.py",
+        "local-agent/dispatch_engine.py",
+        "local-agent/roles/base.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.5,
@@ -397,8 +422,8 @@
     "local-agent/tests/test_hybrid_router.sh": {
       "name": "test_hybrid_router",
       "covers": [
-        "hybrid/router.py",
-        "hybrid/__init__.py"
+        "local-agent/hybrid/__init__.py",
+        "local-agent/hybrid/router.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 1.0,
@@ -408,10 +433,10 @@
     "local-agent/tests/test_hybrid_pipeline.sh": {
       "name": "test_hybrid_pipeline",
       "covers": [
-        "hybrid/worker.py",
-        "hybrid/sync.py",
-        "hybrid/router.py",
-        "hybrid/cost.py"
+        "local-agent/hybrid/cost.py",
+        "local-agent/hybrid/router.py",
+        "local-agent/hybrid/sync.py",
+        "local-agent/hybrid/worker.py"
       ],
       "depends_on": [
         "local-agent/tests/test_hybrid_router.sh"
@@ -423,10 +448,10 @@
     "local-agent/tests/test_deliverer.sh": {
       "name": "test_deliverer",
       "covers": [
-        "roles/deliverer.py",
-        "roles/base.py",
-        "data/admin.py",
-        "ops.py"
+        "local-agent/data/admin.py",
+        "local-agent/ops.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/deliverer.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.0,
@@ -436,11 +461,11 @@
     "tests/test_architect_system.sh": {
       "name": "test_architect_system",
       "covers": [
+        ".codebuddy/skills/architect/SKILL.md",
         "AGENTS.md",
         "docs/ISSUE_MANAGEMENT.md",
         "docs/ROADMAP.md",
-        "docs/templates/",
-        ".codebuddy/skills/architect/SKILL.md"
+        "docs/templates/"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.0,
@@ -450,9 +475,9 @@
     "tests/test_functional_links.sh": {
       "name": "test_functional_links",
       "covers": [
+        ".codebuddy/skills/architect/SKILL.md",
         "AGENTS.md",
         "docs/",
-        ".codebuddy/skills/architect/SKILL.md",
         "local-agent/run.py"
       ],
       "depends_on": [],
@@ -463,9 +488,9 @@
     "tests/test_relay_workflow.sh": {
       "name": "test_relay_workflow",
       "covers": [
+        "local-agent/relay.py",
         "local-agent/roles/__init__.py",
-        "local-agent/roles/manager.py",
-        "local-agent/relay.py"
+        "local-agent/roles/manager.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -475,10 +500,10 @@
     "tests/test_memory_store.sh": {
       "name": "test_memory_store",
       "covers": [
-        "src/memory/store.py",
+        "src/memory/backends/",
         "src/memory/schema.py",
-        "src/memory/triggers.py",
-        "src/memory/backends/"
+        "src/memory/store.py",
+        "src/memory/triggers.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.5,
@@ -488,8 +513,8 @@
     "tests/test_handle_ability.sh": {
       "name": "test_handle_ability",
       "covers": [
-        "local-agent/handle/resolver.py",
         "local-agent/handle/ability.py",
+        "local-agent/handle/resolver.py",
         "local-agent/roles/base.py"
       ],
       "depends_on": [],
@@ -500,8 +525,8 @@
     "tests/test_company_model.sh": {
       "name": "test_company_model",
       "covers": [
-        "local-agent/roles/company.py",
         "local-agent/roles/__init__.py",
+        "local-agent/roles/company.py",
         "local-agent/team.yaml"
       ],
       "depends_on": [],
@@ -512,10 +537,10 @@
     "tests/test_mini_e2e.sh": {
       "name": "test_mini_e2e",
       "covers": [
-        "local-agent/graph.py",
         "local-agent/fractal.py",
-        "local-agent/run.py",
+        "local-agent/graph.py",
         "local-agent/roles/",
+        "local-agent/run.py",
         "local-agent/team.yaml"
       ],
       "depends_on": [],
@@ -527,10 +552,10 @@
       "name": "test_doc_consistency",
       "covers": [
         "docs/",
-        "src/memory/schema.py",
-        "src/memory/backends/embedding/",
         "local-agent/collab/disposition.py",
-        "local-agent/roles/reviewer.py"
+        "local-agent/roles/reviewer.py",
+        "src/memory/backends/embedding/",
+        "src/memory/schema.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.5,
@@ -540,11 +565,11 @@
     "tests/test_company_e2e.sh": {
       "name": "test_company_e2e",
       "covers": [
-        "local-agent/roles/company.py",
-        "local-agent/roles/__init__.py",
-        "src/memory/triggers.py",
         "local-agent/graph.py",
-        "local-agent/team.yaml"
+        "local-agent/roles/__init__.py",
+        "local-agent/roles/company.py",
+        "local-agent/team.yaml",
+        "src/memory/triggers.py"
       ],
       "depends_on": [
         "tests/test_company_model.sh"
@@ -556,9 +581,9 @@
     "tests/test_monitor_bi.sh": {
       "name": "test_monitor_bi",
       "covers": [
-        "local-agent/monitor_bi/",
+        "local-agent/data/admin.py",
         "local-agent/data/schema.py",
-        "local-agent/data/admin.py"
+        "local-agent/monitor_bi/"
       ],
       "depends_on": [],
       "cpu_cost_est": 3.0,
@@ -568,8 +593,8 @@
     "tests/test_relay_card.sh": {
       "name": "test_relay_card",
       "covers": [
-        "local-agent/relay_card/",
-        "local-agent/relay.py"
+        "local-agent/relay.py",
+        "local-agent/relay_card/"
       ],
       "depends_on": [],
       "cpu_cost_est": 1.5,
