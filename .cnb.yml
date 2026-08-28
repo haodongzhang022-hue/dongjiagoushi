@@ -38,14 +38,14 @@ main:
             echo ""
             echo "==== hybrid 路由自检（纯逻辑，低 CPU，云端可跑） ===="
             pip install -q -r local-agent/requirements.txt 2>/dev/null || true
-            python3 -c "
+            python3 - <<'PY'
             import sys; sys.path.insert(0, 'local-agent')
             from hybrid.router import HybridResourceRouter
             r = HybridResourceRouter()
             assert r.classify('test_unit_cpu.sh') == 'local', 'pure-cpu should be local'
             assert r.classify('llm_knowledge_update') == 'cloud', 'llm should be cloud'
             print('  HybridResourceRouter self-check OK')
-            "
+            PY
             echo ""
             echo "==== 说明：37 个 CPU 密集测试已在本地执行 ===="
             echo "本地入口：bash scripts/local-exec.sh --real"
