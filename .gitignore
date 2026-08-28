@@ -28,3 +28,6 @@ docs/BI_DASHBOARD.md
 local-agent/hybrid/.last_run.json
 local-agent/hybrid/.hybrid_sync.log
 local-agent/hybrid/__pycache__/
+
+# Hybrid 资源路由本地测试结果（不进版本库，由 sync 同步）
+.cnb-results/
