@@ -119,18 +119,46 @@ class IncrementalSelector(object):
 
     # ---------- 选择逻辑 ----------
     def _find_by_source(self, source_path):
-        """在 registry 数据中查找覆盖给定源码的测试。"""
+        """在 registry 数据中查找覆盖给定源码的测试。
+
+        与 T1 registry v2.1 一致的路径归一化：`local-agent/` 前缀与裸路径
+        **双向兼容**。无论 source_path / covers 是否带 `local-agent/` 前缀，
+        都生成两个变体（带前缀 / 裸路径）参与匹配，保证：
+          - `local-agent/collab/engine.py` 与 `collab/engine.py` 视为等价；
+          - 注册表 covers 统一为 `local-agent/` 前缀时，裸路径变更也能命中。
+        """
         data = self._load_registry_data()
         tests = data.get("tests", {})
         sp = source_path.rstrip("/")
+        # 双向归一化：源路径同时生成「裸路径 / 带 local-agent/ 前缀」两个变体
+        sp_variants = {sp}
+        if sp.startswith("local-agent/"):
+            sp_variants.add(sp[len("local-agent/"):])
+        else:
+            sp_variants.add("local-agent/" + sp)
+
         hits = []
         for test_path, info in tests.items():
             for covered in info.get("covers", []):
                 cv = covered.rstrip("/")
-                if (sp == cv or
-                    sp.startswith(cv + "/") or
-                    cv.startswith(sp + "/") or
-                    cv.startswith(sp)):
+                # covers 同样做双向归一化（防御：注册表内未统一前缀也兼容）
+                cv_variants = {cv}
+                if cv.startswith("local-agent/"):
+                    cv_variants.add(cv[len("local-agent/"):])
+                else:
+                    cv_variants.add("local-agent/" + cv)
+                matched = False
+                for s in sp_variants:
+                    for c in cv_variants:
+                        if (s == c or
+                            s.startswith(c + "/") or
+                            c.startswith(s + "/") or
+                            c.startswith(s)):
+                            matched = True
+                            break
+                    if matched:
+                        break
+                if matched:
                     hits.append(test_path)
                     break
         return sorted(set(hits))

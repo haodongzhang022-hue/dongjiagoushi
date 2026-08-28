@@ -42,6 +42,44 @@ print('OK')
 ")
 [ "$R" = "OK" ] && ok "select() 变更→受影响测试（含依赖传播）" || bad "select failed: $R"
 
+# 2b. 路径归一化：local-agent/ 前缀与裸路径双向兼容（与 T1 registry v2.1 对齐）
+R=$(python3 -c "
+import sys; sys.path.insert(0, '$ROOT')
+from hybrid import IncrementalSelector
+s = IncrementalSelector(root_dir='$ROOT')
+# 带 local-agent/ 前缀的变更文件同样命中（裸 covers 场景）
+selected = s.select(['local-agent/collab/engine.py'])
+assert 'local-agent/tests/test_collab.sh' in selected, f'missing collab: {selected}'
+assert 'local-agent/tests/test_peer_collab.sh' in selected, f'missing peer_collab: {selected}'
+selected2 = s.select(['local-agent/engine/state_machine.py'])
+assert selected2 == ['local-agent/tests/test_engine.sh'], f'got: {selected2}'
+print('OK')
+")
+[ "$R" = "OK" ] && ok "路径归一化：local-agent/ 前缀与裸路径双向兼容" || bad "路径归一化失败: $R"
+
+# 2c. registry covers 统一为 local-agent/ 前缀时（T1 v2.1），裸路径变更仍可命中
+R=$(python3 -c "
+import sys; sys.path.insert(0, '$ROOT')
+from hybrid import IncrementalSelector
+class PrefixedReg:
+    def all_tests(self):
+        return ['local-agent/tests/test_collab.sh','local-agent/tests/test_peer_collab.sh','local-agent/tests/test_engine.sh']
+    def get(self, t):
+        return {
+          'local-agent/tests/test_collab.sh': {'covers':['local-agent/collab/engine.py'],'depends_on':[]},
+          'local-agent/tests/test_peer_collab.sh': {'covers':['local-agent/collab/peer.py'],'depends_on':['local-agent/tests/test_collab.sh']},
+          'local-agent/tests/test_engine.sh': {'covers':['local-agent/engine/state_machine.py'],'depends_on':[]},
+        }[t]
+s = IncrementalSelector(root_dir='$ROOT', registry=PrefixedReg())
+selected = s.select(['collab/engine.py'])
+assert 'local-agent/tests/test_collab.sh' in selected, f'missing collab: {selected}'
+assert 'local-agent/tests/test_peer_collab.sh' in selected, f'missing peer_collab: {selected}'
+selected2 = s.select(['engine/state_machine.py'])
+assert selected2 == ['local-agent/tests/test_engine.sh'], f'got: {selected2}'
+print('OK')
+")
+[ "$R" = "OK" ] && ok "前缀 covers + 裸路径变更双向命中（T1 v2.1 兼容）" || bad "v2.1 前缀 covers 兼容失败: $R"
+
 # 3. select() 过滤测试文件自身
 R=$(python3 -c "
 import sys; sys.path.insert(0, '$ROOT')
