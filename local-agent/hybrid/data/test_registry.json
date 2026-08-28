@@ -1,0 +1,134 @@
+{
+  "version": "1.0",
+  "description": "本地测试脚本 → 源码模块映射注册表（Issue #65）",
+  "scripts": {
+    "test_benchmark_ab.sh": {
+      "covers": ["local-agent/topology/benchmark.py"],
+      "depends_on": ["local-agent/topology"]
+    },
+    "test_cache_layer.sh": {
+      "covers": ["local-agent/llm", "local-agent/roles", "local-agent/topology/cache_monitor.py", "local-agent/topology/prefix_cache.py", "local-agent/data"],
+      "depends_on": ["local-agent/llm", "local-agent/data", "local-agent/topology"]
+    },
+    "test_collab.sh": {
+      "covers": ["local-agent/collab", "local-agent/engine"],
+      "depends_on": ["local-agent/data", "local-agent/collab"]
+    },
+    "test_data_layer.sh": {
+      "covers": ["local-agent/data", "local-agent/scale/plugin.py", "local-agent/roles/data_admin.py"],
+      "depends_on": ["local-agent/data"]
+    },
+    "test_deliverer.sh": {
+      "covers": ["local-agent/roles", "local-agent/data"],
+      "depends_on": ["local-agent/data", "local-agent/roles"]
+    },
+    "test_depth_engine.sh": {
+      "covers": ["local-agent/depth", "local-agent/roles"],
+      "depends_on": ["local-agent/data", "local-agent/roles", "local-agent/depth"]
+    },
+    "test_dispatch_ability.sh": {
+      "covers": ["local-agent/dispatch", "local-agent/roles"],
+      "depends_on": ["local-agent/data", "local-agent/dispatch", "local-agent/roles"]
+    },
+    "test_dispatch_engine.sh": {
+      "covers": ["local-agent/dispatch", "local-agent/dispatch_engine.py"],
+      "depends_on": ["local-agent/data", "local-agent/dispatch", "local-agent/roles"]
+    },
+    "test_dispatcher.sh": {
+      "covers": ["local-agent/dispatcher"],
+      "depends_on": ["local-agent/data", "local-agent/dispatcher"]
+    },
+    "test_disposition.sh": {
+      "covers": ["local-agent/collab/disposition.py"],
+      "depends_on": ["local-agent/collab"]
+    },
+    "test_engine.sh": {
+      "covers": ["local-agent/engine", "local-agent/scale"],
+      "depends_on": ["local-agent/engine", "local-agent/scale"]
+    },
+    "test_external_source.sh": {
+      "covers": ["local-agent/dispatcher"],
+      "depends_on": ["local-agent/data", "local-agent/dispatcher"]
+    },
+    "test_galton.sh": {
+      "covers": ["local-agent/galton"],
+      "depends_on": ["local-agent/galton"]
+    },
+    "test_hybrid_pipeline.sh": {
+      "covers": ["local-agent/hybrid", "scripts/local-exec.sh"],
+      "depends_on": ["local-agent/hybrid"]
+    },
+    "test_hybrid_router.sh": {
+      "covers": ["local-agent/hybrid/router.py"],
+      "depends_on": ["local-agent/hybrid"]
+    },
+    "test_label_automation.sh": {
+      "covers": ["local-agent/label", "local-agent/roles"],
+      "depends_on": ["local-agent/data", "local-agent/label", "local-agent/roles"]
+    },
+    "test_local_agent.sh": {
+      "covers": ["local-agent/run.py", "local-agent/roles", "local-agent/orchestrator.py"],
+      "depends_on": ["local-agent/roles", "local-agent/orchestrator.py", "local-agent/data"]
+    },
+    "test_ops_sim.sh": {
+      "covers": ["local-agent/engine", "local-agent/sentinel"],
+      "depends_on": ["local-agent/data", "local-agent/engine", "local-agent/sentinel"]
+    },
+    "test_peer_closure.sh": {
+      "covers": ["local-agent/collab/closure"],
+      "depends_on": ["local-agent/data", "local-agent/collab"]
+    },
+    "test_peer_collab.sh": {
+      "covers": ["local-agent/collab/peer.py"],
+      "depends_on": ["local-agent/data", "local-agent/collab"]
+    },
+    "test_prefix_cache.sh": {
+      "covers": ["local-agent/topology/prefix_cache.py", "local-agent/topology/topologies.py"],
+      "depends_on": ["local-agent/topology"]
+    },
+    "test_prescale_entry.sh": {
+      "covers": ["local-agent/scale/prescale.py", "local-agent/engine"],
+      "depends_on": ["local-agent/scale", "local-agent/engine", "local-agent/roles"]
+    },
+    "test_probe.sh": {
+      "covers": ["local-agent/dispatcher/probe.py"],
+      "depends_on": ["local-agent/data", "local-agent/dispatcher"]
+    },
+    "test_review_tester_handoff.sh": {
+      "covers": ["local-agent/roles", "local-agent/data"],
+      "depends_on": ["local-agent/data", "local-agent/roles"]
+    },
+    "test_router_integration.sh": {
+      "covers": ["local-agent/topology/router.py", "local-agent/topology/fusion.py"],
+      "depends_on": ["local-agent/data", "local-agent/topology"]
+    },
+    "test_scale.sh": {
+      "covers": ["local-agent/scale", "local-agent/engine", "local-agent/pool"],
+      "depends_on": ["local-agent/scale", "local-agent/engine", "local-agent/pool"]
+    },
+    "test_secretary_sense.sh": {
+      "covers": ["local-agent/roles/secretary_sense.py", "local-agent/roles"],
+      "depends_on": ["local-agent/roles", "local-agent/data"]
+    },
+    "test_sentinel.sh": {
+      "covers": ["local-agent/sentinel", "local-agent/engine"],
+      "depends_on": ["local-agent/data", "local-agent/sentinel", "local-agent/engine"]
+    },
+    "test_topology_comparison.sh": {
+      "covers": ["local-agent/topology/runner.py", "local-agent/topology/benchmark.py"],
+      "depends_on": ["local-agent/topology"]
+    },
+    "test_topology_fusion.sh": {
+      "covers": ["local-agent/topology/fusion.py"],
+      "depends_on": ["local-agent/topology"]
+    },
+    "test_topology_hybrid.sh": {
+      "covers": ["local-agent/topology/topologies.py"],
+      "depends_on": ["local-agent/topology"]
+    },
+    "test_topology_slim.sh": {
+      "covers": ["local-agent/topology/slim.py"],
+      "depends_on": ["local-agent/topology"]
+    }
+  }
+}
