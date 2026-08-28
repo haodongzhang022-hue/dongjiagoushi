@@ -39,7 +39,7 @@ main:
             echo "==== hybrid 路由自检（纯逻辑，低 CPU，云端可跑） ===="
             pip install -q -r local-agent/requirements.txt 2>/dev/null || true
             python3 -c "
-            import sys; sys.path.insert(0, "local-agent")
+            import sys; sys.path.insert(0, 'local-agent')
             from hybrid.router import HybridResourceRouter
             r = HybridResourceRouter()
             assert r.classify('test_unit_cpu.sh') == 'local', 'pure-cpu should be local'
