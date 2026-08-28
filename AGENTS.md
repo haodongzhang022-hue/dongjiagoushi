@@ -65,6 +65,13 @@
   - 架构·总师一给出架构方案，**架构·经理即可提前分工**（`plan` 只依赖 `architect`，不依赖 `develop`），不必等开发完成；
   - 下游环节（对齐/找工具/小组长）可与实现并行推进。
 - **开发分形扩展（多小组）**：开发任务按项目规模分形为多个小组并行（`fractal`），各小组内开发→小组长测试/整合→**统一向上交付**；小组内仍过大可递归再分形。
+- **开发小组闭环机制（Dev Team · Issue #74 深化结构）**：开发是真正持续推进度的核心，辅助多则浪费——把「一个开发小组」（小组长 + N 个开发）作为**一个确定性编排的整体**，一套循环配 **N 个开发（默认 2）**，辅助质量闸门抽到小组外不挤占开发名额：
+  - **执行-验证分离**：dev 只负责「做」，不负责「判」；产出是否合格由**客观验证器**（测试/lint）裁定，绝不自行裁定"我完成了"；
+  - **确定性状态机**：`DevTeamEngine.decide()` 用代码决定——全部 dev 产出 APPROVED 后小组长才整合统一交付，未通过客观验证不可交付，不让 LLM 决定「下一步/是否结束」；
+  - **硬性熔断**：单 dev 重做超 `max_attempts`（默认3）上报 Leader 换方案；总迭代超 `max_iterations`（默认20）熔断；空闲超 `max_idle_seconds`（默认1800s）判卡死——防单 Agent 无限循环；
+  - **进度北极星监督**：写 `goal_meters`，停滞/横跳/重复错误由监控哨兵拦截；
+  - **记录优先于对话**：过程只写进度留痕 + 存档，**不打断经理**；干完 `deliver_to_manager` 一次性交付（含进度回放）。
+  - 承载：`local-agent/dev_team.py`（DevTeamEngine）+ `local-agent/dev_team_kit/`（DevTeamAbility 全员挂载）+ `docs/DEV_TEAM.md`（设计文档）+ `local-agent/tests/test_dev_team.sh`（8 组信号灯）。
 - **市场获客分层（通用基建）**：工具层 / 数据层 / 渠道层 / 客服层 / 销售层 为平台级通用能力，既服务对外获客，也服务对内需求开发，可多次复用。
 - 承载：`local-agent/team.yaml`（DAG 定义）+ `local-agent/graph.py`（DAG 引擎）+ `local-agent/fractal.py`（分形引擎）。详见 `docs/FRAMEWORK_V2.md`。
 
