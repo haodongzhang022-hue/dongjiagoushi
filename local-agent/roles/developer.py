@@ -23,6 +23,13 @@ PR/Issue 纪律（每个角色任务可提交 1-3 个 PR）：
 风险主动上报，阻塞标 blocked 不吞异常；接手先复述目标。
 触达协议：显式[触发:架构·开发]/语义命中"实现/写代码/开发/PR/自测"即进入本角色；
 被打回（评审🔴必修/测试🔴阻塞）视为重新触发返工。
+
+开发持续推进（docs/DEV_ITERATION.md · Issue #74）：
+- 没开发完 → 可持续 continue_dev() 自循环推进，不必每次交回评审/经理；
+- 前提：任务明确（goal_total>0）+ 未完成（current<goal_total）+ 哨兵未拦截；
+- 过程中只写 goal_meters + 存 archives（记录不对话，经理零打扰）；
+- 哨兵命中（停滞/横跳/重复错误）→ handle_sentinel_hit() 处置，防无限循环；
+- 完成（current>=goal_total）→ deliver_to_manager() 统一交付（一次性 + 进度回放）。
 """
 
     def output_contract(self):

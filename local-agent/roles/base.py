@@ -81,6 +81,12 @@ class BaseRole:
             self.label_ability = LabelAbility(owner=self)
         except Exception:
             self.label_ability = None
+        # 懒加载开发持续推进能力（DevIterationAbility · Issue #74：自循环推进/记录进度/统一交付）
+        try:
+            from dev_iter import DevIterationAbility
+            self.dev_iter_ability = DevIterationAbility(owner=self)
+        except Exception:
+            self.dev_iter_ability = None
 
     # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
@@ -320,6 +326,74 @@ class BaseRole:
                                                goal_total=goal_total,
                                                current=current, note=note,
                                                value=value)
+
+    # ------------------------------------------------------------
+    # 开发持续推进能力透传（全员通用 · Issue #74）
+    # ------------------------------------------------------------
+    def can_continue_dev(self, task_key, goal_total=0.0, current=0.0):
+        """判断开发是否可继续自循环推进（任务明确/未完成/哨兵未拦截）。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.can_continue(task_key, goal_total, current)
+
+    def continue_dev(self, task_key, agent_id, target, goal_total, current,
+                     note="", archive_detail="", max_iterations=20):
+        """开发自循环推进：记录进度 + 哨兵判定 + 判断继续。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.continue_dev(
+            task_key, agent_id, target, goal_total, current,
+            note=note, archive_detail=archive_detail, max_iterations=max_iterations,
+        )
+
+    def record_dev_progress(self, task_key, agent_id, target, goal_total,
+                            current, note="", archive_detail=""):
+        """记录一次开发推进度（goal_meters + archives，非对话）。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.record_progress(
+            task_key, agent_id, target, goal_total, current,
+            note=note, archive_detail=archive_detail,
+        )
+
+    def run_dev_iterations(self, task_key, agent_id, target, goal_total,
+                           steps, notes=None, archive_details=None):
+        """批量执行多轮开发自循环。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.run_iterations(
+            task_key, agent_id, target, goal_total,
+            steps, notes=notes, archive_details=archive_details,
+        )
+
+    def deliver_dev_to_manager(self, task_key, agent_id, output,
+                               issue_ref="", manager_msg=""):
+        """开发完成时统一交付给经理（一次性通知 + 完整进度记录）。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.deliver_to_manager(
+            task_key, agent_id, output,
+            issue_ref=issue_ref, manager_msg=manager_msg,
+        )
+
+    def handle_dev_sentinel_hit(self, task_key, agent_id, hit_result):
+        """哨兵命中处置：按级别执行协议（1级打断 / 2级上报）。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.handle_sentinel_hit(task_key, agent_id, hit_result)
+
+    def dev_progress_history(self, task_key):
+        """某任务的全部开发进度记录（回放，供交付时给经理）。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.progress_history(task_key)
+
+    def dev_iteration_overview(self):
+        """全部开发自循环的俯瞰（二级信息）。"""
+        if self.dev_iter_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发持续推进能力")
+        return self.dev_iter_ability.iteration_overview()
+
     def pending_label_requests(self):
         """查看待审批标签提议（标签管理员用）。"""
         if self.label_ability is None:

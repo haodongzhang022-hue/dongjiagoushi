@@ -260,6 +260,27 @@
 
 > 触发：显式 `[触发:架构·监控哨兵]` / 语义命中「监控/哨兵/无效努力/横跳/停滞/卡住/反复/目标收敛」/ rules 固定。每次推进动作须先经哨兵刻度记录再做收敛判定，命中按协议处置。
 
+### 开发持续推进机制（Dev Iteration · 固定规则 · Issue #74）
+
+开发**没开发完时**不一定要交回评审/经理，而是**继续接开发（自循环推进）**——但受
+「任务明确 + 进度北极星」约束，防陷入无限循环（详见 `docs/DEV_ITERATION.md`）：
+
+1. **任务明确才自循环**：须有北极星目标（`goal_total > 0`）+ 未完成（`current < goal_total`）
+   + 哨兵未拦截。三者都满足 → 可 `continue_dev()` 自循环推进；任一不满足 → 不能自循环
+   （`goal_total<=0` 须先澄清目标 / 已完成应交付 / `sentinel_*` 须处置拦截）。
+2. **记录优先于对话**：每次推进只写 `goal_meters` 进度尺（`distance`/`delta`）+
+   存 `archives`（`kind=dev_progress`），**不投递对话消息**——经理/评审在开发完成前零打扰。
+3. **哨兵拦截防失控**：停滞/横跳/重复错误命中 → `handle_sentinel_hit()` 按级别处置
+   （1级打断重规划 / 2级上报总师助理 + blocked），防自循环陷入死循环。
+4. **完成统一交付**：`current >= goal_total` 时调 `deliver_to_manager()`——归档产物 + 标记
+   done + **一次性通知经理**（含完整 `progress_history` 进度记录回放），不反复汇报。
+5. **回放可审计**：进度记录 `progress_history()` 可回放；`iteration_overview()` 可俯瞰
+   各任务当前进度/距离/状态（二级信息）。
+
+> 触发：开发接单后任务明确 → 可持续 `continue_dev()` 自循环推进；语义命中
+> 「继续开发/持续推进/没干完/自循环/进度北极星/开发迭代」即进入本机制。已落地引擎
+> `local-agent/dev_iteration.py` + 测试 `test_dev_iteration.sh`，红灯可查。
+
 ### 审核者前置助手（决策补全）固定规则
 
 为解决"A or B 二选一疑问"底层常是"两者都不够好、答案藏在并集/补集"的认知盲区，凡出现**二选一 / 两者都不够好 / 拿不准 / 分歧 / 解决不掉**的疑问，由「审核者前置助手」按 3 层时点 + 5 类 or 分支补全决策（详见 `docs/REVIEWER_PRECURSOR.md`）：
@@ -394,8 +415,10 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── HANDLE_ABILITY.md               # 自适应 @ 定位能力（不写死角色名/跨库权限/同仓复用）
   ├── CACHE_ARCHITECTURE.md           # 全链路缓存架构（LLM→角色壳→编排→末端→数据 5 层复用）
   ├── CACHE_MONITOR.md                # 缓存命中监控（按 agent 量化效果/浪费判定）
+  ├── DEV_ITERATION.md               # 开发持续推进机制（没干完继续干，记录进度不对话，干完统一交付）
   ├── ROUTER.md                       # 融合路由接线层（规模→拓扑→可执行节点集，run_pipeline 动态执行）
   └── templates/issue-template.md     # Issue 结构化声明模板
+local-agent/dev_iteration.py          # 开发持续推进引擎（自循环推进 + 哨兵拦截 + 统一交付 · Issue #74）
 local-agent/depth/                    # 七层协作深度能力包（DepthAbility 全员能力 · Issue #47）
   ├── engine.py                        # 七层深度引擎（L1表述→L7全自动到结果，可执行）
   ├── ability.py                       # DepthAbility 能力封装（express/awake/persist/auto_run）
