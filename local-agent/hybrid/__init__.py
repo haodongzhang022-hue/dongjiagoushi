@@ -22,8 +22,14 @@ from hybrid.router import HybridResourceRouter, RouteDecision, default_router
 from hybrid.worker import LocalWorker, default_worker
 from hybrid.sync import ResultSync, default_sync
 from hybrid.cost import CostMonitor, default_monitor
-from hybrid.cache import FingerprintCache, default_cache
 from hybrid.parallel import ParallelExecutor, default_executor
+
+# v2.0 模块按 PR 独立演进，未合并时优雅缺失（依赖注入方仍可用）
+try:
+    from hybrid.cache import FingerprintCache, default_cache
+except ImportError:
+    FingerprintCache = None
+    default_cache = None
 
 __all__ = [
     # v1.0 路由
@@ -37,8 +43,8 @@ __all__ = [
     "CostMonitor",
     "default_monitor",
     # v2.0 测试智能优化层
-    "FingerprintCache",
-    "default_cache",
     "ParallelExecutor",
     "default_executor",
+    "FingerprintCache",
+    "default_cache",
 ]
