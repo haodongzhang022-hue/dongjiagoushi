@@ -22,7 +22,7 @@
 
 ## 命名规范（角色区分度）
 
-- 本体系所有可被 `@` 触发的**角色名统一加「架构·」前缀**形成命名空间：`架构·总师`、`架构·产品`、`架构·开发`、`架构·评审`、`架构·测试`。
+- 本体系所有可被 `@` 触发的**角色名统一加「架构·」前缀**形成命名空间：`架构·总师`、`架构·产品`、`架构·开发`、`架构·评审`、`架构·测试`、`架构·交付`。
 - 目的：① 与其他团队的 agent 区分、不重名；② `@` 后输入「架构」即可**自动填充补全**出本团队全部角色，利于搜索与召唤。
 - `架构师` 一词保留为**体系品牌 / Skill 化身身份**（`.codebuddy/skills/architect`），在文档中用于描述方法论时沿用；被 `@` 具体召唤的 NPC 角色名用带前缀的「架构·总师」等。
 
@@ -32,10 +32,17 @@
 
 - **架构·总师**：走「架构八步」，输出结构化架构与决策。
 - **架构·总师助理**（专角色专用）：较大任务下保总师上下文纯净，**专门负责改错改框架**的框架修正工作，向总师汇报、由总师把关但独立承担框架修正（详见 `docs/CHIEF_ASSISTANT.md`）。
-- **协作角色**：需要时按接力卡召唤（架构·产品/架构·开发/架构·评审/架构·测试），同库内传消息。
+- **协作角色**：需要时按接力卡召唤（架构·产品/架构·开发/架构·评审/架构·测试/架构·交付），同库内传消息。
 - **接力机制**：任务书 + 接力卡传递上下文，目标不偏差；中断可续跑、可留痕。接力卡载体为 **Issue 评论内嵌结构化卡片**。
 - **Issue 声明与双版本管理（版本强制）**：每个 Issue 顶部声明 `module/module_version/type/target/update/depends_on`，涉及 agent 能力时须再加 `agent/agent_version`。**版本强制写明，且不是整体版本**，而是**模块版本 + agent 版本两个独立维度**，各自以**较小的迭代单位**独立升版（`init` 建根 → `update`/`fix` 迭代加强），避免"局部迭代强推整体版本导致合并冲突失效"。非平铺散点。详见 `docs/ISSUE_MANAGEMENT.md`。
 - **留痕**：每一步必须真实执行并在 Issue/PR/提交/CI 留下可核验记录，禁止假装执行。
+
+- **架构·交付**（全流程呈现 + 收尾交付）：传统"做 PPT 的人"的数字化形态——不做 PPT，
+  快速整理**有效信息**（完成度 / 测试成功 / 还存在的问题）呈现给人类俯瞰，并在人类确认
+  合并（CP3）后执行收尾：提交 PR / 处理冲突 / 关闭 Issue / 合并。对应
+  `youxikaifaxilieagent` 的仓库调用专员 + 仓库修复专员职责。触发：人类评审确认后
+  （`[触发:架构·交付]`）或语义命中「交付/收尾/汇总/汇报/呈现/关闭Issue/提交PR/处理冲突/合并」。
+  详见 `docs/DELIVERER.md`。
 
 ### 默认入口协议（入口层 · 架构·秘书）
 
@@ -176,6 +183,7 @@
 - **事件驱动自动打标（自动化核心）**：`AutoLabelEngine` 11 类规则——issue.open→open、
   issue.update→刷进度、requirement→open、progress.advance→in_progress+百分比、
   task.done→done、pr.merged→merged+done、review.need_fix→need_fix+blocked、
+  **review.pass→merge_ready、review.merge→merged（评审通过/合并自动打标签，替代推送"评审结论"）**、
   sentinel.alert→stale、**deps.met→ready（前置依赖满足放行）**、
   **next.trigger→at_node+trigger_next（流水线自动触发下一步）**、
   **priority.set→p0..p9**。事件到达即自动打标，无需 agent 记得去调。
@@ -194,6 +202,13 @@
   高优先级阻塞升级上报）。
 - **CI 事件接线**：`.cnb.yml` 在 issue.open/issue.update 事件自动调 `scripts/auto-label.sh`
   程序化打标，Issue 一开/一改标签即自动上。
+- **评审/跨仓 CodeBuddy 打标签替代推送（★本 Issue #51 收口确认）**：评审结论不再靠"推送消息"表达，
+  统一走**打标签**——评审通过打 `merge_ready`、评审合并打 `merged`、评审需改打 `need_fix`（+blocked），
+  `AutoLabelEngine` 在 `review.pass / review.merge / review.need_fix` 事件自动落标，替代人工推送；
+  同样，**非本仓库的 CodeBuddy**（跨仓被召唤的 CodeBuddy，角色承载仓库非本仓）的评审/反馈
+  结论也一律**打标签替代推送**——`CodeBuddy` 已在 `DIRECT_OPERATORS` 白名单可直接 `apply_label`，
+  跨仓 CodeBuddy 落地到本仓 labels 表即完成留痕（写入/读取同走本仓标签库），不靠推送消息跨仓传结论。
+  凡是"结论/状态/处置"一律标签化留痕，推送只作为辅助通知，不作为结论载体。
 - **规范标签集**：`LABEL_SPECS` 唯一规范来源，非规范即 INVALID_LABEL 拦截；
   `DIRECT_OPERATORS` 白名单控制越权，全员只读 + 白名单直打 + 提议审批。
 

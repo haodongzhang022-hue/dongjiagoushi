@@ -37,7 +37,7 @@
 
 **权限分层**：
 - **查询**：全员开放（走数据库，程序化 MCP 管线，不靠 AI 对话）
-- **直接打标**：架构·开发 / 评审 / 测试 / 经理 / 总师 / 产品 / 秘书 / 数据管理员 / 小组长 / 进度推手（白名单）
+- **直接打标**：架构·开发 / 评审 / 测试 / 经理 / 总师 / 产品 / 秘书 / 数据管理员 / 小组长 / 进度推手 / **CodeBuddy（含非本仓跨仓 CodeBuddy，打标签替代推送）**（白名单）
 - **提议审批**：全员可 propose_label → 数据管理员（标签管理员）审批 → approved 自动落标
 
 **工作流**：
@@ -58,6 +58,8 @@
 | task.done | done |
 | pr.merged | merged + done |
 | review.need_fix | need_fix + blocked |
+| **review.pass** | **merge_ready（评审通过→合并放行标签，打标签替代推送）** ★收口 |
+| **review.merge** | **merged（评审合并→合并标签，打标签替代推送）** ★收口 |
 | sentinel.alert | stale（停滞） |
 | deps.met | ready + in_progress（前置依赖满足，放行下一步）★新增 |
 | next.trigger | at_node + trigger_next（流水线自动触发下一步）★新增 |
