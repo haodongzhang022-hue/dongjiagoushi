@@ -81,6 +81,12 @@ class BaseRole:
             self.label_ability = LabelAbility(owner=self)
         except Exception:
             self.label_ability = None
+        # 懒加载开发闭环能力（DevLoopAbility · Goose 四维闭环：执行-验证分离+确定性状态机+硬性熔断）
+        try:
+            from dev_loop_kit import DevLoopAbility
+            self.dev_loop_ability = DevLoopAbility(owner=self)
+        except Exception:
+            self.dev_loop_ability = None
 
     # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
@@ -353,8 +359,32 @@ class BaseRole:
         return self.label_ability.next_steps(entity)
 
 
+    # ------------------------------------------------------------
+    # 开发闭环能力透传（DevLoopAbility · Goose 四维闭环 · 全员通用）
+    # ------------------------------------------------------------
+    def create_dev_loop(self, goal_total=0.0, **kwargs):
+        """创建一次开发闭环（Planner 门控：goal>0 才允许进循环）。返回 DevLoopEngine。"""
+        if self.dev_loop_ability is None:
+            return None
+        return self.dev_loop_ability.create_loop(goal_total=goal_total, **kwargs)
+
+    def run_dev_loop(self, task_id, agent_id, goal_total, current,
+                     approved, evidence="", max_attempts=3, target=""):
+        """确定性编排一次「执行→验证→决策」单轮（Orchestrator 控制，不让 LLM 自决）。"""
+        if self.dev_loop_ability is None:
+            return None
+        return self.dev_loop_ability.run_loop(
+            task_id, agent_id, goal_total, current, approved,
+            evidence=evidence, max_attempts=max_attempts, target=target)
+
+    def dev_loop_overview(self, engine):
+        """开发闭环运行俯瞰（二级信息）。"""
+        if self.dev_loop_ability is None:
+            return None
+        return self.dev_loop_ability.overview(engine)
+
     def capability(self):
-        """返回本角色的能力清单（含三大全员通用能力）。"""
+        """返回本角色的能力清单（含全部通用能力）。"""
         base = {"role": self.name}
         if self.dispatch_ability is not None:
             base["dispatch_ability"] = self.dispatch_ability.capability()
@@ -364,6 +394,8 @@ class BaseRole:
             base["depth_ability"] = self.depth_ability.capability()
         if self.label_ability is not None:
             base["label_ability"] = self.label_ability.capability()
+        if self.dev_loop_ability is not None:
+            base["dev_loop_ability"] = self.dev_loop_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----
