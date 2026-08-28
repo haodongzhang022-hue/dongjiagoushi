@@ -8,7 +8,7 @@ Hybrid 资源路由模块（Issue #57）
   - hybrid.router.HybridResourceRouter  核心路由（local/cloud 判定）
   - hybrid.worker.LocalWorker           本地批量测试执行器
   - hybrid.sync.ResultSync              结果同步留痕
-  - hybrid.cost.CostMonitor             成本监测与报表
+  - hybrid.cost.CostMonitor             成本监测与报表（含 T6 三合一节省报表）
 """
 from hybrid.router import HybridResourceRouter, RouteDecision, default_router
 from hybrid.worker import LocalWorker, default_worker
