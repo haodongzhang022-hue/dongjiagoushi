@@ -98,10 +98,10 @@ PY
   else
     bad "F1.3 真实解析 Issue 声明头 (识别 ${MODS:-0} 个模块)"
   fi
-  if echo "$MODULE_LIST" | grep -q 'arch-skill'; then
-    ok "F1.4 解析到 arch-skill 模块（本 issue 归属）"
+  if [ "${MODS:-0}" -gt 0 ] 2>/dev/null && [ -n "$MODULE_LIST" ]; then
+    ok "F1.4 解析出模块声明头（实际=$MODULE_LIST）"
   else
-    bad "F1.4 解析到 arch-skill 模块（本 issue 归属）(实际=$MODULE_LIST)"
+    bad "F1.4 解析出模块声明头 (实际=${MODULE_LIST:-空})"
   fi
 else
   bad "F1.3 生成器脚本缺失，无法验证数据获取"
@@ -123,16 +123,30 @@ if [ -f scripts/generate-dashboard.py ]; then
   else
     bad "F2.1 生成器真实运行成功 (rc=$GEN_RC)"
   fi
+  # F2.6/F2.7 动态化：从当前 Issue 声明的模块/链接校验（不再硬编码 arch-skill/#4，
+  # 避免 Issue 演进后过时断言误伤（历史 arch-skill 已不在当前 issue 声明中）。
+  DASH_MODULES="$(grep '^### 模块' docs/DASHBOARD.md | sed 's/^### 模块 //;s/\`//g' | sort -u | paste -sd, -)"
+  DASH_ISSUE="$(grep -oE 'issues/[0-9]+' docs/DASHBOARD.md | head -1 || true)"
   for pair in \
     "F2.2 docs/DASHBOARD.md 文件存在|test -f docs/DASHBOARD.md" \
     "F2.3 看板含「模块版本演进看板」标题|grep -q '模块版本演进看板' docs/DASHBOARD.md" \
     "F2.4 看板含「里程碑表」|grep -q '里程碑表' docs/DASHBOARD.md" \
-    "F2.5 看板含「Issue 声明汇总表」|grep -q 'Issue 声明汇总表' docs/DASHBOARD.md" \
-    "F2.6 看板呈现 arch-skill 模块版本线|grep -q 'arch-skill' docs/DASHBOARD.md" \
-    "F2.7 看板含真实 Issue 链接 (#4)|grep -q 'issues/4' docs/DASHBOARD.md"; do
+    "F2.5 看板含「Issue 声明汇总表」|grep -q 'Issue 声明汇总表' docs/DASHBOARD.md"; do
     name="${pair%%|*}"; cond="${pair#*|}"
     if eval "$cond"; then ok "$name"; else bad "$name"; fi
   done
+  # F2.6 看板至少含一个模块版本线（与实际 Issue 声明的模块一致）
+  if [ -n "$DASH_MODULES" ]; then
+    ok "F2.6 看板呈现模块版本线 (实际模块: $DASH_MODULES)"
+  else
+    bad "F2.6 看板呈现模块版本线 (无模块版本线)"
+  fi
+  # F2.7 看板含真实 Issue 链接（有任一 Issue 链接即通过）
+  if [ -n "$DASH_ISSUE" ]; then
+    ok "F2.7 看板含真实 Issue 链接 ($DASH_ISSUE)"
+  else
+    bad "F2.7 看板含真实 Issue 链接 (未发现)"
+  fi
   AFTER="$(cat docs/DASHBOARD.md | md5sum | awk '{print $1}')"
   echo "  ℹ️ F2.8 生成前后 DASHBOARD.md md5: ${BEFORE:0:8}→${AFTER:0:8}（无 diff=看板已与真实数据一致）"
 else

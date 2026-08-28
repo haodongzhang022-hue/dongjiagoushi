@@ -131,6 +131,15 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
     team = load_team()
     llm = llm or get_backend(backend)
 
+    # 数据底座初始化（幂等：建表 + 登记数据管理员档案）。
+    # 分形开发（peer.spawn_cohort → gid_registry）与 collab 引擎均依赖数据层表，
+    # 未初始化即报 'no such table: gid_registry'（CI 直跑 run.py --pipeline 复现）。
+    try:
+        from data import admin as _dadmin
+        _dadmin.init()
+    except Exception:  # noqa: BLE001
+        pass
+
     card = relay.new_card(req, first_step="secretary", first_role="架构·秘书")
     report = {"req": req, "dag": False, "steps": []}
 
