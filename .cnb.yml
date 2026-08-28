@@ -20,6 +20,8 @@
 main:
   push:
     - name: architecture system acceptance test
+      docker:
+        image: python:3.11
       stages:
         - name: test
           # 信号灯：功能/产物未达成预期即 fail → 阻塞合并，机器强制“没达成不让通过”
@@ -69,6 +71,8 @@ main:
             ignoreProcessFailures: true  # 单个文档处理失败不阻断整体入库
   pull_request:
     - name: change aware test
+      docker:
+        image: python:3.11
       stages:
         - name: test
           # 变更范围感知：根据 git diff 只跑受影响的测试模块

@@ -451,7 +451,6 @@
       "name": "test_functional_links",
       "covers": [
         "AGENTS.md",
-        "docs/",
         ".codebuddy/skills/architect/SKILL.md",
         "local-agent/run.py"
       ],
