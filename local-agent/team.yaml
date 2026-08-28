@@ -194,7 +194,7 @@ pipeline:
       - { id: "find_tools", role: "架构·找工具", action: "检索工具/依赖清单", depends_on: ["plan"] }
       - { id: "align",      role: "架构·对齐",  action: "版本对齐/一致性校验", depends_on: ["plan"] }
       # --- 实现：可分形多小组并行（分形扩展见 fractal.py）---
-      - { id: "develop",    role: "架构·开发",  action: "实现/自测（可分形多小组并行）", depends_on: ["lead"], fractal: { enabled: true, max_per_team: 4 } }
+      - { id: "develop",    role: "架构·开发",  action: "实现/自测（可分形多小组并行，一套循环 2 个开发）", depends_on: ["lead"], fractal: { enabled: true, max_per_team: 4, devs_per_team: 2 } }
       # --- 质量守护 ---
       - { id: "review",     role: "架构·评审",  action: "五维评审/复评", depends_on: ["develop"] }
       - { id: "test",       role: "架构·测试",  action: "测试矩阵/信号灯", depends_on: ["review", "align"] }

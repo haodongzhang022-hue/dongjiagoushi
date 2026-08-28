@@ -78,13 +78,16 @@ def _fractal_develop(plan, req, llm, card, team):
     lead_role = get_role("架构·小组长")
     lines = [plan_text]
 
-    # 为每个小组建同岗位 cohort（差异化编队）
+    # ★ Issue #74：为每个小组建同岗位 cohort（差异化编队），
+    #   开发实例数按 devs_per_team 恒定（"一套循环 N 个开发"），不按任务数膨胀——
+    #   保证每个小组恒定 2 个开发作为实干主力，辅助质量闸门在小组外，不挤占开发名额。
+    devs_per_team = plan.get("devs_per_team", 2)
     cohorts = {}
     for t in plan["teams"]:
         cid = peer.spawn_cohort(
             "架构·开发",
             lead_agent=f"dev-{t['team_id']}-lead",
-            size=len(t["tasks"]),
+            size=devs_per_team,
             mode="differentiated",
             req=req,
             space=f"team.{t['team_id']}",
@@ -127,6 +130,15 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
     """
     team = load_team()
     llm = llm or get_backend(backend)
+
+    # 数据底座初始化（幂等：建表 + 登记数据管理员档案）。
+    # 分形开发（peer.spawn_cohort → gid_registry）与 collab 引擎均依赖数据层表，
+    # 未初始化即报 'no such table: gid_registry'（CI 直跑 run.py --pipeline 复现）。
+    try:
+        from data import admin as _dadmin
+        _dadmin.init()
+    except Exception:  # noqa: BLE001
+        pass
 
     card = relay.new_card(req, first_step="secretary", first_role="架构·秘书")
     report = {"req": req, "dag": False, "steps": []}
@@ -266,6 +278,7 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                     plan = fractal.build_fractal_plan(
                         [f"task{i}" for i in range(n_tasks)],
                         max_per_team=nd["fractal"].get("max_per_team", 4),
+                        devs_per_team=nd["fractal"].get("devs_per_team", 2),
                     )
                     out = _fractal_develop(plan, req, llm, card, team)
                 elif nd["role"] == "编排引擎":

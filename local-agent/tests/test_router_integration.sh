@@ -81,7 +81,7 @@ f=r.get('fusion',{})
 print(f.get('selected','')+'|'+f.get('tier','')+'|'+str(len(r.get('steps',[]))))")
 check "run_pipeline huge→prefix(17步)" "$R" "prefix|huge|17"
 
-# 5. --no-fusion 回退老行为（不 consult 融合路由，无 fusion 字段，11 节点 dag）
+# 5. --no-fusion 回退老行为（不 consult 融合路由，无 fusion 字段，19 节点 dag）
 R=$(cd "$ROOT" && timeout 60 python3 -c "
 import sys,os,io,contextlib;sys.path.insert(0,'.')
 from data import admin;admin.init()

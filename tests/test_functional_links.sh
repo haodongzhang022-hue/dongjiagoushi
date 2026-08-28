@@ -36,6 +36,24 @@ declare -a FAILED_ITEMS=()
 ok()   { PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad()  { FAIL=$((FAIL+1)); FAILED_ITEMS+=("$1"); echo "  ❌ $1"; }
 
+# ------------------------------------------------------------
+# 环境守卫：真实功能链路测试依赖 cnb CLI（携带平台鉴权）访问
+#   Issue API 与知识库 RAG。云 CI 容器（python:3.11）未装 cnb，
+#   此环境无法真实连通平台链路 → 优雅跳过（exit 0），不作为失败。
+#   本地/验收环境（具备 cnb CLI）则完整执行 F1/F2/F3 三大链路。
+#   （对齐 Issue #57：云 CI 只留轻量校验，功能/真实链路本地验收）
+# ------------------------------------------------------------
+if ! command -v cnb >/dev/null 2>&1; then
+  echo ""
+  echo "⏭️  环境未安装 cnb CLI，真实功能链路（Issue API / 知识库 RAG）无法在此环境连通。"
+  echo "    本测试为本地/验收链路测试，云 CI 优雅跳过（视为通过），本地执行脚本见"
+  echo "    scripts/local-exec.sh（真实链路在具备 cnb CLI 的环境全量验收）。"
+  echo "    ⏭️  SKIP（cnb CLI 缺失 → 跳过 F1/F2/F3 真实链路）"
+  echo "======================================================"
+  exit 0
+fi
+
+
 echo "======================================================"
 echo "架构师体系 · 真实功能链路测试 (v0.2.0)"
 echo "仓库: $REPO"
@@ -109,10 +127,10 @@ PY
   else
     bad "F1.3 真实解析 Issue 声明头 (识别 ${MODS:-0} 个模块)"
   fi
-  if [ -n "$MODULE_LIST" ]; then
-    ok "F1.4 解析到真实模块声明头（模块=$MODULE_LIST）"
+  if [ "${MODS:-0}" -gt 0 ] 2>/dev/null && [ -n "$MODULE_LIST" ]; then
+    ok "F1.4 解析出模块声明头（实际=$MODULE_LIST）"
   else
-    bad "F1.4 解析到真实模块声明头 (实际=$MODULE_LIST)"
+    bad "F1.4 解析出模块声明头 (实际=${MODULE_LIST:-空})"
   fi
 else
   bad "F1.3 生成器脚本缺失，无法验证数据获取"
