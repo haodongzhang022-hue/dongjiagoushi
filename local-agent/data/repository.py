@@ -718,3 +718,71 @@ def code_total():
 def count_code_records():
     row = db.query_one("SELECT COUNT(*) AS n FROM code_changes")
     return row["n"] if row else 0
+
+# ================= test_cache（测试指纹缓存 · 测试智能优化层 T3） =================
+
+def upsert_test_cache(script, fingerprint, result=None, status="pass"):
+    """写入/更新一条测试指纹缓存（按 script+fingerprint 唯一去重）。
+
+    script:      测试脚本路径
+    fingerprint: 覆盖源码指纹（git blob hash 摘要）
+    result:      执行结果 dict（exit_code/duration/output）
+    status:      pass/fail/skip
+    返回 cache_id。
+    """
+    cache_id = "tc-%d" % (abs(hash(script + fingerprint)) % 1000000000)
+    now = db.now_iso()
+    db.execute(
+        """
+        INSERT INTO test_cache (cache_id, script, fingerprint, result, status, ts)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(script, fingerprint) DO UPDATE SET
+            result=excluded.result, status=excluded.status, ts=excluded.ts
+        """,
+        (cache_id, script, fingerprint, _dumps(result or {}), status, now),
+    )
+    return cache_id
+
+
+def get_test_cache(script, fingerprint):
+    """按 script+fingerprint 查询缓存记录；未命中返回 None。"""
+    row = db.query_one(
+        "SELECT * FROM test_cache WHERE script=? AND fingerprint=?",
+        (script, fingerprint),
+    )
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d["result"] = json.loads(d["result"])
+    except Exception:  # noqa
+        pass
+    return d
+
+
+def list_test_cache(script=None, status=None, limit=1000):
+    """列出缓存记录，可筛选脚本/状态。"""
+    if script and status:
+        rows = db.query(
+            "SELECT * FROM test_cache WHERE script=? AND status=? ORDER BY ts DESC LIMIT ?",
+            (script, status, limit),
+        )
+    elif script:
+        rows = db.query(
+            "SELECT * FROM test_cache WHERE script=? ORDER BY ts DESC LIMIT ?", (script, limit)
+        )
+    elif status:
+        rows = db.query(
+            "SELECT * FROM test_cache WHERE status=? ORDER BY ts DESC LIMIT ?", (status, limit)
+        )
+    else:
+        rows = db.query("SELECT * FROM test_cache ORDER BY ts DESC LIMIT ?", (limit,))
+    return [dict(r) for r in rows]
+
+
+def count_test_cache(status=None):
+    if status:
+        row = db.query_one("SELECT COUNT(*) AS n FROM test_cache WHERE status=?", (status,))
+    else:
+        row = db.query_one("SELECT COUNT(*) AS n FROM test_cache")
+    return row["n"] if row else 0
