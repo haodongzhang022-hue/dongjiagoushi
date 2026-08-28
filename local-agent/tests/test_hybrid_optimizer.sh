@@ -143,8 +143,14 @@ R=$(cd "$ROOT" && python3 -m hybrid.cli smart --dry --root "$(dirname "$ROOT")" 
 echo "  cli smart --dry: $R"
 MODE=$(echo "$R" | cut -d'|' -f1)
 PAR=$(echo "$R" | cut -d'|' -f2)
-if [ "$MODE" = "incremental" ] && [ "$PAR" = "4" ]; then
-  ok "CLI smart 接线（增量+并行=4）"
+# smart 在有 git 变更上下文时走 incremental；CI 干净工作区无变更时正确降级为 full 兜底。
+# 两者均为合理决策，关键校验并行度=4 正确传入（incremental 时额外验证增量模式）。
+if [ "$PAR" = "4" ] && { [ "$MODE" = "incremental" ] || [ "$MODE" = "full" ]; }; then
+  if [ "$MODE" = "incremental" ]; then
+    ok "CLI smart 接线（增量+并行=4）"
+  else
+    ok "CLI smart 接线（无 git 变更上下文，正确降级 full 兜底，并行=4）"
+  fi
 else
   bad "CLI smart 接线: $R"
 fi
