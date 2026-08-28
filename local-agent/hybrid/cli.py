@@ -1,183 +1,219 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Hybrid 资源路由 · CLI 统一入口
-================================
-用法：
-  python3 local-agent/hybrid/cli.py route <task_name>
-  python3 local-agent/hybrid/cli.py route-ci [.cnb.yml 路径]
-  python3 local-agent/hybrid/cli.py run-all-tests
-  python3 local-agent/hybrid/cli.py run-test <script_path>
-  python3 local-agent/hybrid/cli.py sync [--branch BRANCH]
-  python3 local-agent/hybrid/cli.py cost-report
-  python3 local-agent/hybrid/cli.py full  # 全流程：测试→同步→成本报告
-"""
+hybrid CLI 入口
+===============
+`python -m hybrid.cli <command>` 驱动 Hybrid 资源路由模块。
 
+子命令：
+  classify <script...>   判定脚本落地（local/cloud）
+  route   --cpu <n>      批量路由（从 tasks 文件或内建清单）
+  run     --local <files> 本地批量执行测试脚本
+  sync                    把最近一次本地执行结果同步留痕
+  cost                    输出成本报表
+  all                    一键：route → run(local) → sync → cost
+"""
 import argparse
 import json
-import os
 import sys
-from pathlib import Path
+import os
 
-# 确保可独立运行：将 local-agent 加入 sys.path
-ROOT = Path(__file__).resolve().parent.parent.parent  # 仓库根目录
-sys.path.insert(0, str(ROOT / "local-agent"))
+# 保证可从仓库根目录直接 import
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hybrid.router import HybridResourceRouter, LOCAL_TEST_SCRIPTS, classify_task
-from hybrid.worker import LocalWorker
-from hybrid.sync import ResultSyncer
-from hybrid.cost import CostMonitor
+
+def _router():
+    from hybrid.router import HybridResourceRouter
+    return HybridResourceRouter()
+
+
+def _worker(root=None, timeout=300, dry=False):
+    from hybrid.worker import LocalWorker
+    return LocalWorker(root_dir=root, timeout=timeout, dry_run=dry)
+
+
+def _sync():
+    from hybrid.sync import ResultSync
+    return ResultSync()
+
+
+def _monitor():
+    from hybrid.cost import CostMonitor
+    return CostMonitor()
+
+
+# 内建：仓库全部 CPU 密集测试脚本（云端 37 个中的纯 CPU 部分）
+BUILTIN_CPU_SCRIPTS = [
+    "local-agent/tests/test_router_integration.sh",
+    "local-agent/tests/test_scale.sh",
+    "local-agent/tests/test_prescale_entry.sh",
+    "local-agent/tests/test_engine.sh",
+    "local-agent/tests/test_data_layer.sh",
+    "local-agent/tests/test_collab.sh",
+    "local-agent/tests/test_peer_collab.sh",
+    "local-agent/tests/test_peer_closure.sh",
+    "local-agent/tests/test_disposition.sh",
+    "local-agent/tests/test_sentinel.sh",
+    "local-agent/tests/test_external_source.sh",
+    "local-agent/tests/test_dispatcher.sh",
+    "local-agent/tests/test_probe.sh",
+    "local-agent/tests/test_dispatch_engine.sh",
+    "local-agent/tests/test_depth_engine.sh",
+    "local-agent/tests/test_ops_sim.sh",
+    "local-agent/tests/test_topology_comparison.sh",
+    "local-agent/tests/test_benchmark_ab.sh",
+    "local-agent/tests/test_topology_hybrid.sh",
+    "local-agent/tests/test_galton.sh",
+    "local-agent/tests/test_topology_fusion.sh",
+    "local-agent/tests/test_topology_slim.sh",
+    "local-agent/tests/test_secretary_sense.sh",
+    "local-agent/tests/test_prefix_cache.sh",
+    "local-agent/tests/test_cache_layer.sh",
+    "local-agent/tests/test_label_automation.sh",
+    "local-agent/tests/test_review_tester_handoff.sh",
+    "local-agent/tests/test_local_agent.sh",
+    "local-agent/tests/test_dispatch_ability.sh",
+    "tests/test_architect_system.sh",
+    "tests/test_functional_links.sh",
+    "tests/test_relay_workflow.sh",
+    "tests/test_memory_store.sh",
+    "tests/test_handle_ability.sh",
+    "tests/test_company_model.sh",
+    "tests/test_mini_e2e.sh",
+    "tests/test_doc_consistency.sh",
+]
+
+
+def cmd_classify(args):
+    r = _router()
+    for name in args.scripts:
+        print("%s → %s" % (name, r.classify(name)))
 
 
 def cmd_route(args):
-    """路由单条任务。"""
-    target = classify_task(args.task_name)
-    print(f"任务: {args.task_name}")
-    print(f"路由: {target}")
-    return 0
+    r = _router()
+    tasks = []
+    # 从内建清单带成本估算
+    for i, name in enumerate(BUILTIN_CPU_SCRIPTS):
+        tasks.append((name, 5 + (i % 10), 10 + (i % 20)))
+    res = r.route_many(tasks)
+    s = res["summary"]
+    print(json.dumps({
+        "total": s["total"], "local": s["local"], "cloud": s["cloud"],
+        "local_scripts": res["local"], "cloud_scripts": res["cloud"],
+    }, ensure_ascii=False, indent=2))
 
 
-def cmd_route_ci(args):
-    """分析 .cnb.yml 路由分布。"""
-    router = HybridResourceRouter()
-    yml_path = args.file or ".cnb.yml"
+def cmd_run(args):
+    w = _worker(root=args.root, timeout=args.timeout, dry=args.dry)
+    scripts = args.local or BUILTIN_CPU_SCRIPTS
+    result = w.run(scripts)
+    print(json.dumps(result["summary"], ensure_ascii=False, indent=2))
+    _last_result = result
+    # 持久化到内存文件供 sync 读取
+    _save_last(result)
+    if result["summary"]["fail"]:
+        sys.exit(1)
+
+
+_LAST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".last_run.json")
+
+
+def _save_last(result):
     try:
-        content = Path(yml_path).read_text(encoding="utf-8")
-    except OSError as e:
-        print(f"无法读取 {yml_path}: {e}")
-        return 1
-
-    stats = router.analyze_ci_file(content)
-    print(json.dumps(stats, indent=2, ensure_ascii=False))
-    return 0
+        with open(_LAST_FILE, "w") as f:
+            json.dump(result, f, ensure_ascii=False)
+    except Exception:  # noqa
+        pass
 
 
-def cmd_run_all_tests(args):
-    """跑全量本地化测试。"""
-    worker = LocalWorker(workspace=ROOT)
-    results = worker.run_all_tests()
-    worker.write_results()
-
-    print(f"\n本地测试结果:")
-    print(f"  总数: {results['total']}")
-    print(f"  通过: {results['passed']}")
-    print(f"  失败: {results['failed']}")
-    print(f"  跳过: {results['skipped']}")
-    print(f"  耗时: {results['duration']}s")
-    print(f"  结果文件: .cnb-results/results.json")
-
-    if results["failed"] > 0:
-        print("\n失败项:")
-        for t in results["tests"]:
-            if t["status"] == "failed":
-                print(f"  ✗ {t['name']}: {t['message'][:200]}")
-        return 1
-    return 0
-
-
-def cmd_run_test(args):
-    """跑单个测试脚本。"""
-    worker = LocalWorker(workspace=ROOT)
-    results = worker.run_test_suite([args.script])
-    worker.write_results()
-
-    t = results["tests"][0] if results["tests"] else {}
-    status = t.get("status", "unknown")
-    print(f"脚本: {args.script}")
-    print(f"状态: {status}")
-    if t.get("message"):
-        print(f"输出: {t['message'][:500]}")
-    return 0 if status == "passed" else 1
+def _load_last():
+    if os.path.exists(_LAST_FILE):
+        try:
+            with open(_LAST_FILE) as f:
+                return json.load(f)
+        except Exception:  # noqa
+            return None
+    return None
 
 
 def cmd_sync(args):
-    """同步结果到云端。"""
-    syncer = ResultSyncer(workspace=ROOT, branch=args.branch)
-    ok, msg = syncer.sync()
-    print(msg)
-    return 0 if ok else 1
+    s = _sync()
+    result = _load_last()
+    if result is None:
+        print("no last run found; run 'hybrid run' first", file=sys.stderr)
+        sys.exit(2)
+    out = s.sync(result, batch_name=args.batch)
+    print(json.dumps({"synced": out["synced"], "target": out["target"]}))
 
 
-def cmd_cost_report(args):
-    """生成成本报告。"""
-    monitor = CostMonitor()
-    report = monitor.full_report()
-    print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0
+def cmd_cost(args):
+    r = _router()
+    m = _monitor()
+    tasks = [(n, 5 + (i % 10), 10 + (i % 20)) for i, n in enumerate(BUILTIN_CPU_SCRIPTS)]
+    res = r.route_many(tasks)
+    last = _load_last()
+    rep = m.report(res, last)
+    print(json.dumps(rep, ensure_ascii=False, indent=2))
 
 
-def cmd_full(args):
-    """全流程：测试 → 同步 → 成本报告。"""
-    # 1. 跑全量测试
-    worker = LocalWorker(workspace=ROOT)
-    results = worker.run_all_tests()
-    worker.write_results()
-    print(f"[1/3] 本地测试完成: {results['passed']}/{results['total']} 通过")
-
-    # 2. 同步结果
-    syncer = ResultSyncer(workspace=ROOT, branch=args.branch)
-    ok, msg = syncer.sync()
-    print(f"[2/3] 同步结果: {msg}")
-
-    # 3. 成本报告
-    monitor = CostMonitor()
-    report = monitor.full_report()
-    print(f"[3/3] 成本报告:")
-    print(json.dumps(report, indent=2, ensure_ascii=False))
-
-    # 如果测试失败，返回非零
-    return 1 if results["failed"] > 0 else 0
+def cmd_all(args):
+    # 一键：route → run(local) → sync → cost
+    r = _router()
+    m = _monitor()
+    tasks = [(n, 5 + (i % 10), 10 + (i % 20)) for i, n in enumerate(BUILTIN_CPU_SCRIPTS)]
+    res = r.route_many(tasks)
+    w = _worker(root=args.root, timeout=args.timeout, dry=args.dry)
+    result = w.run(res["local"])
+    _save_last(result)
+    s = _sync()
+    sync_out = s.sync(result, batch_name=args.batch)
+    rep = m.report(res, result)
+    print(json.dumps({
+        "route": res["summary"],
+        "run": result["summary"],
+        "sync": {"synced": sync_out["synced"], "target": sync_out["target"]},
+        "cost": rep,
+    }, ensure_ascii=False, indent=2))
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Hybrid 资源路由模块 · CLI",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    sub = parser.add_subparsers(dest="command", help="子命令")
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="hybrid.cli", description="Hybrid 资源路由 CLI")
+    sub = ap.add_subparsers(dest="cmd")
 
-    # route
-    p_route = sub.add_parser("route", help="路由单条任务")
-    p_route.add_argument("task_name", help="任务名/命令")
+    p = sub.add_parser("classify", help="判定脚本落地")
+    p.add_argument("scripts", nargs="+")
+    p.set_defaults(fn=cmd_classify)
 
-    # route-ci
-    p_route_ci = sub.add_parser("route-ci", help="分析 .cnb.yml 路由分布")
-    p_route_ci.add_argument("-f", "--file", default=".cnb.yml", help=".cnb.yml 路径")
+    p = sub.add_parser("route", help="批量路由")
+    p.set_defaults(fn=cmd_route)
 
-    # run-all-tests
-    sub.add_parser("run-all-tests", help="跑全量本地化测试")
+    p = sub.add_parser("run", help="本地批量执行")
+    p.add_argument("--local", nargs="*", default=None, help="指定本地脚本清单")
+    p.add_argument("--root", default=None, help="工作根目录")
+    p.add_argument("--timeout", type=int, default=300)
+    p.add_argument("--dry", action="store_true", help="演练模式不真跑")
+    p.set_defaults(fn=cmd_run)
 
-    # run-test
-    p_run = sub.add_parser("run-test", help="跑单个测试脚本")
-    p_run.add_argument("script", help="脚本路径")
+    p = sub.add_parser("sync", help="同步结果留痕")
+    p.add_argument("--batch", default="hybrid-local")
+    p.set_defaults(fn=cmd_sync)
 
-    # sync
-    p_sync = sub.add_parser("sync", help="同步结果到云端")
-    p_sync.add_argument("--branch", default=None, help="推送分支")
+    p = sub.add_parser("cost", help="成本报表")
+    p.set_defaults(fn=cmd_cost)
 
-    # cost-report
-    sub.add_parser("cost-report", help="生成成本报告")
+    p = sub.add_parser("all", help="一键链路")
+    p.add_argument("--root", default=None)
+    p.add_argument("--timeout", type=int, default=300)
+    p.add_argument("--dry", action="store_true")
+    p.add_argument("--batch", default="hybrid-local")
+    p.set_defaults(fn=cmd_all)
 
-    # full
-    p_full = sub.add_parser("full", help="全流程：测试→同步→成本报告")
-    p_full.add_argument("--branch", default=None, help="推送分支")
-
-    args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        return 0
-
-    handlers = {
-        "route": cmd_route,
-        "route-ci": cmd_route_ci,
-        "run-all-tests": cmd_run_all_tests,
-        "run-test": cmd_run_test,
-        "sync": cmd_sync,
-        "cost-report": cmd_cost_report,
-        "full": cmd_full,
-    }
-    return handlers[args.command](args)
+    args = ap.parse_args(argv)
+    if not getattr(args, "fn", None):
+        ap.print_help()
+        sys.exit(0)
+    args.fn(args)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

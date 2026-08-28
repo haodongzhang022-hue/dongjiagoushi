@@ -24,5 +24,10 @@ local-agent/galton/_runtime/
 # BI 大屏运行时生成物（monitor_bi render 命令产物）
 docs/BI_DASHBOARD.md
 
+# Hybrid 资源路由模块运行时产物（本地缓存/同步日志，不进版本库）
+local-agent/hybrid/.last_run.json
+local-agent/hybrid/.hybrid_sync.log
+local-agent/hybrid/__pycache__/
+
 # Hybrid 资源路由本地测试结果（不进版本库，由 sync 同步）
 .cnb-results/
