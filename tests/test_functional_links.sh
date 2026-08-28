@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# 架构师 Agent · 真实功能链路测试（arch-skill 模块 v0.2.0）
+# 架构师 Agent · 真实功能链路测试（数据无关：不绑定具体模块/Issue 号）
 # 仓库：dongjiagoushi
 #
 # 作用：把「不是代码写完就行，而是实际功能要能用」变成机器强制的信号灯。
@@ -37,7 +37,7 @@ ok()   { PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad()  { FAIL=$((FAIL+1)); FAILED_ITEMS+=("$1"); echo "  ❌ $1"; }
 
 echo "======================================================"
-echo "架构师体系 · 真实功能链路测试 (arch-skill v0.2.0)"
+echo "架构师体系 · 真实功能链路测试（数据获取 / 看板呈现 / RAG 读取）"
 echo "仓库: $REPO"
 echo "======================================================"
 
@@ -98,10 +98,10 @@ PY
   else
     bad "F1.3 真实解析 Issue 声明头 (识别 ${MODS:-0} 个模块)"
   fi
-  if echo "$MODULE_LIST" | grep -q 'arch-skill'; then
-    ok "F1.4 解析到 arch-skill 模块（本 issue 归属）"
+  if [ -n "$MODULE_LIST" ]; then
+    ok "F1.4 从真实 Issue 数据解析出模块声明头 (模块=$MODULE_LIST)"
   else
-    bad "F1.4 解析到 arch-skill 模块（本 issue 归属）(实际=$MODULE_LIST)"
+    bad "F1.4 从真实 Issue 数据解析出模块声明头 (实际=$MODULE_LIST)"
   fi
 else
   bad "F1.3 生成器脚本缺失，无法验证数据获取"
@@ -128,8 +128,8 @@ if [ -f scripts/generate-dashboard.py ]; then
     "F2.3 看板含「模块版本演进看板」标题|grep -q '模块版本演进看板' docs/DASHBOARD.md" \
     "F2.4 看板含「里程碑表」|grep -q '里程碑表' docs/DASHBOARD.md" \
     "F2.5 看板含「Issue 声明汇总表」|grep -q 'Issue 声明汇总表' docs/DASHBOARD.md" \
-    "F2.6 看板呈现 arch-skill 模块版本线|grep -q 'arch-skill' docs/DASHBOARD.md" \
-    "F2.7 看板含真实 Issue 链接 (#4)|grep -q 'issues/4' docs/DASHBOARD.md"; do
+    "F2.6 看板含模块版本演进线（### 模块）|grep -q '^### 模块' docs/DASHBOARD.md" \
+    "F2.7 看板含真实 Issue 链接（issues/\d+）|grep -qE 'issues/[0-9]+' docs/DASHBOARD.md"; do
     name="${pair%%|*}"; cond="${pair#*|}"
     if eval "$cond"; then ok "$name"; else bad "$name"; fi
   done

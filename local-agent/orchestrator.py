@@ -125,6 +125,14 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
 
     返回交付报告 dict。
     """
+    # 数据先行：确保 DB schema 已初始化（幂等），供 gid_registry / task_pools 等
+    # 流水线中用到的数据表可用（避免 fresh 环境「no such table」失败）
+    try:
+        from data import schema as _schema
+        _schema.init_schema()
+    except Exception:  # noqa: BLE001
+        pass
+
     team = load_team()
     llm = llm or get_backend(backend)
 
