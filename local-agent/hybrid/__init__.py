@@ -20,6 +20,9 @@ from hybrid.cost import CostMonitor, default_monitor
 # 子模块直接引用
 from hybrid import registry as registry
 from hybrid import selector as selector
+from hybrid import cache as cache
+from hybrid import parallel as parallel
+from hybrid import policy as policy
 
 # 便捷函数引用（registry 模块内可直接调用）
 from hybrid.registry import (
@@ -31,6 +34,18 @@ from hybrid.registry import (
 # 便捷函数引用（selector 模块）
 from hybrid.selector import (
     IncrementalSelector, default_selector,
+)
+from hybrid.cache import (
+    FingerprintCache, default_cache,
+)
+from hybrid.parallel import (
+    ParallelExecutor, default_executor,
+)
+from hybrid.policy import (
+    PolicyEngine, default_policy,
+)
+from hybrid.cost import (
+    CostReporter, default_cost_reporter,
 )
 
 __version__ = "v2.0"
@@ -59,4 +74,15 @@ __all__ = [
     # selector 便捷函数
     "IncrementalSelector",
     "default_selector",
+    "cache",
+    "parallel",
+    "policy",
+    "FingerprintCache",
+    "default_cache",
+    "ParallelExecutor",
+    "default_executor",
+    "PolicyEngine",
+    "default_policy",
+    "CostReporter",
+    "default_cost_reporter",
 ]

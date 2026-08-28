@@ -74,3 +74,83 @@ class CostMonitor(object):
 
 # 便捷单例
 default_monitor = CostMonitor()
+
+
+class CostReporter(CostMonitor):
+    """成本报表扩展（测试智能优化层 T6）——三合一节省。
+
+    在 CostMonitor（v1.0 CPU 本地化报表）基础上，扩展出
+    「增量节省 + 缓存节省 + 并行节省」三合一的优化收益报表。
+    """
+
+    def report_optimizer(self, policy, exec_result=None, cache_saved_cpu=0.0,
+                         baseline_serial_seconds=None, cpu_per_test=1.0):
+        """输出测试智能优化层（T3-T5）的三合一节省报表。
+
+        policy:              PolicyEngine.decide() 返回的策略 dict
+        exec_result:         ParallelExecutor 执行结果（含 wall_seconds/summary）
+        cache_saved_cpu:     缓存命中跳过的 CPU 核·分钟（外部估算，可选）
+        baseline_serial_seconds: 全量串行基线耗时（秒）；缺省用 total_duration 估算
+        cpu_per_test:        单测试 CPU 核·分钟（默认 1）
+
+        返回 dict：
+          {
+            incremental: 增量节省（本次相比全量少跑了多少测试）
+            cache:       缓存节省（缓存命中跳过的 CPU）
+            parallel:    并行节省（墙钟从串行 sum 降到 wall）
+            total:       三合一总览
+          }
+        """
+        tests = policy.get("tests", [])
+        cache_hits = policy.get("cache_hits", [])
+        full_count = policy.get("full_count", 0)
+
+        # 增量节省：本应全量跑 → 实际只跑受影响（含缓存剔除后的）
+        if full_count and full_count >= len(tests):
+            incr_saved = full_count - (len(tests) + len(cache_hits))
+            incr_saved = max(incr_saved, 0)
+        else:
+            incr_saved = 0
+        incr_saved_cpu = round(incr_saved * cpu_per_test, 3)
+
+        # 缓存节省：命中跳过的测试 CPU 归零
+        cache_saved = len(cache_hits)
+        cache_saved_cpu = round(cache_saved * cpu_per_test, 3)
+
+        # 并行节省：墙钟从串行 total_duration 降到 wall_seconds
+        parallel_ratio = 1.0
+        wall = exec_result.get("summary", {}).get("wall_seconds") if exec_result else None
+        serial_dur = exec_result.get("summary", {}).get("total_duration") if exec_result else None
+        if baseline_serial_seconds is not None and baseline_serial_seconds > 0 and wall:
+            parallel_ratio = round(wall / baseline_serial_seconds, 4)
+        elif serial_dur and wall and serial_dur > 0:
+            parallel_ratio = round(wall / serial_dur, 4)
+
+        total_saved_cpu = round(incr_saved_cpu + cache_saved_cpu, 3)
+        return {
+            "incremental": {
+                "mode": policy.get("mode"),
+                "full_count": full_count,
+                "ran_count": len(tests),
+                "skipped": incr_saved,
+                "saved_cpu_core_min": incr_saved_cpu,
+            },
+            "cache": {
+                "hit_count": cache_saved,
+                "saved_cpu_core_min": cache_saved_cpu,
+            },
+            "parallel": {
+                "parallelism": policy.get("parallel"),
+                "serial_seconds": baseline_serial_seconds or serial_dur,
+                "wall_seconds": wall,
+                "speedup_ratio": parallel_ratio,
+            },
+            "total": {
+                "saved_cpu_core_min": total_saved_cpu,
+                "summary": "增量+缓存+并行 三合一节省",
+            },
+        }
+
+
+# 便捷单例（扩展版）
+default_cost_reporter = CostReporter()

@@ -553,6 +553,24 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_code_agent ON code_changes(agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_code_project ON code_changes(project)",
+
+    # ---- 33. 测试指纹缓存（test_cache · 测试智能优化层 T3 指纹缓存复用）----
+    # 记录每个测试脚本在特定源码指纹下最后一次执行结果，命中即跳过重复执行（CPU 归零）。
+    # 指纹 = 覆盖源码文件的 git blob hash 摘要（保守可靠，源码一变指纹即变缓存失效）。
+    """
+    CREATE TABLE IF NOT EXISTS test_cache (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        cache_id      TEXT NOT NULL,            -- 缓存记录 id（tc-前缀）
+        script        TEXT NOT NULL,            -- 测试脚本路径
+        fingerprint   TEXT NOT NULL,            -- 覆盖源码指纹（blob hash 摘要）
+        result        TEXT DEFAULT '{}',        -- 上次执行结果 JSON（exit_code/duration/output）
+        status        TEXT DEFAULT 'pass',      -- pass/fail/skip（fail 缓存用于失败重试去重）
+        ts            TEXT,                     -- 上次缓存时间
+        UNIQUE(script, fingerprint)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_testcache_script ON test_cache(script)",
+    "CREATE INDEX IF NOT EXISTS idx_testcache_fp ON test_cache(fingerprint)",
 ]
 
 

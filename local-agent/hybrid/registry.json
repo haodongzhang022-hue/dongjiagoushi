@@ -575,6 +575,21 @@
       "cpu_cost_est": 1.5,
       "time_est": 4.0,
       "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_optimizer.sh": {
+      "name": "test_hybrid_optimizer",
+      "covers": [
+        "hybrid/cache.py",
+        "hybrid/parallel.py",
+        "hybrid/policy.py",
+        "hybrid/cost.py",
+        "data/schema.py",
+        "data/repository.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
     }
   }
 }
