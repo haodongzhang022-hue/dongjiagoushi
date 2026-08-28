@@ -82,6 +82,13 @@ class BaseRole:
         except Exception:
             self.label_ability = None
 
+        # 懒加载开发小组闭环能力（DevTeamAbility · Issue #74：小组整体确定性编排）
+        try:
+            from dev_team_kit import DevTeamAbility
+            self.dev_team_ability = DevTeamAbility(owner=self)
+        except Exception:
+            self.dev_team_ability = None
+
     # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
     # ------------------------------------------------------------
@@ -353,6 +360,37 @@ class BaseRole:
         return self.label_ability.next_steps(entity)
 
 
+
+    # ------------------------------------------------------------
+    # 开发小组闭环能力透传（DevTeamAbility · Issue #74 · 全员通用）
+    # ------------------------------------------------------------
+    def create_dev_team(self, goal_total=0.0, devs_per_team=2, **kwargs):
+        """创建一次开发小组闭环（Planner 门控：goal>0 才允许）。返回 DevTeamEngine。"""
+        if self.dev_team_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发小组闭环能力")
+        return self.dev_team_ability.create_team(goal_total=goal_total,
+                                                 devs_per_team=devs_per_team, **kwargs)
+
+    def run_dev_team_round(self, team, dev_outputs, task_id="", max_attempts=None):
+        """确定性编排一轮小组循环（小组长发起 + 各开发客观验证 + 决策）。"""
+        if self.dev_team_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发小组闭环能力")
+        return self.dev_team_ability.run_team_round(team, dev_outputs,
+                                                    task_id=task_id, max_attempts=max_attempts)
+
+    def advance_dev_team(self, team, delta):
+        """推进开发小组进度（目标北极星），写 goal_meters。"""
+        if self.dev_team_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发小组闭环能力")
+        return self.dev_team_ability.advance_team(team, delta)
+
+    def dev_team_overview(self, team):
+        """开发小组闭环俯瞰（二级信息）。"""
+        if self.dev_team_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发小组闭环能力")
+        return self.dev_team_ability.team_overview(team)
+
+
     def capability(self):
         """返回本角色的能力清单（含三大全员通用能力）。"""
         base = {"role": self.name}
@@ -364,6 +402,8 @@ class BaseRole:
             base["depth_ability"] = self.depth_ability.capability()
         if self.label_ability is not None:
             base["label_ability"] = self.label_ability.capability()
+        if getattr(self, "dev_team_ability", None) is not None:
+            base["dev_team_ability"] = self.dev_team_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----
