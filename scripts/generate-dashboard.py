@@ -70,9 +70,13 @@ TYPE_ICON = {"init": "🆕", "update": "🔺", "fix": "🛠️", "standalone": "
 
 
 def run_cmd(args):
-    """执行命令并返回 (returncode, stdout)"""
-    proc = subprocess.run(args, capture_output=True, text=True)
-    return proc.returncode, proc.stdout
+    """执行命令并返回 (returncode, stdout)。cnb 不可用时优雅降级。"""
+    try:
+        proc = subprocess.run(args, capture_output=True, text=True)
+        return proc.returncode, proc.stdout
+    except FileNotFoundError as e:
+        sys.stderr.write(f"[warn] 命令不可用: {args[0] if args else '?'} ({e})\n")
+        return 127, "command not found"
 
 
 def fetch_issues():
@@ -570,6 +574,15 @@ def render():
 def main():
     output_path = os.path.join(os.path.dirname(__file__), "..", "docs", "DASHBOARD.md")
     content, issues, by_module = render()
+    # 防数据丢失：cnb 不可用 / 拉取到 0 个 Issue 时，不覆盖已有看板（保留仓库已提交的真实看板）
+    if not issues:
+        if os.path.exists(output_path):
+            sys.stderr.write(
+                "[warn] 拉取到 0 个 Issue（cnb 不可用或 API 失败），"
+                "保留现有 docs/DASHBOARD.md 不覆盖。\n"
+            )
+            print("[warn] 拉取到 0 个 Issue，跳过生成（保留现有看板）")
+            return
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"[ok] 已生成 {output_path}")
