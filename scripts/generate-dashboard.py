@@ -303,8 +303,85 @@ def render():
     lines.append("---")
     lines.append("")
 
+    # ===== 1c. 公司化三战线看板（M4 全链贯通 · 二级信息俯瞰） =====
+    lines.append("## 三、公司化三战线看板（公司化体系 · Issue #18 · M4 全链贯通）")
+    lines.append("")
+    lines.append("> 公司化三战线：**市场获客线**（公司能否活着）→ **交付流水线**（接单到交付）→ **能力底座线**（持续开发）。")
+    lines.append("> 数据源：`local-agent/team.yaml` 三战线角色 + `src/memory/schema.py` 语义触发原型 + `docs/COMPANY_MODEL.md` 里程碑。")
+    lines.append("> 里程碑 M1 市场获客线 ✅ / M2 交付线增强 ✅ / M3 能力底座线 ✅ / **M4 全链贯通**（三战线接力 + 语义触发 + 公司看板）。")
+    lines.append("")
+    repo_root = os.path.join(os.path.dirname(__file__), "..")
+
+    # 从 team.yaml 读取三战线角色（本地数据，无需网络）
+    company_lines = {"市场获客线": [], "交付流水线": [], "能力底座线": []}
+    try:
+        import yaml
+        with open(os.path.join(repo_root, "local-agent", "team.yaml"), encoding="utf-8") as f:
+            _team = yaml.safe_load(f)
+        _roles = _team.get("roles", [])
+        _by_name = {r["name"]: r for r in _roles}
+        for _rname in ["架构·找需求", "架构·价值确认", "架构·竞品分析", "市场·销售", "市场·客服"]:
+            if _rname in _by_name:
+                company_lines["市场获客线"].append(_rname)
+        for _rname in ["架构·秘书", "架构·产品", "架构·总师", "架构·经理", "架构·小组长",
+                        "架构·开发", "架构·评审", "架构·对齐", "架构·找工具", "架构·测试"]:
+            if _rname in _by_name:
+                company_lines["交付流水线"].append(_rname)
+        for _rname in ["架构·工具开发", "架构·优化", "架构·数据管理", "架构·运维"]:
+            if _rname in _by_name:
+                company_lines["能力底座线"].append(_rname)
+    except Exception as _e:
+        company_lines = {"市场获客线": [], "交付流水线": [], "能力底座线": []}
+
+    # 三战线表格（干净输出）
+    lines.append("| 战线 | 职责 | 角色清单 | 里程碑 |")
+    lines.append("|------|------|----------|--------|")
+    for _line, _label, _status in [
+        ("市场获客线", "找单/选单/成单/服务（决定做什么单、有没有价值）", "✅ M1"),
+        ("交付流水线", "接单→澄清→架构→分工→实现→评审→对齐→测试→交付", "✅ M2"),
+        ("能力底座线", "工具沉淀/优化/数据管理/运维（持续开发更快更稳）", "✅ M3"),
+    ]:
+        _roles_str = ", ".join(f"`{r}`" for r in company_lines[_line]) if company_lines[_line] else "—"
+        lines.append(f"| **{_line}** | {_label} | {_roles_str} | {_status} |")
+
+    # 语义触发覆盖（从 schema ROLE_PROTOTYPES 统计）
+    lines.append("")
+    lines.append("### 三战线角色语义触发覆盖")
+    lines.append("")
+    try:
+        sys.path.insert(0, os.path.join(repo_root, "src"))
+        from memory.schema import ROLE_PROTOTYPES
+        _proto_keys = set(ROLE_PROTOTYPES.keys())
+        _total = 0
+        for _k in ["架构·找需求", "架构·价值确认", "架构·竞品分析", "市场·销售", "市场·客服",
+                   "架构·工具开发", "架构·优化", "架构·数据管理", "架构·运维",
+                   "架构·经理", "架构·秘书", "架构·小组长", "架构·对齐", "架构·找工具",
+                   "架构·总师助理", "架构·监控哨兵", "架构·进度推手", "架构·数据管理员"]:
+            if _k in _proto_keys:
+                _total += 1
+        lines.append(f"- **语义触发原型登记**：{_total} 个三战线/新增角色已登记（`ROLE_PROTOTYPES`），语义命中即可触发，无需显式 `[触发]`。")
+    except Exception:
+        lines.append("- 语义触发原型登记：读取失败。")
+    lines.append("")
+    lines.append("### 三战线接力拓扑")
+    lines.append("")
+    lines.append("```")
+    lines.append("市场获客线:  找需求 → 价值确认 → 竞品分析 → 销售成单 → 客服")
+    lines.append("                    │")
+    lines.append("                    ▼ 成单需求")
+    lines.append("交付流水线:  秘书 → 产品 → 总师 → 经理 → 小组长 → 开发 → 评审 → 对齐 → 测试 → 交付")
+    lines.append("                    │")
+    lines.append("                    ▼ 交付产物/沉淀")
+    lines.append("能力底座线:  工具开发 → 优化 → 数据管理 → 运维")
+    lines.append("```")
+    lines.append("")
+    lines.append("> **关键洞察**：交付线产出工具/数据/优化经验反馈给底座线，底座线让下次交付更快 → 成本更低 → 市场更有竞争力——这是「持续开发能力 + 市场存活」的来源（详见 docs/COMPANY_MODEL.md）。")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
     # ===== 2. 里程碑表 =====
-    lines.append("## 三、里程碑表（M0~M8）")
+    lines.append("## 四、里程碑表（M0~M8）")
     lines.append("")
     lines.append("> 里程碑状态需人工在 `docs/ROADMAP.md` 维护；此处根据已声明 Issue 的关键词自动标注落地线索。")
     lines.append("")
@@ -335,7 +412,7 @@ def render():
     lines.append("")
 
     # ===== 3. Issue 声明汇总表（双版本） =====
-    lines.append("## 四、Issue 声明汇总表（双版本）")
+    lines.append("## 五、Issue 声明汇总表（双版本）")
     lines.append("")
     lines.append("| Issue | 模块 | 模块版本 | agent | agent版本 | type | 目标 | 依赖 | 状态 |")
     lines.append("|-------|------|---------|-------|----------|------|------|------|------|")
@@ -370,7 +447,7 @@ def render():
     lines.append("")
 
     # ===== 4. 待办 / 阻塞点扫描 =====
-    lines.append("## 五、待办 / 阻塞点扫描")
+    lines.append("## 六、待办 / 阻塞点扫描")
     lines.append("")
     open_issues = [i for i in issues if i.get("state") == "open"]
     lines.append(f"当前 open Issue：**{len(open_issues)}** / 总 {len(issues)}。")
@@ -389,7 +466,7 @@ def render():
     lines.append("")
 
     # ===== 5. 版本合规 / 迭代冲突扫描（版本强制核查） =====
-    lines.append("## 六、版本合规 / 迭代冲突扫描（版本强制核查）")
+    lines.append("## 七、版本合规 / 迭代冲突扫描（版本强制核查）")
     lines.append("")
     lines.append("核查每张 Issue 是否满足「版本强制 + 双维度独立 + 较小迭代单位」：")
     lines.append("- 未写明 `module_version`（模块维度）的 Issue；")
@@ -418,7 +495,7 @@ def render():
     lines.append("")
 
     # ===== 6. 框架健康度（框架自升级维度） =====
-    lines.append("## 六、框架健康度（framework 自升级维度）")
+    lines.append("## 八、框架健康度（framework 自升级维度）")
     lines.append("")
     lines.append("> 框架整体 = AGENTS.md + .cnb.yml + SKILL.md + settings.yml + docs/ + src/memory/。")
     lines.append("> 本维度把「框架自身」纳入版本演进，展示各模块/角色版本线 + 测试信号灯 + 待办升级项，供人类俯瞰框架健康（详见 docs/FRAMEWORK_UPGRADE.md）。")
@@ -478,7 +555,7 @@ def render():
     lines.append("")
 
     # ===== 7. 刷新指南 =====
-    lines.append("## 七、刷新指南")
+    lines.append("## 九、刷新指南")
     lines.append("")
     lines.append("```bash")
     lines.append("python3 scripts/generate-dashboard.py   # 重新生成 docs/DASHBOARD.md")
