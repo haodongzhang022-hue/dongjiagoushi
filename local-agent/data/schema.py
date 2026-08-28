@@ -553,6 +553,19 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_code_agent ON code_changes(agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_code_project ON code_changes(project)",
+    # ---- 33. 测试源码指纹缓存（test_cache · 测试智能优化层 Issue #65 T3）----
+    # 记录每个测试脚本→覆盖源码组合指纹，供 FingerprintCache 判定缓存命中跳过。
+    # test_script UNIQUE（同一测试只存一条最新指纹），ts 记录最近一次运行时间。
+    """
+    CREATE TABLE IF NOT EXISTS test_cache (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        test_script   TEXT NOT NULL UNIQUE,    -- 测试脚本名（唯一）
+        fingerprint   TEXT DEFAULT '',          -- 覆盖源码组合指纹（SHA-256）
+        result        TEXT DEFAULT '{}',        -- 最近一次运行结果快照（JSON）
+        ts            TEXT                      -- 记录时间戳
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_test_cache_script ON test_cache(test_script)",
 ]
 
 
