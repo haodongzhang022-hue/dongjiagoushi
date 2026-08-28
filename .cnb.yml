@@ -92,6 +92,8 @@ main:
             bash local-agent/tests/test_cache_layer.sh
             echo "==== 公司化三战线测试（company-model：选单情报/能力底座线/架构文档） ===="
             bash tests/test_company_model.sh
+            echo "==== 公司化三战线端到端全链贯通测试（company-e2e · M4：三战线接力+语义触发+跨战线转交+数据底座+全链可复现） ===="
+            bash tests/test_company_e2e.sh
             echo "==== 端到端小需求测试（mini-e2e：小需求端到端信号灯） ===="
             bash tests/test_mini_e2e.sh
             echo "==== 标签管理+进度自动化测试（label：标签能力/事件驱动自动打标/MCP管线/进度推手/全员挂载/越权拦截） ===="

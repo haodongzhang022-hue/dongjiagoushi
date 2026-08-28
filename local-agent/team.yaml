@@ -201,6 +201,27 @@ pipeline:
       # --- 交付 ---
       - { id: "deliver",    role: "编排引擎",    action: "汇总交付报告", depends_on: ["test"] }
 
+      # ============================================================
+      # 三战线贯通（M4 全链贯通）：市场获客线 + 能力底座线 + 跨战线转交
+      #   市场获客线：找需求 → 价值确认 → 竞品分析 → 销售成单（选单情报）
+      #   能力底座线：工具开发 → 优化 → 数据管理 → 运维（持续开发沉淀）
+      #   跨战线转交：获客成单 → 交付线 plan；交付沉淀 → 底座线 tool_builder
+      # ============================================================
+      # --- 市场获客线（选单情报：决定做什么单/有没有价值）---
+      - { id: "demand_finder", role: "架构·找需求", action: "找单/商机列表/可接性初筛", depends_on: [] }
+      - { id: "value_verifier", role: "架构·价值确认", action: "价值评级/市场空白/方向建议", depends_on: ["demand_finder"] }
+      - { id: "competitor", role: "架构·竞品分析", action: "竞品优劣势/差异化定位", depends_on: ["value_verifier"] }
+      - { id: "sales", role: "市场·销售", action: "谈单/报价/跟进成单", depends_on: ["competitor"] }
+      # --- 跨战线转交①：市场获客线成单 → 交付线（经理接手进 plan）---
+      #     sales 成单产出订单需求，作为交付线的输入（plan 消费）
+      # --- 能力底座线（持续开发：更快更稳成本更低）---
+      - { id: "tool_builder", role: "架构·工具开发", action: "工具沉淀/系统迭代/工具库管理", depends_on: ["deliver"] }
+      - { id: "optimizer", role: "架构·优化", action: "效率/交互/算法优化/收益量化", depends_on: ["tool_builder"] }
+      - { id: "data_admin", role: "架构·数据管理", action: "数据存储/调用/核实/数据字典", depends_on: ["optimizer"] }
+      - { id: "ops", role: "架构·运维", action: "部署上线/监控告警/故障处理", depends_on: ["data_admin"] }
+      # --- 跨战线转交②：交付线沉淀 → 能力底座线（tool_builder 消费交付产物）---
+      #     deliver 产出工具沉淀/数据/经验 → tool_builder 沉淀反哺交付线提效
+
   # 旧式线性 steps（保留兼容：不配 --dag 时回退，便于老测试/老调用）
   steps:
     - { step: "secretary",  role: "架构·秘书",  action: "默认入口/诉求接收/路由" }
