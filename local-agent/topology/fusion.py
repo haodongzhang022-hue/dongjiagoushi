@@ -17,8 +17,8 @@
       * micro（单任务修改/单开发即可）→ **简化体系·敏捷**（产品→开发→审查）
         ★ 占比最高，最该精雕细琢；
       * small（低复杂度）→ **敏捷开发**（同上，仍轻量）；
-      * medium（中等）→ **加架构师**（产品→架构→开发→评审→测试）；
-      * large（高复杂度）→ **公司结构拉满**（DAG 全角色 + 分形 + 找工具/对齐）；
+      * medium（中等）→ **加架构师 + 开发增强**（产品→总师→小组长→2开发→评审→测试）；
+      * large（高复杂度）→ **公司结构拉满 + 开发增强**（产品→总师→小组长→2开发→评审→测试→交付）；
       * huge（极高复杂度/大型）→ **完整体系** + 公司规模最大 + 动态扩容
         + 水龙头蔓延 + 带蔓延关系的回传合并（融合拓扑）。
   - **缓存命中为主线（cache-first）**：所有档位都共享上下文复用，只是聚合程度递增：
@@ -208,8 +208,8 @@ def select_topology(scale, available=None):
       3. micro（单任务修改）→ 简化体系（agile：产品→开发→审查），占比最高最该优化，
          cache-first 共享需求前缀复用；
       4. small（低复杂度）→ 敏捷开发（agile），仍轻量、cache-first；
-      5. medium（中等）→ 加架构师（dag）；
-      6. large（高复杂度）→ 公司结构拉满（dag 全角色）；
+      5. medium（中等）→ 加架构师（dag，开发增强优先：dev_enhanced，一套循环2个开发）；
+      6. large（高复杂度）→ 公司结构拉满（dag 全角色，开发增强优先：dev_enhanced）；
       7. 兜底 → dag（默认生产拓扑）。
 
     返回：{selected, system, reason, alternatives, plan}
@@ -274,25 +274,33 @@ def select_topology(scale, available=None):
             "slim": _slim_for(scale["tier"]),
         }
 
-    # 5) medium → 加架构师（dag）
+    # 5) medium → 加架构师（dag，开发增强优先：dev_enhanced）
     if scale["tier"] == "medium":
-        plan = build_plan("dag", scale)
+        if "dev_enhanced" in available:
+            chosen = "dev_enhanced"
+        else:
+            chosen = "dag" if "dag" in available else (list(available)[0] if available else "linear")
+        plan = build_plan(chosen, scale)
         return {
-            "selected": "dag" if "dag" in available else (list(available)[0] if available else "linear"),
+            "selected": chosen,
             "system": system,
-            "reason": "中等复杂度 → 加架构师（产品→架构→开发→评审→测试），架构把关",
-            "alternatives": ["dag", "event"],
+            "reason": "中等复杂度 → 加架构师 + 开发增强配比（产品→总师→小组长→2开发→评审→测试），开发是推进核心、一套循环2个开发",
+            "alternatives": ["dag", "event", "dev_enhanced"],
             "plan": plan,
             "slim": _slim_for(scale["tier"]),
         }
 
-    # 6) large → 公司结构拉满（dag 全角色 + 分形 + 找工具/对齐）
-    plan = build_plan("dag", scale)
+    # 6) large → 公司结构拉满（dag 全角色 + 分形多小组，开发增强优先：dev_enhanced）
+    if "dev_enhanced" in available:
+        chosen = "dev_enhanced"
+    else:
+        chosen = "dag" if "dag" in available else (list(available)[0] if available else "linear")
+    plan = build_plan(chosen, scale)
     return {
-        "selected": "dag" if "dag" in available else (list(available)[0] if available else "linear"),
+        "selected": chosen,
         "system": system,
-        "reason": "高复杂度 → 公司结构拉满（DAG 全角色 + 分形多小组 + 找工具/对齐），承载大型任务",
-        "alternatives": ["dag", "event", "hybrid"],
+        "reason": "高复杂度 → 公司结构拉满 + 开发增强配比（产品→总师→小组长→2开发→评审→测试→交付），开发推进核心、一套循环2个开发",
+        "alternatives": ["dag", "event", "hybrid", "dev_enhanced"],
         "plan": plan,
         "slim": _slim_for(scale["tier"]),
     }
