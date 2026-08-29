@@ -86,6 +86,10 @@ try:
 finally:
     os.unlink(path)
 print("  ✅ 代码规范：裸except/敏感信息/死代码 确定性判定")
+# 自检：checker.py 本身无裸 except（docstring 中的 "except:" 不误判）
+r_self = ck.check_code('local-agent/dev_standard/checker.py')
+assert r_self["C01"]["passed"] is True, f"checker.py 自检 C01 失败: {r_self['C01']}"
+print("  ✅ 自检：checker.py 自身 C01 合规（docstring 中的 except: 不误判）")
 EOF
 
 echo "===== [dev-standard] 4. StandardAbility 能力（BaseRole 挂载）====="

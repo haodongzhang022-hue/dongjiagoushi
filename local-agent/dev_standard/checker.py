@@ -188,8 +188,11 @@ class StandardChecker:
         if code is None:
             return {"ok": True, "details": "无代码文件可检，跳过"}
         # 匹配裸 except: / except ：（不带异常类型）
-        bare = re.findall(r"except\s*:", code)
-        bare_full = re.findall(r"except\s*:\s*pass", code)
+        # 用行首锚点精确匹配真实 except 语句，避免把注释/docstring/字符串中的
+        # except: 文字误判为代码（自检 checker.py 不再误报）。
+        _code = re.sub(chr(34)*3 + '.*?' + chr(34)*3, '', code, flags=re.DOTALL)  # 双引号 docstring
+        bare = re.findall(r'^\s*except\s*:', _code, flags=re.MULTILINE)
+        bare_full = re.findall(r'^\s*except\s*:\s*pass', _code, flags=re.MULTILINE)
         ok = not bare
         detail = f"发现 {len(bare)} 处裸 except（静默吞异常）" if bare else "无裸 except ✅"
         if bare and bare_full:
@@ -286,7 +289,8 @@ class StandardChecker:
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 return f.read()
-        except Exception:
+        except (OSError, IOError) as e:
+            # 文件读取失败——显式异常类型，不静默吞（C01 合规）
             return None
 
 
