@@ -21,6 +21,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+from hybrid.cost import CostReporter, default_cost_reporter
+
+
 def _router():
     from hybrid.router import HybridResourceRouter
     return HybridResourceRouter()
@@ -176,6 +179,85 @@ def cmd_all(args):
     }, ensure_ascii=False, indent=2))
 
 
+# ============ 测试智能优化层（v2.0 T3-T6）CLI 接线 ============
+
+def _policy():
+    from hybrid.policy import PolicyEngine
+    return PolicyEngine()
+
+
+def _cache():
+    from hybrid.cache import FingerprintCache
+    return FingerprintCache()
+
+
+def _executor(root=None, timeout=300, dry=False, parallel=4):
+    from hybrid.parallel import ParallelExecutor
+    return ParallelExecutor(root_dir=root, timeout=timeout, dry_run=dry, parallel=parallel)
+
+
+def cmd_smart(args):
+    """智能优化一键：增量选择 → 缓存命中剔除 → 并行执行 → 三合一成本报表。"""
+    from hybrid import selector
+    sel = selector.IncrementalSelector(root_dir=args.root or os.getcwd())
+    pol = _policy()
+    c = _cache()
+    # 变更来源：--base/--head 指定 git 区间，否则用工作区未提交变更
+    if args.base:
+        changed = sel.changed_files(args.base, args.head or "HEAD")
+    else:
+        changed = sel.changed_files_workdir()
+
+    suite = None
+    if args.full:
+        suite = lambda: sel.full_suite()
+
+    # 决策
+    decision = pol.decide(
+        changed_files=changed,
+        cache=c if args.cache else None,
+        selector=sel if args.incremental else None,
+        full_suite=suite,
+        last_full_ts=args.last_full_ts,
+        overrides={"incremental": args.incremental, "cache": args.cache,
+                   "parallel": args.parallel, "full": args.full},
+    )
+    print(json.dumps({
+        "mode": decision["mode"],
+        "tests": decision["tests"],
+        "cache_hits": decision["cache_hits"],
+        "parallel": decision["parallel"],
+        "reason": decision["reason"],
+    }, ensure_ascii=False, indent=2))
+
+    # 执行（只跑未命中缓存的）
+    if not args.dry:
+        ex = _executor(root=args.root, timeout=args.timeout, dry=False,
+                       parallel=decision["parallel"])
+        run_result = ex.run_parallel(decision["tests"], parallel=decision["parallel"])
+        # 执行后写入缓存（通过项标记 pass）
+        for r in run_result["results"]:
+            if r["exit_code"] == 0:
+                c.mark(r["script"], r, "pass")
+        # 同步留痕
+        _save_last(run_result)
+        # 三合一成本报表
+        cr = CostReporter() if "CostReporter" in globals() else _cost_reporter()
+        full_count = len(sel.full_suite()) if decision["mode"] == "incremental" else len(decision["tests"])
+        rep = cr.report_optimizer(
+            {**decision, "full_count": full_count},
+            run_result,
+        )
+        print(json.dumps({"run": run_result["summary"], "cost": rep},
+                         ensure_ascii=False, indent=2))
+
+
+def _cost_reporter():
+    from hybrid.cost import CostReporter
+    return CostReporter()
+
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="hybrid.cli", description="Hybrid 资源路由 CLI")
     sub = ap.add_subparsers(dest="cmd")
@@ -208,6 +290,19 @@ def main(argv=None):
     p.add_argument("--batch", default="hybrid-local")
     p.set_defaults(fn=cmd_all)
 
+    p = sub.add_parser("smart", help="智能优化一键（增量+缓存+并行+成本）")
+    p.add_argument("--root", default=None)
+    p.add_argument("--timeout", type=int, default=300)
+    p.add_argument("--dry", action="store_true", help="只决策不执行")
+    p.add_argument("--base", default=None, help="git diff 起点（默认用工作区变更）")
+    p.add_argument("--head", default=None, help="git diff 终点")
+    p.add_argument("--incremental", action="store_true", default=True, help="启用增量选择")
+    p.add_argument("--cache", action="store_true", default=True, help="启用缓存命中跳过")
+    p.add_argument("--parallel", action="store_true", default=True, help="启用并行执行")
+    p.add_argument("--full", action="store_true", help="强制全量回归")
+    p.add_argument("--last-full-ts", default=None, help="上次全量回归时间戳")
+    p.set_defaults(fn=cmd_smart)
+
     args = ap.parse_args(argv)
     if not getattr(args, "fn", None):
         ap.print_help()
@@ -217,3 +312,5 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
+

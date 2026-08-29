@@ -1,0 +1,636 @@
+{
+  "$schema": "https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/raw/main/local-agent/hybrid/registry.schema.json",
+  "version": "v2.1",
+  "generated_at": "2026-08-29T00:41:53Z",
+  "description": "集中测试注册表 — 声明仓库全部 CPU 密集测试脚本，映射到覆盖的源码模块与依赖关系，供增量测试选择器消费。v2.1 修复角色模块覆盖缺失、统一路径前缀、补依赖分析。",
+  "tests": {
+    "local-agent/tests/test_router_integration.sh": {
+      "name": "test_router_integration",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/graph.py",
+        "local-agent/orchestrator.py",
+        "local-agent/topology/fusion.py",
+        "local-agent/topology/router.py",
+        "local-agent/topology/topologies.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_scale.sh"
+      ],
+      "cpu_cost_est": 3.2,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_scale.sh": {
+      "name": "test_scale",
+      "covers": [
+        "local-agent/scale/broker.py",
+        "local-agent/scale/engine.py",
+        "local-agent/scale/plugin.py",
+        "local-agent/scale/pool.py",
+        "local-agent/scale/profile.py",
+        "local-agent/scale/spec.py",
+        "local-agent/scale/store.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 4.5,
+      "time_est": 12.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_prescale_entry.sh": {
+      "name": "test_prescale_entry",
+      "covers": [
+        "local-agent/orchestrator.py",
+        "local-agent/roles/base.py",
+        "local-agent/scale/engine.py",
+        "local-agent/scale/prescale.py",
+        "local-agent/scale/profile.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.8,
+      "time_est": 7.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_engine.sh": {
+      "name": "test_engine",
+      "covers": [
+        "local-agent/engine/host.py",
+        "local-agent/engine/state_machine.py",
+        "local-agent/engine/timer.py",
+        "local-agent/scale/store.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_data_layer.sh": {
+      "name": "test_data_layer",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/data/cli.py",
+        "local-agent/data/db.py",
+        "local-agent/data/repository.py",
+        "local-agent/data/schema.py",
+        "local-agent/roles/data_admin.py",
+        "local-agent/scale/plugin.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 5.0,
+      "time_est": 15.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_collab.sh": {
+      "name": "test_collab",
+      "covers": [
+        "local-agent/collab/engine.py",
+        "local-agent/collab/peer.py",
+        "local-agent/collab/store.py",
+        "local-agent/data/admin.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.5,
+      "time_est": 9.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_peer_collab.sh": {
+      "name": "test_peer_collab",
+      "covers": [
+        "local-agent/collab/engine.py",
+        "local-agent/collab/peer.py",
+        "local-agent/data/admin.py",
+        "local-agent/orchestrator.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_collab.sh"
+      ],
+      "cpu_cost_est": 3.8,
+      "time_est": 10.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_peer_closure.sh": {
+      "name": "test_peer_closure",
+      "covers": [
+        "local-agent/collab/closure.py",
+        "local-agent/collab/decisions.py",
+        "local-agent/collab/human_gate.py",
+        "local-agent/collab/peer.py",
+        "local-agent/collab/precursor.py",
+        "local-agent/data/admin.py",
+        "local-agent/sentinel/peer_guard.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_peer_collab.sh"
+      ],
+      "cpu_cost_est": 4.0,
+      "time_est": 11.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_disposition.sh": {
+      "name": "test_disposition",
+      "covers": [
+        "local-agent/collab/disposition.py",
+        "local-agent/collab/peer.py",
+        "local-agent/data/admin.py",
+        "local-agent/roles/base.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.2,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_sentinel.sh": {
+      "name": "test_sentinel",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/roles/base.py",
+        "local-agent/sentinel/detect.py",
+        "local-agent/sentinel/engine.py",
+        "local-agent/sentinel/store.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 4.2,
+      "time_est": 12.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_external_source.sh": {
+      "name": "test_external_source",
+      "covers": [
+        "local-agent/data/schema.py",
+        "local-agent/dispatcher/host_helper.py",
+        "local-agent/dispatcher/rules.py",
+        "local-agent/dispatcher/security.py",
+        "local-agent/dispatcher/source.py",
+        "local-agent/dispatcher/sources.py",
+        "local-agent/dispatcher/webhook.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.5,
+      "time_est": 7.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dispatcher.sh": {
+      "name": "test_dispatcher",
+      "covers": [
+        "local-agent/data/db.py",
+        "local-agent/data/schema.py",
+        "local-agent/dispatcher/engine.py",
+        "local-agent/dispatcher/guard.py",
+        "local-agent/dispatcher/queue.py",
+        "local-agent/dispatcher/reject.py",
+        "local-agent/dispatcher/rules.py",
+        "local-agent/dispatcher/source.py",
+        "local-agent/dispatcher/webui.py",
+        "local-agent/sentinel/detect.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.3,
+      "time_est": 9.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_probe.sh": {
+      "name": "test_probe",
+      "covers": [
+        "local-agent/data/schema.py",
+        "local-agent/dispatcher/engine.py",
+        "local-agent/dispatcher/probe.py",
+        "local-agent/dispatcher/sources.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 1.8,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dispatch_engine.sh": {
+      "name": "test_dispatch_engine",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/dispatch/ability.py",
+        "local-agent/dispatch_engine.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/manager.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_depth_engine.sh": {
+      "name": "test_depth_engine",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/depth/ability.py",
+        "local-agent/depth/engine.py",
+        "local-agent/roles/base.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.8,
+      "time_est": 7.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_ops_sim.sh": {
+      "name": "test_ops_sim",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/data/schema.py",
+        "local-agent/gid.py",
+        "local-agent/ops.py",
+        "local-agent/sentinel/engine.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_topology_comparison.sh": {
+      "name": "test_topology_comparison",
+      "covers": [
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/runner.py",
+        "local-agent/topology/topologies.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.5,
+      "time_est": 10.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_benchmark_ab.sh": {
+      "name": "test_benchmark_ab",
+      "covers": [
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/runner.py",
+        "local-agent/topology/topologies.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_topology_comparison.sh"
+      ],
+      "cpu_cost_est": 4.0,
+      "time_est": 12.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_topology_hybrid.sh": {
+      "name": "test_topology_hybrid",
+      "covers": [
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/runner.py",
+        "local-agent/topology/tasksource.py",
+        "local-agent/topology/topologies.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_galton.sh": {
+      "name": "test_galton",
+      "covers": [
+        "local-agent/galton/engine.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.5,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_topology_fusion.sh": {
+      "name": "test_topology_fusion",
+      "covers": [
+        "local-agent/topology/fusion.py",
+        "local-agent/topology/topologies.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.2,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_topology_slim.sh": {
+      "name": "test_topology_slim",
+      "covers": [
+        "local-agent/topology/fusion.py",
+        "local-agent/topology/slim.py",
+        "local-agent/topology/topologies.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_topology_fusion.sh"
+      ],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_secretary_sense.sh": {
+      "name": "test_secretary_sense",
+      "covers": [
+        "local-agent/data/schema.py",
+        "local-agent/orchestrator.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/secretary.py",
+        "local-agent/roles/secretary_sense.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.5,
+      "time_est": 7.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_prefix_cache.sh": {
+      "name": "test_prefix_cache",
+      "covers": [
+        "local-agent/topology/benchmark.py",
+        "local-agent/topology/prefix_cache.py",
+        "local-agent/topology/topologies.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_cache_layer.sh": {
+      "name": "test_cache_layer",
+      "covers": [
+        "local-agent/data/db.py",
+        "local-agent/llm/base.py",
+        "local-agent/llm/cache.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/shell_cache.py",
+        "local-agent/topology/cache_monitor.py",
+        "local-agent/topology/prefix_cache.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_label_automation.sh": {
+      "name": "test_label_automation",
+      "covers": [
+        "local-agent/data/db.py",
+        "local-agent/label/ability.py",
+        "local-agent/label/auto.py",
+        "local-agent/label/cli.py",
+        "local-agent/label/progress_pusher.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/data_admin.py",
+        "local-agent/roles/developer.py",
+        "local-agent/roles/manager.py",
+        "local-agent/roles/market.py",
+        "local-agent/roles/product.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.2,
+      "time_est": 9.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_review_tester_handoff.sh": {
+      "name": "test_review_tester_handoff",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/reviewer.py",
+        "local-agent/roles/tester.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_local_agent.sh": {
+      "name": "test_local_agent",
+      "covers": [
+        "local-agent/fractal.py",
+        "local-agent/graph.py",
+        "local-agent/orchestrator.py",
+        "local-agent/roles/__init__.py",
+        "local-agent/roles/base.py",
+        "local-agent/run.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dispatch_ability.sh": {
+      "name": "test_dispatch_ability",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/dispatch/ability.py",
+        "local-agent/dispatch_engine.py",
+        "local-agent/roles/base.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.5,
+      "time_est": 7.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_router.sh": {
+      "name": "test_hybrid_router",
+      "covers": [
+        "local-agent/hybrid/__init__.py",
+        "local-agent/hybrid/router.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 1.0,
+      "time_est": 3.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_pipeline.sh": {
+      "name": "test_hybrid_pipeline",
+      "covers": [
+        "local-agent/hybrid/cost.py",
+        "local-agent/hybrid/router.py",
+        "local-agent/hybrid/sync.py",
+        "local-agent/hybrid/worker.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_hybrid_router.sh"
+      ],
+      "cpu_cost_est": 1.5,
+      "time_est": 4.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_deliverer.sh": {
+      "name": "test_deliverer",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/ops.py",
+        "local-agent/roles/base.py",
+        "local-agent/roles/deliverer.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_architect_system.sh": {
+      "name": "test_architect_system",
+      "covers": [
+        ".codebuddy/skills/architect/SKILL.md",
+        "AGENTS.md",
+        "docs/ISSUE_MANAGEMENT.md",
+        "docs/ROADMAP.md",
+        "docs/templates/"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_functional_links.sh": {
+      "name": "test_functional_links",
+      "covers": [
+        ".codebuddy/skills/architect/SKILL.md",
+        "AGENTS.md",
+        "docs/",
+        "local-agent/run.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.5,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_relay_workflow.sh": {
+      "name": "test_relay_workflow",
+      "covers": [
+        "local-agent/relay.py",
+        "local-agent/roles/__init__.py",
+        "local-agent/roles/manager.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_memory_store.sh": {
+      "name": "test_memory_store",
+      "covers": [
+        "src/memory/backends/",
+        "src/memory/schema.py",
+        "src/memory/store.py",
+        "src/memory/triggers.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.5,
+      "time_est": 10.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_handle_ability.sh": {
+      "name": "test_handle_ability",
+      "covers": [
+        "local-agent/handle/ability.py",
+        "local-agent/handle/resolver.py",
+        "local-agent/roles/base.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 1.8,
+      "time_est": 4.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_company_model.sh": {
+      "name": "test_company_model",
+      "covers": [
+        "local-agent/roles/__init__.py",
+        "local-agent/roles/company.py",
+        "local-agent/team.yaml"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_mini_e2e.sh": {
+      "name": "test_mini_e2e",
+      "covers": [
+        "local-agent/fractal.py",
+        "local-agent/graph.py",
+        "local-agent/roles/",
+        "local-agent/run.py",
+        "local-agent/team.yaml"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.5,
+      "time_est": 10.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_doc_consistency.sh": {
+      "name": "test_doc_consistency",
+      "covers": [
+        "docs/",
+        "local-agent/collab/disposition.py",
+        "local-agent/roles/reviewer.py",
+        "src/memory/backends/embedding/",
+        "src/memory/schema.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.5,
+      "time_est": 7.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_company_e2e.sh": {
+      "name": "test_company_e2e",
+      "covers": [
+        "local-agent/graph.py",
+        "local-agent/roles/__init__.py",
+        "local-agent/roles/company.py",
+        "local-agent/team.yaml",
+        "src/memory/triggers.py"
+      ],
+      "depends_on": [
+        "tests/test_company_model.sh"
+      ],
+      "cpu_cost_est": 3.0,
+      "time_est": 9.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_monitor_bi.sh": {
+      "name": "test_monitor_bi",
+      "covers": [
+        "local-agent/data/admin.py",
+        "local-agent/data/schema.py",
+        "local-agent/monitor_bi/"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_relay_card.sh": {
+      "name": "test_relay_card",
+      "covers": [
+        "local-agent/relay.py",
+        "local-agent/relay_card/"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 1.5,
+      "time_est": 4.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_optimizer.sh": {
+      "name": "test_hybrid_optimizer",
+      "covers": [
+        "local-agent/hybrid/cache.py",
+        "local-agent/hybrid/parallel.py",
+        "local-agent/hybrid/policy.py",
+        "local-agent/hybrid/cost.py",
+        "local-agent/data/schema.py",
+        "local-agent/data/repository.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dev_enhanced.sh": {
+      "name": "test_dev_enhanced",
+      "covers": [
+        "fractal.py",
+        "topology/topologies.py",
+        "topology/router.py",
+        "topology/fusion.py",
+        "orchestrator.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_local_agent.sh"
+      ],
+      "cpu_cost_est": 2.0,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
+    }
+  }
+}
