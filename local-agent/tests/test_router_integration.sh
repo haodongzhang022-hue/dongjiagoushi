@@ -9,7 +9,7 @@
 #   2. 各档位节点集均能被 DagEngine 校验（可真实执行）
 #   3. run_pipeline 端到端：micro→agile(4节点) 不再硬编码 11 节点 dag
 #   4. run_pipeline 端到端：大型→prefix(17节点)
-#   5. --no-fusion 回退老行为（team.yaml 11 节点 dag，无 fusion 字段）
+#   5. --no-fusion 回退老行为（team.yaml 19 节点 dag，无 fusion 字段）
 #   6. --topo 显式指定拓扑（绕过规模评估）
 # ============================================================
 set -euo pipefail
@@ -81,7 +81,7 @@ f=r.get('fusion',{})
 print(f.get('selected','')+'|'+f.get('tier','')+'|'+str(len(r.get('steps',[]))))")
 check "run_pipeline huge→prefix(17步)" "$R" "prefix|huge|17"
 
-# 5. --no-fusion 回退老行为（不 consult 融合路由，无 fusion 字段，11 节点 dag）
+# 5. --no-fusion 回退老行为（不 consult 融合路由，无 fusion 字段，19 节点 dag）
 R=$(cd "$ROOT" && timeout 60 python3 -c "
 import sys,os,io,contextlib;sys.path.insert(0,'.')
 from data import admin;admin.init()
@@ -90,7 +90,7 @@ buf=io.StringIO()
 with contextlib.redirect_stdout(buf):
     r=orchestrator.run_pipeline('帮我改一下登录接口的 bug', backend='cli_fallback', use_fusion=False)
 print(('yes' if 'fusion' not in r else 'no')+'|'+str(len(r.get('steps',[]))))")
-check "--no-fusion 回退(无fusion,11步)" "$R" "yes|11"
+check "--no-fusion 回退(无fusion,19步)" "$R" "yes|19"
 
 # 6. --topo 显式指定拓扑（绕过规模评估）
 R=$(cd "$ROOT" && timeout 60 python3 -c "

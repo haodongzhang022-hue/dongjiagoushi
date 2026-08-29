@@ -20,6 +20,8 @@
 main:
   push:
     - name: architecture system acceptance test
+      docker:
+        image: python:3.11
       stages:
         - name: test
           # 信号灯：功能/产物未达成预期即 fail → 阻塞合并，机器强制“没达成不让通过”
@@ -67,17 +69,74 @@ main:
             issueSyncEnabled: true    # 同步 Issue 数据，供 agent 检索需求/决策上下文
             forceRebuild: false       # 默认增量；如需全量重建知识库改为 true
             ignoreProcessFailures: true  # 单个文档处理失败不阻断整体入库
+  pull_request:
+    - name: change aware test
+      docker:
+        image: python:3.11
+      stages:
+        - name: test
+          # 变更范围感知：根据 git diff 只跑受影响的测试模块
+          # 由 local-agent/hybrid/selector.py 的 IncrementalSelector 实现
+          # 避免每次 PR 推送全量跑 43 个 CPU 密集测试
+          script: |
+            set -e
+            echo "==== 变更范围感知测试（pull_request · IncrementalSelector） ===="
+            echo "只跑受影响的测试模块，避免全量 43 脚本造成 CPU 浪费"
+            echo ""
+            pip install -q -r local-agent/requirements.txt 2>/dev/null || true
+            python3 - <<'PY'
+            import sys, subprocess
+            sys.path.insert(0, 'local-agent')
+            from hybrid.selector import IncrementalSelector
+
+            s = IncrementalSelector(root_dir='.')
+            # 用 PR 目标分支对比当前 HEAD 获取变更
+            import os
+            base = os.environ.get('CNB_PULL_REQUEST_TARGET_SHA', '')
+            if base:
+                try:
+                    changed = s.changed_files(base, 'HEAD')
+                except Exception:
+                    changed = s.incremental_workdir()
+            else:
+                changed = s.incremental_workdir()
+            if not changed:
+                print('  无变更文件，跳过变更感知测试')
+                sys.exit(0)
+
+            print(f'  变更文件数: {len(changed)}')
+            selected = s.select(changed)
+            if not selected:
+                print('  变更未命中任何测试，跑核心冒烟测试兜底')
+                selected = ['tests/test_architect_system.sh']
+
+            print(f'  选定测试({len(selected)}个):')
+            for t in selected:
+                print(f'    bash {t}')
+
+            failed = False
+            for t in selected:
+                print(f'\n==== 运行: {t} ====')
+                rc = subprocess.call(['bash', t], cwd='.')
+                if rc != 0:
+                    print(f'  ❌ {t} 失败')
+                    failed = True
+                else:
+                    print(f'  ✅ {t} 通过')
+            sys.exit(1 if failed else 0)
+            PY
+
 
 # NPC 任务兜底（Issue/PR 评论 @NPC 触发）
 # 主路线是官方 @CodeBuddy 自动加载 architect skill；
 # 此处保留 npc:go 兜底，供未来按 .cnb/settings.yml 定义自建 NPC 或平台触发时使用。
 .npc_task: &npc_task
-  - name: architect npc
-    stages:
-      - name: npc go
-        type: npc:go
-        options:
-          role: "架构·总师"   # 对应 .cnb/settings.yml 中的角色（兜底人设）
+  name: architect npc
+  stages:
+    - name: npc go
+      type: npc:go
+      options:
+        role: "架构·总师"   # 对应 .cnb/settings.yml 中的角色（兜底人设）
           # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
           # model: hy3    # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
           # model: glm-5  # GLM 模型
@@ -86,8 +145,8 @@ main:
 # 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md
 # 在 Issue 增改删、PR 评论等事件后自动刷新，人类俯瞰决策零人工成本。
 .dashboard_refresh: &dashboard_refresh
-  - name: refresh dashboard
-    stages:
+  name: refresh dashboard
+  stages:
       - name: generate dashboard
         script: |
           set -e
@@ -111,8 +170,8 @@ main:
 # 事件驱动自动打标（Issue #51 · 标签自动化 MCP 管线）
 # 在 Issue 新增/更新时程序化自动打标签，无需任何 agent 记得去调。
 .auto_label: &auto_label
-  - name: auto label
-    stages:
+  name: auto label
+  stages:
       - name: auto label
         script: |
           set -e
@@ -122,8 +181,10 @@ main:
 
 # 兜底事件（仓库级事件在此处理）
 $:
-  issue.comment@npc: *npc_task
-  pull_request.comment@npc: *npc_task
+  issue.comment@npc:
+    - *npc_task
+  pull_request.comment@npc:
+    - *npc_task
   # Issue 增/改/删/重开时自动刷新看板
   issue.open:
     - *dashboard_refresh
@@ -131,8 +192,10 @@ $:
   issue.update:
     - *dashboard_refresh
     - *auto_label
-  issue.close: *dashboard_refresh
-  issue.reopen: *dashboard_refresh
+  issue.close:
+    - *dashboard_refresh
+  issue.reopen:
+    - *dashboard_refresh
 
   # Code Wiki：打 tag 时自动读取仓库代码 + docs/ 文档，生成项目 Wiki
   # 生成后仓库首页出现 Wiki 入口，并自动入库知识库（knowledge_enabled: true，可被 AI 问答引用）
