@@ -24,7 +24,7 @@
 |--------|------|------|
 | **`devs_per_team`（每小组开发数）** | `local-agent/fractal.py` | 每个分形小组配 N 个开发并行实现，**默认 2 = "一套循环 2 个开发"** |
 | **`dev_ratio()`（开发密度量化）** | `local-agent/fractal.py` | 量化小组内开发占比，辅助过多时直观暴露浪费 |
-| **`dev_enhanced`（开发增强拓扑）** | `local-agent/topology/topologies.py` | 产品→总师→小组长→2开发→评审→测试→交付，8 节点，供 router 显式选用 |
+| **`dev_enhanced`（开发增强拓扑）** | `local-agent/topology/topologies.py` | 产品→总师→小组长→2开发→评审→测试→交付，8 节点；已纳入 fusion 自动路由（medium/large 档优先选用），也可 router 显式选用 |
 
 ### 小组内结构深化（一套4个 → 一个开发小组）
 
@@ -86,9 +86,18 @@ bash local-agent/tests/test_topology_slim.sh
 ## 使用方法
 
 ```bash
-# 显式选用开发增强拓扑（一套循环 2 个开发）
+# 自动路由：medium/large 档默认选中 dev_enhanced（开发是推进核心，一套循环 2 个开发）
+python3 local-agent/run.py --pipeline full --req "中等复杂度的系统开发"
+
+# 显式选用开发增强拓扑（绕过规模评估强制指定）
 python3 local-agent/run.py --pipeline full --req "..." --topo dev_enhanced
 
 # 看分形计划（含每小组开发数与开发密度）
 python3 local-agent/run.py --pipeline full --req "..."   # DAG 开发分形自动带 devs_per_team=2
 ```
+
+> **自动路由**：`dev_enhanced` 已纳入 `fusion.route()` 自动路由——规模评估落在
+> **medium（中等）/large（高复杂度）** 档时优先选用它（它是 dag 的开发增强版，
+> 体现用户"一套循环 2 个开发、开发是推进核心"的诉求），无需显式指定；
+> 其他档位（micro/small/huge/散沙）仍按原路由逻辑。专项测试
+> `test_dev_enhanced.sh` 已注册到 `local-agent/hybrid/registry.json`，CI 增量选择器会自动运行。

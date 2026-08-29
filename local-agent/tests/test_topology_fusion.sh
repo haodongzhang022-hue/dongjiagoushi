@@ -6,8 +6,8 @@
 #   ★ 规模金字塔 → 承接体系（用户纠偏核心：小任务占比最高最该优化）
 #   1. micro（单任务修改）→ 简化体系·敏捷（agile：产品→开发→审查）
 #   2. small（低复杂度）  → 敏捷开发（agile，仍轻量）
-#   3. medium（中等）     → 加架构师（architected → dag）
-#   4. large（高复杂度）  → 公司结构拉满（company → dag）
+#   3. medium（中等）     → 加架构师 + 开发增强（architected → dev_enhanced，一套循环2开发）
+#   4. large（高复杂度）  → 公司结构拉满 + 开发增强（company → dev_enhanced）
 #   5. huge（极高/大型）  → 完整体系 + 蔓延（full → prefix 融合）
 #   6. 散沙型高并发 → 一窝蜂 scatter
 #   7. 缓存命中为主线（cache-first）横贯所有档位
@@ -35,13 +35,13 @@ check "micro 档=简化体系·敏捷 agile" "$R" "micro|agile|agile"
 R=$(python3 -c "import sys;sys.path.insert(0,'$ROOT');from topology import fusion;r=fusion.route(complexity=2,subtasks=3,concurrency=1);print(r['tier']+'|'+r['system']+'|'+r['selected'])")
 check "small 档=敏捷开发 agile" "$R" "small|agile|agile"
 
-# 3. medium（中等）→ 加架构师 architected → dag
+# 3. medium（中等）→ 加架构师 architected → dev_enhanced（开发增强，一套循环2开发）
 R=$(python3 -c "import sys;sys.path.insert(0,'$ROOT');from topology import fusion;r=fusion.route(complexity=4,subtasks=10,concurrency=3);print(r['tier']+'|'+r['system']+'|'+r['selected'])")
-check "medium 档=加架构师 dag" "$R" "medium|architected|dag"
+check "medium 档=加架构师+开发增强 dev_enhanced" "$R" "medium|architected|dev_enhanced"
 
-# 4. large（高复杂度）→ 公司结构拉满 company → dag
+# 4. large（高复杂度）→ 公司结构拉满 company → dev_enhanced（开发增强）
 R=$(python3 -c "import sys;sys.path.insert(0,'$ROOT');from topology import fusion;r=fusion.route(complexity=7,subtasks=25,concurrency=3,is_scattered=False);print(r['tier']+'|'+r['system']+'|'+r['selected'])")
-check "large 档=公司拉满 dag" "$R" "large|company|dag"
+check "large 档=公司拉满+开发增强 dev_enhanced" "$R" "large|company|dev_enhanced"
 
 # 5. huge（极高复杂度/大型）→ 完整体系 full → prefix 融合（水龙头蔓延）
 R=$(python3 -c "import sys;sys.path.insert(0,'$ROOT');from topology import fusion;r=fusion.route(complexity=9,subtasks=60,concurrency=3,is_scattered=False);print(r['tier']+'|'+r['system']+'|'+r['selected'])")
