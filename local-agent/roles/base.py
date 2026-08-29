@@ -88,6 +88,12 @@ class BaseRole:
             self.dev_team_ability = DevTeamAbility(owner=self)
         except Exception:
             self.dev_team_ability = None
+        # 懒加载开发规范全员能力（StandardAbility · Issue #83：确定性检查 + 阶段强制清单 + 合规留痕）
+        try:
+            from dev_standard import StandardAbility
+            self.standard_ability = StandardAbility(owner=self)
+        except Exception:
+            self.standard_ability = None
 
     # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
@@ -391,6 +397,63 @@ class BaseRole:
         return self.dev_team_ability.team_overview(team)
 
 
+    # ------------------------------------------------------------
+    # 开发规范全员能力透传（StandardAbility · Issue #83 · 全员通用）
+    # ------------------------------------------------------------
+    def list_standards(self, level=None, category=None):
+        """列出规范条目（按级别/类别过滤）。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.list_standards(level=level, category=category)
+
+    def get_standard(self, spec_id):
+        """获取单条规范详情。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.get_standard(spec_id)
+
+    def get_enforced_specs(self, stage):
+        """获取某开发阶段的强制规范清单。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.get_enforced_specs(stage)
+
+    def standards_summary(self):
+        """规范注册表概览（二级信息）。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.standards_summary()
+
+    def check_standard(self, target, spec_ids=None):
+        """检查合规性（确定性检查器，非 LLM 判断）。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.check_standard(target, spec_ids=spec_ids)
+
+    def check_pr(self, pr_info):
+        """PR 规范检查。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.check_pr(pr_info)
+
+    def check_code(self, code_file, repo_path=""):
+        """代码规范检查。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.check_code(code_file, repo_path=repo_path)
+
+    def check_deliver(self, deliver_info):
+        """交付规范检查（自测上报/变更范围）。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.check_deliver(deliver_info)
+
+    def report_compliance(self, entity, results, format="json"):
+        """生成合规报告并留痕（供评审/测试核验）。"""
+        if self.standard_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
+        return self.standard_ability.report_compliance(entity, results, format=format)
+
     def capability(self):
         """返回本角色的能力清单（含三大全员通用能力）。"""
         base = {"role": self.name}
@@ -404,6 +467,8 @@ class BaseRole:
             base["label_ability"] = self.label_ability.capability()
         if getattr(self, "dev_team_ability", None) is not None:
             base["dev_team_ability"] = self.dev_team_ability.capability()
+        if getattr(self, "standard_ability", None) is not None:
+            base["standard_ability"] = self.standard_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----
