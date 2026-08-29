@@ -331,6 +331,31 @@
 - **除非对已有 PR 的修改再提交**：用 `ops.amend_pr`（复用原 Issue，不新增独立 Issue）。
 - 任务过大一开始就拆分，或开发中发现过大申报加派，避免单 PR 过大。
 
+## 开发规范体系（dev-standard · 固定规则 · Issue #83）
+
+为让开发 agent **强制遵循统一开发规范**（而非自觉遵守），建立**开发规范体系**
+`local-agent/dev-standard/`。本规则为仓库级固定 rules，对所有开发/评审/测试 agent 生效：
+
+- **独立模块 + 唯一事实源**：规范条目集中在 `specs.py`（`STANDARD_SPECS`），各层
+  （检查器/能力/CLI/CI/评审）都从这里读取，不各自取名、不产生版本差异；
+- **确定性检查（执行-验证分离）**：`StandardChecker` 是确定性代码（非 LLM 判断），
+  给定输入必然返回相同合规报告——杜绝"AI 自判合规"；dev 只负责"做"，合规与否由检查器裁定；
+- **三层分级**：L1 必做（hard·阻断）/ L2 推荐（soft·警告）/ L3 可选（提示）；
+- **强制时机（enforce_at 绑定开发阶段）**：pre_pr / review / commit / deliver / all——
+  开发在对应阶段必须查询并遵循强制规范清单（`get_enforced_specs(stage)`）；
+- **三机制并行**：`rules`（本规则硬约束）+ `MCP/CLI`（`standard.*` / `python -m dev_standard.cli`
+  程序化调用）+ `CI`（流水线自动校验）互补覆盖；
+- **以使用效果为边界**：先搭建可用核心 → 测试稳定实现 → 让 agent 学会用（合规报告留痕，
+  评审核验）；规范本身不成为"污染残留"——每条必须可程序化验证 + 留痕 + 追踪。
+
+**核心必做规范（L1 · hard）**：S01 模块独立成 PR/base 为 main · S02 按功能域解耦 ·
+S03 接口显式化 · S04 冲突前置规避 · S05 每 PR 自含测试+文档 · C01 错误处理不吞异常 ·
+C02 敏感信息不落代码 · D01 变更必留痕 · P01 Issue 声明头+双版本管理 · P02 进度尺标注 ·
+Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
+
+> 触发：任何开发/评审/测试处理代码任务即自动遵循（rules 固定触发）。
+> 不通过检查器硬检查 = `blocked_on: standard_violation`，须整改后重新提交，评审打回 `[回转]`。
+
 ## 解耦式功能模块开发（按功能分布 · 防冲突 · 跨项目可复用）固定规则
 
 每个功能模块**必须解耦开发**，按**功能分布**，禁止把模块耦合到其他功能分支上。规则硬触发，任何 agent 违反即打回：
@@ -411,6 +436,14 @@ local-agent/dispatch/                 # 通用派发能力包（DispatchAbility 
   ├── ability.py                      # 通用派发能力类（L1→L4 + 接单闭环）
   └── __init__.py                     # 导出 DispatchAbility
   └── templates/issue-template.md     # Issue 结构化声明模板
+local-agent/dev-standard/              # 开发规范体系（StandardAbility 全员能力 · Issue #83）
+  ├── specs.py                        # 规范条目注册表（唯一事实源）
+  ├── checker.py                      # 确定性规范检查器（非 LLM 判断）
+  ├── ability.py                      # StandardAbility 能力类（查询/检查/报告）
+  ├── mcp.py                          # MCP 工具暴露层（standard.*）
+  ├── cli.py                          # CLI 接口（MCP 管线）
+  ├── rules.md                        # AGENTS.md 引用的规范规则
+  └── README.md                       # 模块使用说明
 local-agent/handle/                   # 自适应 @ 定位能力包（HandleAbility 全员能力）
   ├── resolver.py                     # 核心解析器：触发串/探测/跨同仓判定/权限建议
   ├── ability.py                      # HandleAbility 能力类（self_handle/resolve/is_cross）
