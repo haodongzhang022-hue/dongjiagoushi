@@ -8,7 +8,7 @@ Hybrid 资源路由模块（Issue #57）+ 测试智能优化层（v2.1）
   - hybrid.router.HybridResourceRouter  核心路由（local/cloud 判定）
   - hybrid.worker.LocalWorker           本地批量测试执行器
   - hybrid.sync.ResultSync              结果同步留痕
-  - hybrid.cost.CostMonitor             成本监测与报表
+  - hybrid.cost.CostMonitor             成本监测与报表（含 T6 三合一节省报表）
   - hybrid.registry.TestRegistry        集中测试注册表（v2.1 增强）
   - hybrid.selector.IncrementalSelector 变更感知增量选择器（v2.0 新增）
 """
