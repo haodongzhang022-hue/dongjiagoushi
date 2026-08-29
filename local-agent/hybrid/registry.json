@@ -589,6 +589,22 @@
       "cpu_cost_est": 2.0,
       "time_est": 6.0,
       "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dev_enhanced.sh": {
+      "name": "test_dev_enhanced",
+      "covers": [
+        "fractal.py",
+        "topology/topologies.py",
+        "topology/router.py",
+        "topology/fusion.py",
+        "orchestrator.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_local_agent.sh"
+      ],
+      "cpu_cost_est": 2.0,
+      "time_est": 6.0,
+      "kind": "cpu-dense"
     }
   }
 }
