@@ -54,10 +54,22 @@ SPECIALTIES = {
 
 
 def _gid_for(etype, biz_key):
-    """给同岗位实体生成全局唯一 gid（稳定寻址，二次触发取回同一）。"""
+    """给同岗位实体生成全局唯一 gid（稳定寻址，二次触发取回同一）。
+
+    若数据库 schema 未初始化（如 CI 直跑 peer 未先 admin.init()），
+    幂等初始化后重试；仍失败则降级内存哈希 gid（不阻断同岗协作）。
+    """
     if data_admin is not None:
-        gid, _new = data_admin.register_gid(etype, biz_key)
-        return gid
+        try:
+            gid, _new = data_admin.register_gid(etype, biz_key)
+            return gid
+        except Exception:
+            try:
+                data_admin.init()  # 幂等建表（CREATE TABLE IF NOT EXISTS）
+                gid, _new = data_admin.register_gid(etype, biz_key)
+                return gid
+            except Exception:
+                pass
     return f"{etype}-{abs(hash(biz_key)) % 999999}"
 
 

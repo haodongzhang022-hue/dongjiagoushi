@@ -159,13 +159,20 @@ def task_overview():
 
 # ================= 全局唯一编号（gid · 精准定位/二次触发同一实体） =================
 
+def _ensure_gid_schema():
+    """确保 gid_registry 表存在（幂等，供 gid 系列函数前置调用）。"""
+    schema.init_schema()
+
+
 def registry_get(etype, biz_key):
     """查某业务 key 已登记的全局唯一 gid（未登记返回 None）。"""
+    _ensure_gid_schema()
     return repo.registry_get(etype, biz_key)
 
 
 def registry_set(etype, biz_key, gid):
     """登记某业务 key 的全局唯一 gid（幂等）。"""
+    _ensure_gid_schema()
     repo.registry_set(etype, biz_key, gid)
     record_event("data_admin", "gid_registered",
                  {"etype": etype, "biz_key": biz_key, "gid": gid})
@@ -174,6 +181,7 @@ def registry_set(etype, biz_key, gid):
 
 def registry_lookup(gid):
     """按全局唯一 gid 反查其类型/业务 key（精准定位某实体）。"""
+    _ensure_gid_schema()
     return repo.registry_lookup_by_gid(gid)
 
 
@@ -182,6 +190,7 @@ def register_gid(etype, biz_key):
 
     返回 (gid, is_new)。
     """
+    _ensure_gid_schema()
     exist = repo.registry_get(etype, biz_key)
     if exist:
         return exist, False

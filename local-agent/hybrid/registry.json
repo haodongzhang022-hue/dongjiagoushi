@@ -1,7 +1,7 @@
 {
   "$schema": "https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/raw/main/local-agent/hybrid/registry.schema.json",
   "version": "v2.1",
-  "generated_at": "2026-08-28T06:17:34Z",
+  "generated_at": "2026-08-29T00:41:53Z",
   "description": "集中测试注册表 — 声明仓库全部 CPU 密集测试脚本，映射到覆盖的源码模块与依赖关系，供增量测试选择器消费。v2.1 修复角色模块覆盖缺失、统一路径前缀、补依赖分析。",
   "tests": {
     "local-agent/tests/test_router_integration.sh": {
@@ -599,6 +599,21 @@
       "depends_on": [],
       "cpu_cost_est": 1.5,
       "time_est": 4.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_optimizer.sh": {
+      "name": "test_hybrid_optimizer",
+      "covers": [
+        "local-agent/hybrid/cache.py",
+        "local-agent/hybrid/parallel.py",
+        "local-agent/hybrid/policy.py",
+        "local-agent/hybrid/cost.py",
+        "local-agent/data/schema.py",
+        "local-agent/data/repository.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 6.0,
       "kind": "cpu-dense"
     }
   }
