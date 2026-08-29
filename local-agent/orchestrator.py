@@ -10,6 +10,7 @@
 - 输出写入接力卡；支持回转（revert_to）与打断（--resume 续跑）。
 """
 import os
+import re
 import sys
 
 import yaml
@@ -203,6 +204,18 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                 relay.save(card)
                 print(f"\n▶ [DAG波次] {_step_label(nd)}")
 
+                # ---- 开发小组驱动已消费的 dev 节点：跳过，避免重复执行 ----
+                if card.get("consumed_dev_nodes") and nid in card.get("consumed_dev_nodes", []):
+                    print(f"   [跳过] dev 节点 {nid} 已由开发小组闭环驱动消费")
+                    out = f"[已由开发小组闭环驱动消费] {_step_label(nd)}"
+                    card["output"] = out
+                    card["input"] = out
+                    relay.save(card)
+                    report["steps"].append(
+                        {"step": nid, "role": nd["role"], "output": out}
+                    )
+                    continue
+
                 # ---- 2 次定团队规模·秘书澄清阶段第 1 次预设 ----
                 if nid == "secretary" or nd["role"] == "架构·秘书":
                     pre = _prescale.prescale(req, kind="default")
@@ -269,8 +282,64 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                         print(f"   [第2次定规模] 经理增量修正: team_size={adj['team_size']} "
                               f"risk={adj['risk_level']} (adjusted={adj.get('adjusted_by_architect')})")
 
-                # 分形开发节点
-                if nd.get("fractal") and nd["fractal"].get("enabled") and nd["role"] == "架构·开发":
+                # ---- 开发小组闭环接线（方案 A · 把 DevTeam 接成真实可跑链路）----
+                _devteam_driven = False
+                # dev_enhanced / dev_team 拓扑的 lead（小组长）节点：确定性驱动
+                # 一套循环 N 个开发（默认2），全部 APPROVED 后小组长整合交付。
+                # 被驱动的 dev_N 开发节点由本驱动统一消费，不再逐个 _run_one 重复执行。
+                if (nd.get("role") == "架构·小组长"
+                        and dag_nodes
+                        and any((_n.get("role") == "架构·开发" and re.match(r'^dev_\d+$', str(_n.get("id", ""))))
+                                for _n in dag_nodes)
+                        and not nd.get("fractal")):
+                    from dev_team_driver import DevTeamDriver
+                    try:
+                        _dev_nodes = [
+                            _n for _n in dag_nodes
+                            if _n.get("role") == "架构·开发"
+                            and re.match(r'^dev_\d+$', str(_n.get("id", "")))
+                        ]
+                        _devs_per_team = max(1, len(_dev_nodes) or 2)
+                        _driver = DevTeamDriver(
+                            goal_total=float(getattr(nd, "goal_total", 0) or 0),
+                            devs_per_team=_devs_per_team,
+                            lead_id=nd["role"], owner=req[:24],
+                        )
+                        # 目标未显式给定时按需求粗估（开发小组需目标明确才进闭环）
+                        if _driver.goal_total <= 0:
+                            from dev_team_driver import estimate_goal_total
+                            _goal = estimate_goal_total(req)
+                            _driver.goal_total = _goal
+                            _driver.team.goal_total = _goal
+                        _can, _why = _driver.can_enter()
+                        if not _can:
+                            out = f"[开发小组] 目标未量化，跳过小组闭环：{_why}"
+                            print(f"   {out}")
+                            _devteam_driven = True
+                        else:
+                            _res = _driver.drive(
+                                req=req, task_id=f"{req[:24]}",
+                                summary=f"开发小组闭环交付（{_devs_per_team} 开发）",
+                                delta_per_round=float(getattr(nd, "delta_per_round", 1.0) or 1.0),
+                            )
+                            out = (
+                                f"[开发小组] 建组={_driver.team.devs_per_team}开发 目标={_driver.goal_total} "
+                                f"轮次={len(_res['rounds'])} 终态={_res['rounds'][-1]['verdict'] if _res['rounds'] else 'NA'} "
+                                f"进度={_res['progress']['progress_pct']}% "
+                                f"交付={_res['delivery'] is not None}"
+                            )
+                            print(f"   {out}")
+                            # 消费掉跟随 lead 的 dev 节点，避免下游重复执行
+                            card["consumed_dev_nodes"] = [_n["id"] for _n in _dev_nodes]
+                            _devteam_driven = True
+                    except Exception as _e:
+                        out = f"[开发小组驱动异常] {_e}"
+                        print(f"   {out}")
+                        _devteam_driven = True
+
+                # 分形开发节点（未由开发小组驱动时才执行）
+                if (not _devteam_driven
+                        and nd.get("fractal") and nd["fractal"].get("enabled") and nd["role"] == "架构·开发"):
                     import fractal
 
                     # 用架构·经理的任务拆解估算任务数（占位：以 req 长度/估算）
@@ -281,12 +350,12 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                         devs_per_team=nd["fractal"].get("devs_per_team", 2),
                     )
                     out = _fractal_develop(plan, req, llm, card, team)
-                elif nd["role"] == "编排引擎":
+                elif not _devteam_driven and nd["role"] == "编排引擎":
                     card["output"] = f"交付完成：{req}"
                     card["status"] = "done"
                     relay.save(card)
                     out = card["output"]
-                else:
+                elif not _devteam_driven:
                     role = get_role(nd["role"])
                     if role is None:
                         out = f"[错误] 未注册角色 {nd['role']}"

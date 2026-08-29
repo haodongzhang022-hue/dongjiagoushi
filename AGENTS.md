@@ -73,6 +73,7 @@
   - **进度北极星监督**：写 `goal_meters`，停滞/横跳/重复错误由监控哨兵拦截；
   - **记录优先于对话**：过程只写进度留痕 + 存档，**不打断经理**；干完 `deliver_to_manager` 一次性交付（含进度回放）。
   - 承载：`local-agent/dev_team.py`（DevTeamEngine）+ `local-agent/dev_team_kit/`（DevTeamAbility 全员挂载）+ `docs/DEV_TEAM.md`（设计文档）+ `local-agent/tests/test_dev_team.sh`（8 组信号灯）。
+  - **接线驱动层（方案 A · 把能力接成真实可跑链路）**：能力就绪但流程缺失——此前流水线无一处调用 DevTeamEngine。`local-agent/dev_team_driver.py` 补齐总师方案 A 的 5 个接线点（①建组入口 ②驱动循环 ③进度北极星 ④整合交付 ⑤路由/分形），`orchestrator.run_pipeline` 的 `lead` 节点接上驱动，`dev_enhanced` 拓扑走开发小组闭环、agile/dag 不误触发；测试 `test_dev_team_driver.sh`（6 组信号灯）验证端到端接线。
 - **市场获客分层（通用基建）**：工具层 / 数据层 / 渠道层 / 客服层 / 销售层 为平台级通用能力，既服务对外获客，也服务对内需求开发，可多次复用。
 - 承载：`local-agent/team.yaml`（DAG 定义）+ `local-agent/graph.py`（DAG 引擎）+ `local-agent/fractal.py`（分形引擎 + devs_per_team）。详见 `docs/FRAMEWORK_V2.md`。
 

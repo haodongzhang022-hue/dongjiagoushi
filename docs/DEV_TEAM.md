@@ -134,3 +134,51 @@ team.deliver_to_manager(task_id="登录模块", summary="小组完成交付")
 
 **一句话**：开发小组作为一个确定性编排的整体——一套循环 N 个开发，只做不判、
 客观验证、超限熔断、进度北极星管住循环、干完统一交付给经理。
+
+## 9. 接线驱动层（方案 A · 把 DevTeam 接成真实可跑链路）
+
+> 能力已就绪但「流程缺失」——执行流水线此前没有任何一处调用 DevTeamEngine，
+> 等于造了引擎没接线。本接线驱动层补齐总师方案 A 的 5 个接线点，让开发小组
+> 闭环真正跑起来（Issue #74 深化）。
+
+### 核心文件：`local-agent/dev_team_driver.py`
+
+把 DevTeamEngine 接到真实执行流水线的**接线驱动层**。对外主入口 `DevTeamDriver`：
+
+| 接线点 | 方法/位置 | 说明 |
+|---|---|---|
+| ① 建组入口 | `from_topology(topology, req, devs_per_team)` | 从拓扑 `lead`+`dev_N` 节点建 DevTeamEngine（dev 数取拓扑，默认 2） |
+| ② 驱动循环 | `run_round(dev_outputs)` / `drive()` | 确定性状态机 execute→verify→decide，不让 LLM 决定 |
+| ③ 进度北极星 | `advance(delta)` → `team.advance()` | 写 goal_meters，喂哨兵（停滞/横跳/重复错误拦截） |
+| ④ 整合交付 | `deliver()` + `aggregate()` | 全部 APPROVED 后 deliver_to_manager + 收口信息 |
+| ⑤ 路由/分形 | `orchestrator.run_pipeline` 的 lead 节点 hook | dev_enhanced 拓扑 lead 走驱动；agile/dag 不误触发 |
+
+### 关键约定
+
+- **dev 节点识别**：`dev_N` 必须严格匹配 `^dev_\d+$`（如 `dev_1`/`dev_2`）。
+  单独的 `develop` 节点（id="develop"）**不算**开发小组成员，避免把 dag/agile
+  的单个开发节点误判成小组成员。
+- **目标门控**：goal<=0 拒绝进入闭环（目标未量化不空转）；未显式给定时
+  `estimate_goal_total(req)` 按需求粗估。
+- **消费防重**：驱动消费掉的 `dev_N` 节点被标记 `consumed_dev_nodes`，
+  流水线跳过它们，避免下游重复 `_run_one`。
+
+### 端到端验证
+
+```bash
+bash local-agent/tests/test_dev_team_driver.sh   # 6 组信号灯（建组/驱动/熔断/北极星/端到端/路由）
+```
+
+```text
+▶ [DAG波次] [lead] 架构·小组长：任务细化/拆解（小组内 2 开发并行实现）
+   [开发小组] 建组=2开发 目标=4.0 轮次=5 终态=DONE 进度=100.0% 交付=True
+▶ [DAG波次] [dev_1] 架构·开发 …   [跳过] dev 节点 dev_1 已由开发小组闭环驱动消费
+▶ [DAG波次] [dev_2] 架构·开发 …   [跳过] dev 节点 dev_2 已由开发小组闭环驱动消费
+▶ [DAG波次] [review] 架构·评审 …  （仍执行）
+▶ [DAG波次] [test]   架构·测试 …  （仍执行）
+```
+
+---
+
+**一句话**：接线驱动层把「一套循环 N 个开发」从能力变成真实可跑链路——
+经理派发 → 小组长 lead 节点建组驱动 → dev 确定性循环 → 全部 APPROVED 整合交付。
