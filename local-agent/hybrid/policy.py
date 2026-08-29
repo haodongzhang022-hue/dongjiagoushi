@@ -73,9 +73,14 @@ class PolicyEngine(object):
             last = float(last_full_ts)
         else:
             try:
+                # 兼容 ISO 字符串
                 last = time.mktime(time.strptime(last_full_ts, "%Y-%m-%dT%H:%M:%S"))
             except Exception:  # noqa
-                return True
+                try:
+                    # 兼容 epoch 秒字符串
+                    last = float(last_full_ts)
+                except (TypeError, ValueError):  # noqa
+                    return True
         elapsed_days = (time.time() - last) / 86400.0
         return elapsed_days >= self.full_regression_days
 
