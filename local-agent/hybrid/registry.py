@@ -21,7 +21,7 @@ import json
 import os
 import threading
 
-__version__ = "v2.0"
+__version__ = "v2.1"
 
 # 单例锁（并发查询安全）
 _lock = threading.Lock()
@@ -90,18 +90,42 @@ def find_by_source(source_path):
 
     支持精确匹配和目录前缀匹配（如 "topology/" 匹配覆盖 topology/ 下所有文件的测试）。
     同时支持文件前缀匹配（如 "topology/router" 匹配 "topology/router.py"）。
+
+    v2.1 增强：同时兼容带/不带 `local-agent/` 前缀的路径。注册表 covers 统一
+    使用 `local-agent/` 前缀；调用方传 `local-agent/roles/manager.py` 或
+    `roles/manager.py` 均可命中，保证 `find_by_source` 命中一致。
     """
     tests = load()["tests"]
     hits = []
     sp = source_path.rstrip("/")  # 去尾斜杠方便比较
+    # 兼容：若源路径不带 local-agent/ 前缀，尝试补充后匹配（反之亦然）
+    variants = {sp}
+    if sp.startswith("local-agent/"):
+        variants.add(sp[len("local-agent/"):])
+    else:
+        variants.add("local-agent/" + sp)
+
     for test_path, info in tests.items():
         for covered in info.get("covers", []):
             cv = covered.rstrip("/")
-            # 精确匹配、covered 目录包含 source、或 source 目录包含 covered、或文件前缀匹配
-            if (sp == cv or
-                sp.startswith(cv + "/") or
-                cv.startswith(sp + "/") or
-                cv.startswith(sp)):
+            # cv 变体：注册表内 covers 已统一为 local-agent/ 前缀，但防御兼容
+            cv_variants = {cv}
+            if cv.startswith("local-agent/"):
+                cv_variants.add(cv[len("local-agent/"):])
+            else:
+                cv_variants.add("local-agent/" + cv)
+            matched = False
+            for s in variants:
+                for c in cv_variants:
+                    if (s == c or
+                        s.startswith(c + "/") or
+                        c.startswith(s + "/") or
+                        c.startswith(s)):
+                        matched = True
+                        break
+                if matched:
+                    break
+            if matched:
                 hits.append(test_path)
                 break
     return sorted(set(hits))

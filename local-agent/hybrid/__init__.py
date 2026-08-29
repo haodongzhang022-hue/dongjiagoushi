@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Hybrid 资源路由模块（Issue #57）+ 测试智能优化层（v2.0）
+Hybrid 资源路由模块（Issue #57）+ 测试智能优化层（v2.1）
 =========================================================
 把云端 CI 的 CPU 密集纯逻辑本地化，云端只保留 LLM 强相关操作。
 
@@ -9,7 +9,7 @@ Hybrid 资源路由模块（Issue #57）+ 测试智能优化层（v2.0）
   - hybrid.worker.LocalWorker           本地批量测试执行器
   - hybrid.sync.ResultSync              结果同步留痕
   - hybrid.cost.CostMonitor             成本监测与报表
-  - hybrid.registry.TestRegistry        集中测试注册表（v2.0 新增）
+  - hybrid.registry.TestRegistry        集中测试注册表（v2.1 增强）
   - hybrid.selector.IncrementalSelector 变更感知增量选择器（v2.0 新增）
 """
 from hybrid.router import HybridResourceRouter, RouteDecision, default_router
@@ -48,7 +48,7 @@ from hybrid.cost import (
     CostReporter, default_cost_reporter,
 )
 
-__version__ = "v2.0"
+__version__ = "v2.1"
 __all__ = [
     "HybridResourceRouter",
     "RouteDecision",
