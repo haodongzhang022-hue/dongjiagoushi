@@ -55,7 +55,7 @@ for t in ['micro','small','medium','large','huge']:
     res.append(t+':'+r['selected']+':'+('ok' if ok else 'ERR'))
 print(';'.join(res))
 ")
-check "5 档节点集全部通过 DagEngine 校验" "$R" "micro:agile:ok;small:agile:ok;medium:dag:ok;large:scatter:ok;huge:prefix:ok"
+check "5 档节点集全部通过 DagEngine 校验" "$R" "micro:agile:ok;small:agile:ok;medium:dev_enhanced:ok;large:scatter:ok;huge:prefix:ok"
 
 # 3. run_pipeline 端到端：micro→agile 实际执行 4 节点（不再硬编码 11 节点 dag）
 R=$(cd "$ROOT" && timeout 60 python3 -c "
@@ -81,7 +81,7 @@ f=r.get('fusion',{})
 print(f.get('selected','')+'|'+f.get('tier','')+'|'+str(len(r.get('steps',[]))))")
 check "run_pipeline huge→prefix(17步)" "$R" "prefix|huge|17"
 
-# 5. --no-fusion 回退老行为（不 consult 融合路由，无 fusion 字段，11 节点 dag）
+# 5. --no-fusion 回退老行为（不 consult 融合路由，无 fusion 字段，19 节点 dag）
 R=$(cd "$ROOT" && timeout 60 python3 -c "
 import sys,os,io,contextlib;sys.path.insert(0,'.')
 from data import admin;admin.init()

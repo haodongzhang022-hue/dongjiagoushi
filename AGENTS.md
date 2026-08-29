@@ -65,6 +65,7 @@
   - 架构·总师一给出架构方案，**架构·经理即可提前分工**（`plan` 只依赖 `architect`，不依赖 `develop`），不必等开发完成；
   - 下游环节（对齐/找工具/小组长）可与实现并行推进。
 - **开发分形扩展（多小组）**：开发任务按项目规模分形为多个小组并行（`fractal`），各小组内开发→小组长测试/整合→**统一向上交付**；小组内仍过大可递归再分形。
+- **开发增强配比（Dev-Ratio · Issue #74）**：开发是真正推进度的核心，辅助角色（评审/测试/对齐）过多则浪费、进度慢。每个分形小组可配置 `devs_per_team`（默认 **2，即"一套循环 2 个开发"**）——一个小组 = 1 小组长 + N 开发并行实现，辅助质量闸门抽到小组外，不挤占开发名额；`dev_ratio()` 量化开发密度，辅助过多时直观暴露浪费；配套 `dev_enhanced` 开发增强拓扑（产品→总师→小组长→2开发→评审→测试→交付，8 节点）供 router 显式选用（`--topo dev_enhanced`）。
 - **开发小组闭环机制（Dev Team · Issue #74 深化结构）**：开发是真正持续推进度的核心，辅助多则浪费——把「一个开发小组」（小组长 + N 个开发）作为**一个确定性编排的整体**，一套循环配 **N 个开发（默认 2）**，辅助质量闸门抽到小组外不挤占开发名额：
   - **执行-验证分离**：dev 只负责「做」，不负责「判」；产出是否合格由**客观验证器**（测试/lint）裁定，绝不自行裁定"我完成了"；
   - **确定性状态机**：`DevTeamEngine.decide()` 用代码决定——全部 dev 产出 APPROVED 后小组长才整合统一交付，未通过客观验证不可交付，不让 LLM 决定「下一步/是否结束」；
@@ -72,8 +73,9 @@
   - **进度北极星监督**：写 `goal_meters`，停滞/横跳/重复错误由监控哨兵拦截；
   - **记录优先于对话**：过程只写进度留痕 + 存档，**不打断经理**；干完 `deliver_to_manager` 一次性交付（含进度回放）。
   - 承载：`local-agent/dev_team.py`（DevTeamEngine）+ `local-agent/dev_team_kit/`（DevTeamAbility 全员挂载）+ `docs/DEV_TEAM.md`（设计文档）+ `local-agent/tests/test_dev_team.sh`（8 组信号灯）。
+  - **接线驱动层（方案 A · 把能力接成真实可跑链路）**：能力就绪但流程缺失——此前流水线无一处调用 DevTeamEngine。`local-agent/dev_team_driver.py` 补齐总师方案 A 的 5 个接线点（①建组入口 ②驱动循环 ③进度北极星 ④整合交付 ⑤路由/分形），`orchestrator.run_pipeline` 的 `lead` 节点接上驱动，`dev_enhanced` 拓扑走开发小组闭环、agile/dag 不误触发；测试 `test_dev_team_driver.sh`（6 组信号灯）验证端到端接线。
 - **市场获客分层（通用基建）**：工具层 / 数据层 / 渠道层 / 客服层 / 销售层 为平台级通用能力，既服务对外获客，也服务对内需求开发，可多次复用。
-- 承载：`local-agent/team.yaml`（DAG 定义）+ `local-agent/graph.py`（DAG 引擎）+ `local-agent/fractal.py`（分形引擎）。详见 `docs/FRAMEWORK_V2.md`。
+- 承载：`local-agent/team.yaml`（DAG 定义）+ `local-agent/graph.py`（DAG 引擎）+ `local-agent/fractal.py`（分形引擎 + devs_per_team）。详见 `docs/FRAMEWORK_V2.md`。
 
 ### 分发递进深度模型（dispatch depth L1→L4 · 固定规则）
 
