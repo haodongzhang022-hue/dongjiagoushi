@@ -141,4 +141,7 @@ deepseek harness / CLI / agent 运行时 / HTTP 客户端）能程序化调用�
 | 规则绑定 | `local-agent/dev_standard/rules.md` + `AGENTS.md` |
 | 模块说明 | `local-agent/dev_standard/README.md` |
 | 测试信号灯 | `tests/test_dev_standard.sh` |
+| 宿主接入 | `local-agent/dev_standard/host.py` |
+| M5 测试 | `tests/test_dev_standard_host.sh` |
+| CI 接线 | `scripts/standard-check.sh` + `.cnb.yml` |
 | 合规报告模板 | `docs/templates/standard-report.md` |
