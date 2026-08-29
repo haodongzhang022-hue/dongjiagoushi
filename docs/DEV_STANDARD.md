@@ -94,11 +94,33 @@
 | M2 | CLI + MCP 接口 + 文档 + 测试信号灯 | ✅ 已实施 |
 | M3 | BaseRole 挂载 StandardAbility + AGENTS.md 规则绑定 | ✅ 已实施 |
 | M4 | 测试信号灯运行验证 + PR | 本次交付 |
-| M5 | MCP 宿主接入（第二阶段扩展） | 预留 |
+| M5 | MCP 宿主接入（StandardMCPHost + JSON host + CI 接线） | ✅ 已实施 |
 
 **测试验证**：`tests/test_dev_standard.sh` 信号灯覆盖——规范注册表完整性、确定性检查
 （含 hard/soft 判定）、CLI 可用性、BaseRole 挂载、各 check_* 逻辑（base main / 解耦 /
 接口 / 冲突 / 测试文档 / 裸 except / 敏感信息 / 留痕 / 声明 / 进度尺 / 自测 / 范围）。
+`tests/test_dev_standard_host.sh` 信号灯覆盖 M5 宿主接入——宿主工具注册 / 按名调用 /
+未知工具容错 / JSON host RPC 契约 / CLI 入口 / CI 接线脚本阻断行为。
+
+## 七·五、M5 · MCP 宿主接入（Issue #83 第二阶段）
+
+把 `standard.*` MCP 工具**真正接入可运行宿主**，让外部宿主（cnb.cool 流水线 /
+deepseek harness / CLI / agent 运行时 / HTTP 客户端）能程序化调用开发规范能力：
+
+- **`local-agent/dev_standard/host.py`**（`StandardMCPHost`）薄适配宿主层：
+  - `register_tools()` / `list_tools()` —— 宿主注册 `standard.*` 工具清单；
+  - `call(tool_name, params)` —— 按名调用（未知工具容错，返回 available）；
+  - `serve(port)` —— 起 JSON host 服务（POST /rpc，GET /health /tools），
+    供 HTTP 客户端 / CI 远程调用，与 dispatcher webhook/webui 同款 `http.server` 风格；
+  - `overview()` —— 宿主接入俯瞰（工具清单 + 规范注册表摘要）。
+- **CLI 入口** `python -m dev_standard.host list|call|overview|serve`。
+- **CI 接线** `scripts/standard-check.sh`：流水线到达即程序化执行规范检查，
+  **hard 失败 → 退出码 1 阻断流水线**（`blocked_on: standard_violation`）；
+  `.cnb.yml` 的 `pull_request` 阶段已接入 `dev-standard check`。
+- **接口导出**：`dev_standard.get_host(operator)` 懒加载宿主实例，避免 `-m` 双导入告警。
+
+> 调用契约与 MCP 管线一致：`standard.*` 工具名 + params JSON → `{ok, data/error}`。
+> 所有逻辑收口到 `StandardAbility` / `call_mcp`，host 层只做路由分发——**解除耦合**。
 
 ## 八、与现有体系关系
 

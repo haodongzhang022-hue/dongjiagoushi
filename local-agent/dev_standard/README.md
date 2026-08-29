@@ -51,3 +51,31 @@ python -m dev_standard.cli check-all --target '{"pr_info": {...}}'
 - **L3 可选**（提示）：预留扩展
 
 详见 `docs/DEV_STANDARD.md`（体系设计）与 `rules.md`（规则绑定）。
+
+## MCP 宿主接入（M5 · Issue #83）
+
+把 `standard.*` 工具接入可运行宿主，供外部宿主程序化调用：
+
+```python
+from dev_standard import get_host
+host = get_host("开发")
+host.register_tools()                 # 工具清单（供宿主注册）
+host.call("standard.summary", {})     # 按名调用
+host.call("standard.enforced", {"stage": "pre_pr"})
+host.overview()                        # 宿主接入俯瞰
+# host.serve(port=8701)               # 起 JSON host 服务（POST /rpc）
+```
+
+CLI / CI：
+
+```bash
+python -m dev_standard.host list                  # 宿主工具清单
+python -m dev_standard.host call standard.summary '{}'
+python -m dev_standard.host serve --port 8701     # 起 JSON host 服务
+# CI 接线（hard 失败 → 阻断流水线）
+bash scripts/standard-check.sh check-pr --target main --source auto/x-1 \
+    --test-files "tests/a.sh" --docs-files "docs/A.md"
+bash scripts/standard-check.sh check-code --file local-agent/x.py
+```
+
+调用契约与 MCP 管线一致：`standard.*` 工具名 + params JSON → `{ok, data/error}`。

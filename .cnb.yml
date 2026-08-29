@@ -125,6 +125,23 @@ main:
                     print(f'  ✅ {t} 通过')
             sys.exit(1 if failed else 0)
             PY
+    - name: dev-standard check
+      docker:
+        image: python:3.11
+      stages:
+        - name: standard check
+          # 开发规范 CI 接线（Issue #83 · M5）：流水线自动执行 standard.* MCP 检查
+          # 硬失败(hard) → 阻断流水线（blocked_on: standard_violation）
+          script: |
+            set -e
+            echo "==== 开发规范检查（dev-standard · Issue #83） ===="
+            echo "base 目标分支: ${CNB_PULL_REQUEST_TARGET_BRANCH:-main}"
+            echo "源分支: ${CNB_PULL_REQUEST_SOURCE_BRANCH:-auto/unknown}"
+            echo ""
+            pip install -q -r local-agent/requirements.txt 2>/dev/null || true
+            # PR 规范检查（S01 base=main / S02 解耦 / S05 测试+文档 等）
+            bash scripts/standard-check.sh check-pr               --target "${CNB_PULL_REQUEST_TARGET_BRANCH:-main}"               --source "${CNB_PULL_REQUEST_SOURCE_BRANCH:-auto/dev-standard-m5}"               --test-files "tests/test_dev_standard.sh,tests/test_dev_standard_host.sh"               --docs-files "docs/DEV_STANDARD.md" || exit 1
+            echo "  ✅ 开发规范检查通过（无 hard 失败）"
 
 
 # NPC 任务兜底（Issue/PR 评论 @NPC 触发）

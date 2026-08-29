@@ -41,3 +41,15 @@ __all__ = [
     "specs_by_enforce_at",
     "summary",
 ]
+
+# ---- M5 宿主接入（Issue #83 · 懒加载避免 -m 双导入告警）----
+def get_host(operator="系统"):
+    """获取 StandardMCPHost 宿主实例（懒加载，避免 __init__ 提前导入 host 模块）。
+
+    供外部宿主/agent 运行时按需获取，与 mcp.call_mcp 等价但带宿主封装。
+    """
+    from .host import StandardMCPHost
+    return StandardMCPHost(operator=operator)
+
+
+__all__ = __all__ + ["get_host"]
