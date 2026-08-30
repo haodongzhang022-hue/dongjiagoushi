@@ -179,6 +179,33 @@ def cmd_all(args):
     }, ensure_ascii=False, indent=2))
 
 
+# ============ 云端批量打包（CloudBatch）CLI 接线 ============
+
+def _batch():
+    from hybrid.batch import CloudBatch
+    return CloudBatch()
+
+
+def cmd_batch_enqueue(args):
+    b = _batch()
+    r = b.enqueue(args.title, description=args.description or "",
+                  project=args.project or "", location=args.location or "",
+                  priority=args.priority or "P2 中",
+                  acceptance=args.acceptance.split("|") if args.acceptance else [])
+    print(json.dumps(r, ensure_ascii=False, indent=2))
+
+
+def cmd_batch_status(args):
+    b = _batch()
+    print(json.dumps(b.status(), ensure_ascii=False, indent=2))
+
+
+def cmd_batch_flush(args):
+    b = _batch()
+    r = b.flush(dry_run=args.dry, post_comment=args.comment)
+    print(json.dumps(r, ensure_ascii=False, indent=2))
+
+
 # ============ 测试智能优化层（v2.0 T3-T6）CLI 接线 ============
 
 def _policy():
@@ -289,6 +316,23 @@ def main(argv=None):
     p.add_argument("--dry", action="store_true")
     p.add_argument("--batch", default="hybrid-local")
     p.set_defaults(fn=cmd_all)
+
+    p = sub.add_parser("batch", help="云端批量打包（攒批防频繁唤醒）")
+    bs = p.add_subparsers(dest="batch_cmd")
+    pe = bs.add_parser("enqueue", help="任务入批（本地 0 成本）")
+    pe.add_argument("title", help="任务标题（必填）")
+    pe.add_argument("--description", default=None, help="任务描述")
+    pe.add_argument("--project", default=None, help="所属项目")
+    pe.add_argument("--location", default=None, help="成果落地路径")
+    pe.add_argument("--priority", default=None, help="P0 紧急/P1 高/P2 中/P3 低")
+    pe.add_argument("--acceptance", default=None, help="验收条件，用 | 分隔多条")
+    pe.set_defaults(fn=cmd_batch_enqueue)
+    ps = bs.add_parser("status", help="查看攒批队列")
+    ps.set_defaults(fn=cmd_batch_status)
+    pf = bs.add_parser("flush", help="提交攒批到云端（一次唤醒）")
+    pf.add_argument("--dry", action="store_true", help="只生成不创建")
+    pf.add_argument("--comment", action="store_true", help="提交后补 @CodeBuddy 评论")
+    pf.set_defaults(fn=cmd_batch_flush)
 
     p = sub.add_parser("smart", help="智能优化一键（增量+缓存+并行+成本）")
     p.add_argument("--root", default=None)

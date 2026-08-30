@@ -121,9 +121,20 @@ class HybridResourceRouter(object):
         decisions = {}
         local_names, cloud_names = [], []
         for item in tasks:
+            # 防御：允许纯字符串（自动补 0.0 估算），避免把字符当字段用
+            if isinstance(item, str):
+                item = (item, 0.0, 0.0)
             name = item[0]
             lte = item[1] if len(item) > 1 else 0.0
             cce = item[2] if len(item) > 2 else 0.0
+            try:
+                lte = float(lte)
+            except (TypeError, ValueError):
+                lte = 0.0
+            try:
+                cce = float(cce)
+            except (TypeError, ValueError):
+                cce = 0.0
             d = self.route(name, lte, cce)
             decisions[name] = d
             if d.target == "local":

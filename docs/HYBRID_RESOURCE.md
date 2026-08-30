@@ -84,3 +84,52 @@ python3 -m hybrid.cli all --dry
 - [x] 结果同步回数据层留痕（可回溯）
 - [x] 成本报表量化节省
 - [x] `.cnb.yml` 云端仅保留 LLM 强相关操作
+---
+
+## v1.1 跑通记录（2026-08-30 · Windows 本地实跑）
+
+> 之前「没跑通测试」的根因与修复，以及新增强的云端批量打包（防频繁唤醒）。
+
+### 修复的故障点
+
+| 故障 | 根因 | 修复 |
+| --- | --- | --- |
+| F1 CRLF | 53/53 测试脚本 CRLF（core.autocrlf=true、无 .gitattributes）→ bash 报 python3\r not found | 新增 .gitattributes（*.sh text eol=lf 等），222 文件字节级转 LF |
+| F2 cost 链崩溃 | route_many 对字符串入参不防御（len>2 把字符当字段），cost.report float += str 崩溃 | router 字符串→元组 + float 转换；cost 防御缺失/字符串/非 RouteDecision |
+| F5/F6 Windows 执行 | bash 输出非 UTF-8 字节解码崩溃；bash.exe 是 WSL bash 不认 Windows 路径 | encoding='utf-8', errors='replace'；_pick_bash 探测 + _wsl_popen_cmd 路径转 /mnt/<盘>/... |
+
+### 真实执行结果（2026-08-30）
+
+```json
+{ "route": {"total": 37, "local": 37, "cloud": 0},
+  "run":   {"total": 37, "pass": 37, "fail": 0, "total_duration": 53.88},
+  "sync":  {"synced": true, "target": "data_layer"},
+  "cost":  {"total_cloud_cpu": 696.0, "localized_cpu": 696.0,
+            "net_save": 696.0, "localization_ratio": 1.0} }
+```
+
+### 新增：CloudBatch 云端批量打包（batch.py）
+
+**动机**：云端 CodeBuddy 每次唤醒有冷启动/上下文重建成本，频繁唤醒浪费云端 CPU。CPU 密集活已本地化，剩给云端的 LLM 强相关任务应**攒批**后一次唤醒处理多个。
+
+- enqueue(title, ...)：任务入批（本地 0 成本）
+- status()：攒批队列状态（ready = 攒够 min_tasks）
+- flush(dry_run)：一次提交云端（默认 1 Issue 打包多任务，按任务声明协议内嵌 yaml 元数据）
+- 秘钥：环境变量 cnbcooldong（实测 API 认证成功）；目标仓库 CNB_REPO 可覆盖
+- CLI：python -m hybrid.cli batch enqueue|status|flush
+
+**实测**：2 任务攒批 → 一次 flush → 云端 yunduanjiaohu#31 批量任务单创建成功。
+
+### 一键使用
+
+```bash
+# 本地跑全部 CPU 测试 + 留痕 + 成本报表
+bash scripts/local-exec.sh --real
+# 或直接：
+python -m hybrid.cli all --timeout 300 --batch <batch名>
+
+# 云端任务攒批（本地零成本）→ 一次唤醒
+python -m hybrid.cli batch enqueue "任务" --project xxx
+python -m hybrid.cli batch status
+python -m hybrid.cli batch flush     # 攒够后一次提交
+```

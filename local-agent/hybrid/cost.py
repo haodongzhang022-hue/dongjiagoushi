@@ -32,9 +32,19 @@ class CostMonitor(object):
         localized_cpu = 0.0       # 被本地化的云端 CPU 核·分钟
         cloud_remain = 0.0        # 仍留云端的 CPU 核·分钟
         for name, dec in d.items():
-            cce = dec.cloud_cpu_est
+            # 防御：cloud_cpu_est 可能缺失/字符串/非 RouteDecision（旧数据/直接 dict）
+            cce = getattr(dec, "cloud_cpu_est", 0.0)
+            try:
+                cce = float(cce)
+            except (TypeError, ValueError):
+                cce = 0.0
+            target = getattr(dec, "target", None)
+            if target is None and isinstance(dec, dict):
+                target = dec.get("target")
+            if target is None:
+                target = "cloud"
             total_cloud_cpu += cce
-            if dec.target == "local":
+            if target == "local":
                 localized_cpu += cce
             else:
                 cloud_remain += cce
