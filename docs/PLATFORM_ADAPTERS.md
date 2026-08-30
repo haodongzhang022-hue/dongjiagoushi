@@ -55,6 +55,12 @@
   ```
 - **活动规则适配**：harness 逐节点调度时，读取 `team.yaml` 的 `dag`（或回退 `steps`），每个节点执行对应角色模块；接力卡持久化到 `state/`，支持 `--resume` 续跑（对应 `[打断]`）、`--role` 单角色触发（对应 `[触发]`）。
 - **要点**：harness 的「任务分发 / 上下文传递」直接复用 `orchestrator.py` + `relay.py`，无需重写。
+- **当前落地状态（2026-08-30）**：适配插件 `@dsh-dongjiagoushi/adapter`（`dsh-dongjiagoushi-adapter/`，workspace 内）已装配为 DSH web profile bundle（含白名单注册），暴露 21 个工具：
+  - dev-standard 6（standard.list/get/enforced/summary/check/report）+ label 13（progress/status/labels/apply/remove/propose/review/auto/depends/next/priority/node/specs）；
+  - collab 协作层 10 个（新增）：`collab.roles/resolve`（角色目录）、`relay.write/read/list`（接力卡五要素，落盘 `state/relay/`）、`issue.list/read/comment`（本地 Issue 留痕）、`memory.store/query/keys`（跨会话记忆）。
+  - Agent Directory：`dsh-collaboration-rules.yaml` 已注册 @架构·秘书/总师/经理/开发/评审/交付 6 个外部 agent（endpoint=local），DSH 会话可直接 @ 触发。
+  - 协作范式映射：CNB「Issue 评论接力卡 + [触发:X]」→ DSH「relay.* + collab.roles + issue.comment」；跨文件夹 = 绝对根目录（DONGJIAGOUSHI_ROOT）下 repo/issues/state 三区；记忆 = memory.* 本地 KV（可后续接 LanceDB）；PR = git remote（cnb.cool）经 pwsh git 操作。
+  - 待办：dispatch（四层分发）、depth（七层深度）、peer（同岗协作）、sentinel（哨兵）引擎尚在 Python local-agent，下一迭代接桥或移植。
 
 ### 4.3 MCP（Model Context Protocol）蜂群调度
 - **定位**：把体系能力包装成 MCP 服务器暴露的工具，供蜂群 agent（可多个并行）通过标准 MCP 协议调用。
