@@ -47,6 +47,9 @@ from hybrid.policy import (
 from hybrid.cost import (
     CostReporter, default_cost_reporter,
 )
+from hybrid.quota import (
+    QuotaGuard, default_guard,
+)
 
 __version__ = "v2.1"
 __all__ = [
@@ -85,4 +88,7 @@ __all__ = [
     "default_policy",
     "CostReporter",
     "default_cost_reporter",
+    # quota 配额护栏（M6）
+    "QuotaGuard",
+    "default_guard",
 ]

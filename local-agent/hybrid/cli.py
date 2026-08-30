@@ -258,6 +258,28 @@ def _cost_reporter():
 
 
 
+
+# ============ 云端配额护栏（QuotaGuard）CLI 接线（M6 · Issue #90） ============
+
+def _quota():
+    from hybrid.quota import QuotaGuard
+    return QuotaGuard()
+
+
+def cmd_quota(args):
+    q = _quota()
+    if args.action == "status":
+        print(json.dumps(q.quota_status(), ensure_ascii=False, indent=2))
+    elif args.action == "meter":
+        r = q.meter_consume(args.task, float(args.amount), note=args.note or "")
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+    elif args.action == "credit":
+        r = q.credit_localized(float(args.amount), note=args.note or "")
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+    elif args.action == "audit":
+        print(json.dumps(q.audit(), ensure_ascii=False, indent=2))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="hybrid.cli", description="Hybrid 资源路由 CLI")
     sub = ap.add_subparsers(dest="cmd")
@@ -302,6 +324,13 @@ def main(argv=None):
     p.add_argument("--full", action="store_true", help="强制全量回归")
     p.add_argument("--last-full-ts", default=None, help="上次全量回归时间戳")
     p.set_defaults(fn=cmd_smart)
+
+    p = sub.add_parser("quota", help="云端核时配额护栏")
+    p.add_argument("action", choices=["status", "meter", "credit", "audit"])
+    p.add_argument("--task", default=None, help="任务 id（meter 用）")
+    p.add_argument("--amount", default="0", help="核·分钟数（meter/credit 用）")
+    p.add_argument("--note", default=None, help="备注")
+    p.set_defaults(fn=cmd_quota)
 
     args = ap.parse_args(argv)
     if not getattr(args, "fn", None):
