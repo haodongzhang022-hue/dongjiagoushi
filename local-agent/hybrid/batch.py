@@ -170,8 +170,20 @@ class CloudBatch(object):
         return result
 
     # ---------- CNB API ----------
+    def _host_env(self, name):
+        """在 WSL 里读 Windows 宿主环境变量（WSL 默认不继承 Windows env）。"""
+        try:
+            import subprocess as sp
+            out = sp.run(["cmd.exe", "/c", "echo %%%s%%" % name],
+                         capture_output=True, text=True, timeout=10)
+            v = (out.stdout or "").strip().strip("\r")
+            return v if v and "%" not in v else None
+        except Exception:  # noqa
+            return None
+
     def _headers(self):
-        token = os.environ.get("cnbcooldong") or os.environ.get("CNB_TOKEN")
+        token = (os.environ.get("cnbcooldong") or os.environ.get("CNB_TOKEN")
+                 or self._host_env("cnbcooldong") or self._host_env("CNB_TOKEN"))
         if not token:
             raise RuntimeError("缺少 cnbcooldong/CNB_TOKEN 环境变量（CNB 访问令牌）")
         return {
