@@ -179,6 +179,27 @@ def cmd_all(args):
     }, ensure_ascii=False, indent=2))
 
 
+# ============ 云端配额护栏（QuotaGuard）CLI 接线 ============
+
+def _quota():
+    from hybrid.quota import QuotaGuard
+    return QuotaGuard()
+
+
+def cmd_quota(args):
+    q = _quota()
+    if args.action == "status":
+        print(json.dumps(q.quota_status(), ensure_ascii=False, indent=2))
+    elif args.action == "meter":
+        r = q.meter_consume(args.task, float(args.amount), note=args.note or "")
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+    elif args.action == "credit":
+        r = q.credit_localized(float(args.amount), note=args.note or "")
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+    elif args.action == "audit":
+        print(json.dumps(q.audit(), ensure_ascii=False, indent=2))
+
+
 # ============ 云端批量打包（CloudBatch）CLI 接线 ============
 
 def _batch():
@@ -316,6 +337,13 @@ def main(argv=None):
     p.add_argument("--dry", action="store_true")
     p.add_argument("--batch", default="hybrid-local")
     p.set_defaults(fn=cmd_all)
+
+    p = sub.add_parser("quota", help="云端核时配额护栏")
+    p.add_argument("action", choices=["status", "meter", "credit", "audit"])
+    p.add_argument("--task", default=None, help="任务 id（meter 用）")
+    p.add_argument("--amount", default="0", help="核·分钟数（meter/credit 用）")
+    p.add_argument("--note", default=None, help="备注")
+    p.set_defaults(fn=cmd_quota)
 
     p = sub.add_parser("batch", help="云端批量打包（攒批防频繁唤醒）")
     bs = p.add_subparsers(dest="batch_cmd")

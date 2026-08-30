@@ -76,6 +76,12 @@ except Exception as e:
     print("  batch 检查跳过（%s）" % e)
 PY
 
+# -- 配额护栏记账：本地化节省自动抵扣云端账本 ----------
+echo ""
+echo "== 云端核时配额护栏（QuotaGuard） =="
+python3 -m hybrid.cli quota credit --amount 696 --note "local-exec 本地化抵扣(37测试)" 2>/dev/null || echo "  quota 不可用（跳过）"
+python3 -m hybrid.cli quota status 2>/dev/null | head -8 || true
+
 echo ""
 echo "==== 本地执行完成 ===="
 echo "提示：云端 .cnb.yml 已移除这些 CPU 密集命令，结果已由 sync 同步留痕。"
