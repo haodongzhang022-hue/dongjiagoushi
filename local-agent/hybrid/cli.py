@@ -306,6 +306,40 @@ def _cost_reporter():
 
 
 
+def _station():
+    from hybrid.station import StationAnchor
+    return StationAnchor()
+
+
+def cmd_station(args):
+    """站点锚定模型 CLI：list / anchor / plan / replay / cache / review。"""
+    a = _station()
+    import json as _json
+    if args.action == "list":
+        print(_json.dumps(a.list_stations(), ensure_ascii=False, indent=2))
+    elif args.action == "anchor":
+        rec = a.anchor(role=args.role, branch=args.branch,
+                       commit=args.commit, tag=args.tag, note=args.note or "")
+        print(_json.dumps(rec, ensure_ascii=False, indent=2))
+    elif args.action == "plan":
+        plan = a.replay_plan(from_role=args.from_role, to_role=args.to_role)
+        print(_json.dumps(plan, ensure_ascii=False, indent=2))
+    elif args.action == "replay":
+        plan = a.replay_apply(from_role=args.from_role, to_role=args.to_role,
+                              dry=args.dry)
+        print(_json.dumps(plan, ensure_ascii=False, indent=2))
+    elif args.action == "cache":
+        print(a.build_cache_key(role=args.role, suffix=args.suffix or "tests"))
+    elif args.action == "review":
+        if args.verdict:
+            r = a.review_round(args.role, args.verdict)
+        elif args.reset:
+            r = a.review_reset(args.role)
+        else:
+            r = a.review_status(args.role)
+        print(_json.dumps(r, ensure_ascii=False, indent=2))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="hybrid.cli", description="Hybrid 资源路由 CLI")
     sub = ap.add_subparsers(dest="cmd")
@@ -337,6 +371,21 @@ def main(argv=None):
     p.add_argument("--dry", action="store_true")
     p.add_argument("--batch", default="hybrid-local")
     p.set_defaults(fn=cmd_all)
+
+    p = sub.add_parser("station", help="站点锚定模型（M1-M3 + M4缓存 + M5评审闸门）")
+    p.add_argument("action", choices=["list", "anchor", "plan", "replay", "cache", "review"])
+    p.add_argument("--role", default="local", help="站点角色（cloud/local）")
+    p.add_argument("--branch", default=None, help="分支（anchor 用）")
+    p.add_argument("--commit", default=None, help="commit（anchor 用）")
+    p.add_argument("--tag", default=None, help="标签（anchor 用）")
+    p.add_argument("--note", default=None, help="备注")
+    p.add_argument("--from-role", default="cloud", help="源站点（plan/replay 用）")
+    p.add_argument("--to-role", default="local", help="目标站点（plan/replay 用）")
+    p.add_argument("--suffix", default="tests", help="缓存键后缀（cache 用）")
+    p.add_argument("--verdict", default=None, help="评审结论（review 用：merge/fix_bug/...）")
+    p.add_argument("--reset", action="store_true", help="评审通过后复位轮次")
+    p.add_argument("--dry", action="store_true", help="演练模式（replay 不真改 git）")
+    p.set_defaults(fn=cmd_station)
 
     p = sub.add_parser("quota", help="云端核时配额护栏")
     p.add_argument("action", choices=["status", "meter", "credit", "audit"])

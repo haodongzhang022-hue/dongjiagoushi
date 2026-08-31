@@ -16,6 +16,7 @@ from hybrid.router import HybridResourceRouter, RouteDecision, default_router
 from hybrid.worker import LocalWorker, default_worker
 from hybrid.sync import ResultSync, default_sync
 from hybrid.cost import CostMonitor, default_monitor
+from hybrid.station import StationAnchor, default_anchor
 
 # 子模块直接引用
 from hybrid import registry as registry
@@ -59,6 +60,8 @@ __all__ = [
     "default_sync",
     "CostMonitor",
     "default_monitor",
+    "StationAnchor",
+    "default_anchor",
     "registry",
     "selector",
     # registry 便捷函数
