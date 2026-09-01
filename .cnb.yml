@@ -153,7 +153,7 @@ main:
     - name: npc go
       type: npc:go
       options:
-        role: "架构·总师"   # 对应 .cnb/settings.yml 中的角色（兜底人设）
+        role: "架构·秘书"   # 对应 .cnb/settings.yml 中的角色（兜底人设）
           # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
           # model: hy3    # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
           # model: glm-5  # GLM 模型
