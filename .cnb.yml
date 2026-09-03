@@ -114,16 +114,12 @@ main:
             for t in selected:
                 print(f'    bash {t}')
 
-            failed = False
-            for t in selected:
-                print(f'\n==== 运行: {t} ====')
-                rc = subprocess.call(['bash', t], cwd='.')
-                if rc != 0:
-                    print(f'  ❌ {t} 失败')
-                    failed = True
-                else:
-                    print(f'  ✅ {t} 通过')
-            sys.exit(1 if failed else 0)
+            # ---- 整批计划执行（Issue #93）：把本轮选定的一批测试作为一个批次计划，在
+            #      单次 CI 构建内整批跑完 + 统一 sync/cost/quota 收尾，而非逐脚本独立构建
+            #      （BusRunner · scripts/ci-bus-batch.py）----
+            print(f'  整批计划执行（BusRunner · 单次构建内一批跑完 + 统一 sync/cost/quota）:')
+            rc = subprocess.call(['python3', 'scripts/ci-bus-batch.py'] + selected, cwd='.')
+            sys.exit(rc)
             PY
     - name: dev-standard check
       docker:
