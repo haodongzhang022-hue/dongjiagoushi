@@ -179,6 +179,43 @@ def cmd_all(args):
     }, ensure_ascii=False, indent=2))
 
 
+# ============ 公交车式批量测试计划执行器（BusRunner）CLI 接线 ============
+
+def _bus():
+    from hybrid.bus import BusRunner
+    return BusRunner(dry_run=False)
+
+
+def cmd_bus_enqueue(args):
+    b = _bus()
+    r = b.enqueue(args.tests, source=args.source or "cli",
+                  note=args.note or "bus enqueue")
+    print(json.dumps(r, ensure_ascii=False, indent=2))
+
+
+def cmd_bus_status(args):
+    b = _bus()
+    print(json.dumps(b.status(), ensure_ascii=False, indent=2))
+
+
+def cmd_bus_dispatch(args):
+    # 立即整批发车：把队列里全部待跑测试作为一批计划，一次构建跑完
+    from hybrid.bus import BusRunner
+    b = BusRunner(dry_run=args.dry, timeout=args.timeout,
+                  interval=args.interval, parallel=args.parallel)
+    plan = b.dispatch(extra_tests=args.tests or None, note=args.note or "bus dispatch")
+    print(json.dumps(plan, ensure_ascii=False, indent=2))
+
+
+def cmd_bus_tick(args):
+    # 定时哨兵：到点且队列非空才发车（公交车逻辑），否则等下一班
+    from hybrid.bus import BusRunner
+    b = BusRunner(dry_run=args.dry, timeout=args.timeout,
+                  interval=args.interval, parallel=args.parallel)
+    plan = b.tick(extra_tests=args.tests or None, note=args.note or "bus tick")
+    print(json.dumps(plan, ensure_ascii=False, indent=2))
+
+
 # ============ 云端配额护栏（QuotaGuard）CLI 接线 ============
 
 def _quota():
@@ -410,6 +447,31 @@ def main(argv=None):
     pf.add_argument("--dry", action="store_true", help="只生成不创建")
     pf.add_argument("--comment", action="store_true", help="提交后补 @CodeBuddy 评论")
     pf.set_defaults(fn=cmd_batch_flush)
+
+    p = sub.add_parser("bus", help="公交车式批量测试计划执行器（攒批一次构建跑完）")
+    bs2 = p.add_subparsers(dest="bus_cmd")
+    be = bs2.add_parser("enqueue", help="测试入列（0 成本，等发车）")
+    be.add_argument("tests", nargs="+", help="待跑测试脚本")
+    be.add_argument("--source", default=None, help="入列来源")
+    be.add_argument("--note", default=None, help="备注")
+    be.set_defaults(fn=cmd_bus_enqueue)
+    bs2.add_parser("status", help="站台信息（队列/下一班车）").set_defaults(fn=cmd_bus_status)
+    bd = bs2.add_parser("dispatch", help="立即整批发车（跑完队列全部，一次构建）")
+    bd.add_argument("tests", nargs="*", help="可选临时追加测试")
+    bd.add_argument("--dry", action="store_true", help="演练不真跑")
+    bd.add_argument("--timeout", type=int, default=600)
+    bd.add_argument("--interval", type=int, default=900)
+    bd.add_argument("--parallel", type=int, default=4)
+    bd.add_argument("--note", default=None)
+    bd.set_defaults(fn=cmd_bus_dispatch)
+    bt = bs2.add_parser("tick", help="定时哨兵：到点且非空才发车")
+    bt.add_argument("tests", nargs="*", help="可选临时追加测试")
+    bt.add_argument("--dry", action="store_true", help="演练不真跑")
+    bt.add_argument("--timeout", type=int, default=600)
+    bt.add_argument("--interval", type=int, default=900)
+    bt.add_argument("--parallel", type=int, default=4)
+    bt.add_argument("--note", default=None)
+    bt.set_defaults(fn=cmd_bus_tick)
 
     p = sub.add_parser("smart", help="智能优化一键（增量+缓存+并行+成本）")
     p.add_argument("--root", default=None)

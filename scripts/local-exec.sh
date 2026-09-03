@@ -82,6 +82,12 @@ echo "== 云端核时配额护栏（QuotaGuard） =="
 python3 -m hybrid.cli quota credit --amount 696 --note "local-exec 本地化抵扣(37测试)" 2>/dev/null || echo "  quota 不可用（跳过）"
 python3 -m hybrid.cli quota status 2>/dev/null | head -8 || true
 
+# -- 公交车式攒批调度：到点且队列非空才整批发车（Issue #90 收尾） ----------
+echo ""
+echo "== 公交车式批量测试调度（BusRunner·15min一班） =="
+python3 -m hybrid.cli bus tick --real 2>/dev/null || echo "  bus 不可用（跳过）"
+python3 -m hybrid.cli bus status 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print('  队列 %d 个待跑 / 下一班车 %d s 后' % (d['queued'], d['due_in_seconds']))" 2>/dev/null || true
+
 echo ""
 echo "==== 本地执行完成 ===="
 echo "提示：云端 .cnb.yml 已移除这些 CPU 密集命令，结果已由 sync 同步留痕。"

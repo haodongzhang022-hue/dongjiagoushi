@@ -17,6 +17,7 @@ from hybrid.worker import LocalWorker, default_worker
 from hybrid.sync import ResultSync, default_sync
 from hybrid.cost import CostMonitor, default_monitor
 from hybrid.station import StationAnchor, default_anchor
+from hybrid.bus import BusRunner, default_bus
 
 # 子模块直接引用
 from hybrid import registry as registry
@@ -24,6 +25,7 @@ from hybrid import selector as selector
 from hybrid import cache as cache
 from hybrid import parallel as parallel
 from hybrid import policy as policy
+from hybrid import bus as bus
 
 # 便捷函数引用（registry 模块内可直接调用）
 from hybrid.registry import (
@@ -62,6 +64,8 @@ __all__ = [
     "default_monitor",
     "StationAnchor",
     "default_anchor",
+    "BusRunner",
+    "default_bus",
     "registry",
     "selector",
     # registry 便捷函数
@@ -80,6 +84,7 @@ __all__ = [
     "cache",
     "parallel",
     "policy",
+    "bus",
     "FingerprintCache",
     "default_cache",
     "ParallelExecutor",
