@@ -34,10 +34,12 @@ else
 fi
 
 # 4. 整批里只要有一个真实失败的测试脚本 → ci-bus-batch 会以非 0 退出（评审门禁红）
-#    用不存在的测试脚本验证失败路径透传（ci-review-batch 走 ci-bus-batch 退出码）
-RC_FAIL=$(python3 scripts/ci-review-batch.py --base origin/main --head HEAD \
-    >/dev/null 2>&1; echo $?)   # 变更未命中冒烟——用显式失败场景难构造，此断言弱化为：本命令应正常退出 0
-if [ "$RC_FAIL" = "0" ]; then ok "变更未命中 → 冒烟兜底整批，正常退出 0"; else bad "冒烟兜底整批应正常退出 0，实际为 $RC_FAIL"; fi
+#    验证失败路径透传：ci-review-batch 把整批交给 ci-bus-batch 并透传其退出码，故用
+#    "不存在的测试脚本"直测 ci-bus-batch 失败透传（评审门禁红）。不能对 ci-review-batch.py
+#    做非 --dry 真跑——其变更感知会把自己命中并递归选中 test_ci_review_batch.sh 自身，
+#    造成整批无限递归 / CI 超时红（v1.1 缺陷）。
+RC_FAIL=$(python3 scripts/ci-bus-batch.py tests/__ci_review_nonexistent__.sh >/dev/null 2>&1; echo $?)
+if [ "$RC_FAIL" -ne 0 ]; then ok "整批含失败测试 → ci-bus-batch 非 0 退出（评审门禁红透传）"; else bad "失败测试应令 ci-bus-batch 非 0 退出，实际为 $RC_FAIL"; fi
 
 # 5. .cnb.yml 已接线评审整批（pull_request.approved · review gate batch test）
 CNB_REF=$(grep -c "ci-review-batch.py" .cnb.yml)
