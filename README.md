@@ -99,6 +99,7 @@ Star 后，本仓库定义的全部架构师 NPC 角色会自动出现在其他�
 │   ├── DASHBOARD.md                     # 📊 可视化看板（自动化生成，勿手编）
 │   ├── ISSUE_MANAGEMENT.md              # Issue 声明与模块版本管理机制
 │   ├── HYBRID_RESOURCE.md               # 🌐 Hybrid 混合资源路由（云端 CPU 本地化，Issue #57 + v1.1 跑通记录）
+│   ├── HYBRID_CI_BUS.md                 # 🚌 云端 CI 整批测试执行（BusRunner 接入 CI · Issue #93）
 │   ├── CLOUD_LOCAL_COOP.md              # ☁️🖥️ 云端⇄本地协同机制（分工边界/触发时机/异常处理，Issue #90）
 │   ├── PLATFORM_ADAPTERS.md             # 跨宿主适配方案（cnb.cool / deepseek harness / MCP）
 │   └── templates/
