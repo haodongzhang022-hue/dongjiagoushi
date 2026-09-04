@@ -23,7 +23,7 @@ if [ -x scripts/ci-bus-batch.py ]; then ok "scripts/ci-bus-batch.py 存在且可
 
 # 2. --help 正常
 HELP="$(python3 scripts/ci-bus-batch.py --help 2>&1)"
-if echo "$HELP" | grep -q "--parallel" && echo "$HELP" | grep -q "tests"; then ok "--help 输出帮助与参数(--parallel + tests)"; else bad "--help 输出异常: $HELP"; fi
+if echo "$HELP" | grep -q -- "--parallel" && echo "$HELP" | grep -q "tests"; then ok "--help 输出帮助与参数(--parallel + tests)"; else bad "--help 输出异常: $HELP"; fi
 
 # 3. --dry 演练：传一批测试，应产出整批等效汇总（整批一次跑完语义）
 DRY_OUT="$(python3 scripts/ci-bus-batch.py --dry tests/test_architect_system.sh tests/test_doc_consistency.sh 2>&1)"
