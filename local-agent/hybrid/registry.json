@@ -391,6 +391,17 @@
       "time_est": 5.0,
       "kind": "cpu-dense"
     },
+    "local-agent/tests/test_dual_axis_review.sh": {
+      "name": "test_dual_axis_review",
+      "covers": [
+        "local-agent/roles/reviewer.py",
+        "local-agent/roles/base.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 1.5,
+      "time_est": 4.0,
+      "kind": "cpu-dense"
+    },
     "local-agent/tests/test_local_agent.sh": {
       "name": "test_local_agent",
       "covers": [

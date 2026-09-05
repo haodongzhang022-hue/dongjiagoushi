@@ -187,8 +187,38 @@ contains "ISSUE_TRACKING 含 wontfix 分诊态" "$(cat docs/ISSUE_TRACKING.md)" 
 contains ".out-of-scope 目录存在" "$(ls -d .out-of-scope 2>/dev/null)" ".out-of-scope"
 
 # P1-1 code-review 双轴（标准∥spec）
+#   修复 Issue #98 遗留（评审机制不全）：双轴不再是"就绪可调能力"，而是评审必走闸门——
+#   评审主流程 do_review 强制先产出双轴、机器核验 axes_complete、缺任一轴即评审不完整禁止放行。
 contains "评审角色含双轴评审（Standards）" "$(cat local-agent/roles/reviewer.py 2>/dev/null)" "Standards"
 contains "评审角色含双轴评审（Spec）" "$(cat local-agent/roles/reviewer.py 2>/dev/null)" "Spec"
+contains "评审主流程入口 do_review（双轴强制）" "$(cat local-agent/roles/reviewer.py 2>/dev/null)" "def do_review"
+contains "双轴完整性机器核验 axes_complete" "$(cat local-agent/roles/reviewer.py 2>/dev/null)" "axes_complete"
+contains "双轴缺轴即不完整禁止放行" "$(cat local-agent/roles/reviewer.py 2>/dev/null)" "双轴必走"
+contains "REVIEW_DUAL_AXIS 文档登记必走闸门" "$(cat docs/REVIEW_DUAL_AXIS.md 2>/dev/null)" "必走闸门"
+contains "AGENTS.md 登记双轴必走固定规则" "$(cat AGENTS.md 2>/dev/null)" "双轴必走"
+# 运行时核验：do_review 缺任一轴 → review_complete=False + disposition=fix_bug（禁止放行）
+$PY - >/dev/null 2>&1 <<'PYINNER'
+import sys
+sys.path.insert(0, "local-agent")
+try:
+    from data import admin
+    admin.init()
+    from roles import get_role
+    r = get_role("架构·评审")
+    rep = r.do_review("缺轴校验", source="PR #x", spec_ref="Issue #x",
+                      standards_axis={"🔴": [], "note": "ok"}, spec_axis={})
+    assert rep["axes_complete"] is False, "缺轴应不完整"
+    assert rep["review_complete"] is False, "缺轴评审不完整"
+    assert rep["disposition"] == "fix_bug", "缺轴禁止放行应 fix_bug"
+except Exception as e:
+    print("ERR", e); sys.exit(1)
+PYINNER
+if [ $? -eq 0 ]; then
+  PASS=$((PASS+1)); echo "  ✅ 运行时核验：do_review 缺轴 → review_complete=False + fix_bug（禁止放行）"
+else
+  FAIL=$((FAIL+1)); FAILED_ITEMS+=("[双轴强制运行时核验] 缺轴未正确判不完整/禁止放行")
+  echo "  ❌ 运行时核验：do_review 缺轴未正确判不完整/禁止放行"
+fi
 # ============================================================
 # 汇总（信号灯）
 # ============================================================

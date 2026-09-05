@@ -25,7 +25,7 @@
 | **协作** | 同岗协作（PeerCollab）| 会诊/编队/补位/同岗 | `local-agent/collab/` | docs/PEER_COLLAB.md | Issue #47 |
 | **协作** | 同岗收尾闭环 | 会诊未收敛/收尾 | `local-agent/collab/closure.py` | docs/PEER_COLLAB_CLOSURE.md | Issue #47 |
 | **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 |
-| **质量** | 双轴评审（Standards∥Spec）| 双轴/Standards/Spec/互不污染 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
+| **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
 | **质量** | 审核前置助手（决策补全）| 二选一/拿不准/解决不掉/换方案 | `roles/manager.py`(审核前置) | docs/REVIEWER_PRECURSOR.md | Issue #47 |
 | **防无效** | 监控哨兵 | 监控/哨兵/停滞/横跳/无效努力 | `local-agent/sentinel/` | docs/SENTINEL.md | Issue #33 |
 | **规模** | 规模预设 + 3 阶段渐进 | prescale/规模/档位/阶段 | `local-agent/scale/prescale.py` | docs/ENTRY_PRESCALE.md | Issue #41 |
