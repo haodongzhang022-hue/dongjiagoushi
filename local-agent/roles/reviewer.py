@@ -28,6 +28,8 @@ class ReviewerRole(BaseRole):
   从规范集合中取：merge(适合合并)/proceed(适合推进)/fix_bug(适合改bug)/
   research(适合调研)/human(适合移交人类判断)/consult(适合专家会诊)/vote(适合投票)
 - 仅评改动新增/改动行
+- **双轴评审（Issue #98）**：拆 Standards（规范/坏味道基线）与 Spec（忠实实现源
+  目标/边界/验收）两轴并行独立评审、互不污染，最后按必改优先合并；推荐处置仍走规范标签。
 
 协作纪律：
 - 🔴必修项必须指出并推动修复，复评至清零才放行；结论发回接力卡供下游接力。
@@ -48,6 +50,7 @@ class ReviewerRole(BaseRole):
                 "分级(severity: 🔴/🟡/🟢)",
                 "统一处置标签(disposition: merge/proceed/fix_bug/research/human/consult/vote)",
                 "复评结论(recheck)",
+                "**双轴评审(dual_axis_review: Standards∥Spec 互不污染, Issue #98)**",
                 "**评审通过后转交测试(handoff_to_tester: 完整@ + [触发:架构·测试] + 校验回执)**",
             ],
         }
@@ -149,3 +152,45 @@ class ReviewerRole(BaseRole):
             "reason": reason,
             "relay_card": result,
         }
+
+    # ------------------------------------------------------------
+    # 双轴评审（P1-1 · Issue #98 · 借鉴 mattpocock code-review 双轴不互相污染）
+    # ------------------------------------------------------------
+    def dual_axis_review(self, source="", diff_scope="", spec_ref="",
+                         standards_axis=None, spec_axis=None):
+        """评审拆成两轴，各评各的、互不污染（防止一轴结论带偏另一轴）。
+
+        - **Standards 轴**：是否符合仓库规范 + Fowler 坏味道基线（语法/异味/最佳实践/性能/重复）；
+        - **Spec 轴**：是否忠实实现源 issue/spec（目标/做不做边界/验收标准是否覆盖）。
+
+        两轴结论**并行独立产出**，最后按「必改优先原则」合并：
+          Standards 🔴 必修 或 Spec 不达标 → fix_bug（打回）；
+          两轴均达标 → merge/proceed（放行）。
+        返回结构化双轴结论，供评审报告使用；`dispose()` 仍作为最终规范处置标签出口。
+        """
+        standards = standards_axis or {}
+        spec = spec_axis or {}
+        # 汇总两轴必修/通过
+        standards_block = standards.get("blocking") or standards.get("🔴") or []
+        spec_block = spec.get("blocking") or spec.get("🔴") or []
+        spec_faithful = spec.get("faithful", spec.get("pass", True))
+
+        blocked = bool(standards_block) or (not spec_faithful) or bool(spec_block)
+
+        axis_report = {
+            "source": source,
+            "diff_scope": diff_scope,
+            "spec_ref": spec_ref,
+            "axes": {
+                "standards": standards,   # 规范/坏味道轴
+                "spec": spec,             # 忠实实现轴
+            },
+            "blocked": blocked,
+            "recommended_disposition": ("fix_bug" if blocked else "proceed"),
+            "note": (
+                "双轴并行独立评审，互不污染；存在必修即打回。"
+                if blocked else
+                "双轴均达标，可放行。"
+            ),
+        }
+        return axis_report

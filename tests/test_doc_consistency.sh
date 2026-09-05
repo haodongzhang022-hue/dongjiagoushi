@@ -156,6 +156,40 @@ contains "文档含 consult 标签" "$(cat docs/REVIEW_DISPOSITION.md)" "consult
 file_exists "disposition 测试脚本存在" "local-agent/tests/test_disposition.sh"
 
 # ============================================================
+# 六、Issue #98 领域文档 + 追踪问题纪律（P0/P1）一致性
+# ============================================================
+echo ""
+echo "▶ 六、Issue #98 领域文档 + 追踪问题纪律一致性"
+
+# P0-1 单一规范能力/功能索引
+file_exists "CAPABILITY_INDEX.md 存在（唯一事实源）" "docs/CAPABILITY_INDEX.md"
+contains "AGENTS.md 含领域文档追踪纪律规则" "$(cat AGENTS.md)" "领域文档 + 追踪问题纪律"
+contains "CAPABILITY_INDEX 含能力/机制索引" "$(cat docs/CAPABILITY_INDEX.md)" "能力/机制总索引"
+contains "CAPABILITY_INDEX 含 ask-matt 式路由速查" "$(cat docs/CAPABILITY_INDEX.md)" "ask-matt 式路由速查"
+
+# P0-2 领域术语表 CONTEXT.md（root 共享语言）
+file_exists "root CONTEXT.md 存在（术语表）" "CONTEXT.md"
+contains "CONTEXT.md 为纯 glossary 铁律" "$(cat CONTEXT.md)" "纯 glossary"
+contains "CONTEXT.md 含 _Avoid_ 弃用词纪律" "$(cat CONTEXT.md)" "_Avoid_"
+contains "AGENTS.md 引用 CONTEXT.md 为领域术语表" "$(cat AGENTS.md)" "CONTEXT.md"
+
+# P0-3 决策记录 ADR
+file_exists "docs/adr/README.md 存在（ADR 纪律）" "docs/adr/README.md"
+contains "ADR 目录含 ADR-0001" "$(ls docs/adr/)" "0001-monorepo-multirole.md"
+contains "ADR README 声明三条铁律" "$(cat docs/adr/README.md)" "难反转"
+contains "CAPABILITY_INDEX 登记 ADR 能力域" "$(cat docs/CAPABILITY_INDEX.md)" "docs/adr/"
+
+# P0-4 追踪问题 agent-ready brief 链路
+file_exists "ISSUE_TRACKING.md 存在（追踪问题链路）" "docs/ISSUE_TRACKING.md"
+contains "ISSUE_TRACKING 含 agent-ready brief" "$(cat docs/ISSUE_TRACKING.md)" "agent-ready brief"
+contains "ISSUE_TRACKING 含 .out-of-scope 记被否需求" "$(cat docs/ISSUE_TRACKING.md)" ".out-of-scope"
+contains "ISSUE_TRACKING 含 wontfix 分诊态" "$(cat docs/ISSUE_TRACKING.md)" "wontfix"
+contains ".out-of-scope 目录存在" "$(ls -d .out-of-scope 2>/dev/null)" ".out-of-scope"
+
+# P1-1 code-review 双轴（标准∥spec）
+contains "评审角色含双轴评审（Standards）" "$(cat local-agent/roles/reviewer.py 2>/dev/null)" "Standards"
+contains "评审角色含双轴评审（Spec）" "$(cat local-agent/roles/reviewer.py 2>/dev/null)" "Spec"
+# ============================================================
 # 汇总（信号灯）
 # ============================================================
 echo ""

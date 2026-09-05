@@ -404,6 +404,29 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 - **唯一负责**：数据写入 / 校验 / 统计 / 归档由「架构·数据管理员」统一执行，人类 / 总师只通过 `progress_report` / `task_overview` / `snapshot_stats` 二级信息俯瞰。
 - **后端可伸缩**：默认 SQLite 零依赖；生产 / 2500 级切 PostgreSQL（`DB_BACKEND`），同一套表结构与接口无缝迁移。
 
+## 领域文档 + 追踪问题纪律（Issue #98 · 借鉴 mattpocock/skills · 固定规则）
+
+为补强「领域文档」与「追踪问题」两套工程师作业纪律，沉淀为仓库级固定规则（详见
+`docs/CAPABILITY_INDEX.md` 能力索引 · 唯一事实源）：
+
+- **① 领域术语表 CONTEXT.md（共享语言）**：仓库根 `CONTEXT.md` 是唯一领域术语表，
+  只收领域专有词、纯 glossary、绝不含实现细节；每词带 `_Avoid_:` 弃用词收敛命名。
+  术语统一从此对齐，不各取名（详见 `CONTEXT.md` 铁律）。新增领域可建子 context + CONTEXT-MAP。
+- **② 决策记录 ADR（docs/adr/）**：架构取舍（难反转 + 无上下文会困惑 + 有真实权衡 三者皆满足）
+  写一条编号 ADR（`docs/adr/00NN-*.md`），记「做了 X、为什么」；被推翻不删除，改状态 Superseded。
+  现状取舍见 docs/adr/0001-0005。防后来 agent「修正」掉刻意决策。
+- **③ 能力/功能索引 CAPABILITY_INDEX（唯一事实源）**：`docs/CAPABILITY_INDEX.md` 是全仓库
+  能力/机制/角色/触发词/唯一事实源/版本线的**单一规范索引**（类比 mattpocock 顶层 README + ask-matt 路由）。
+  任何 agent「我这种情况该用哪个机制」先查此表；新增机制须在此表加行 + 建正文，正文变更先改正文再刷表。
+- **④ 追踪问题 agent-ready brief 链路**：把 Issue 磨到「任意 agent 拿了就能干」的清晰度。
+  分诊态：needs-triage / needs-info / ready-for-agent / wontfix（+ bug/enhancement 分类），
+  产出 **agent-ready brief**（一句话目标 + 做/不做边界 + 验收标准 + depends_on + 风险）。
+  详见 `docs/ISSUE_TRACKING.md`（含 to-tickets 垂直切片 + blocking edges、wayfinder 决策票地图）。
+- **⑤ .out-of-scope 记被否需求（防重复建议）**：凡被否 / wontfix 需求，写仓库
+  `.out-of-scope/<日期>-<slug>.md` 记「为何否 + 替代路径」，防未来重复建议同一件事。
+- **⑥ 护栏（P1-2）**：以上均有可核验产物（CONTEXT.md / docs/adr/ / docs/CAPABILITY_INDEX.md /
+  docs/ISSUE_TRACKING.md / .out-of-scope/），配套测试信号灯防"只写了没接上"。
+
 ## 知识库
 
 - 云端走 CNB 原生仓库知识库（`knowledge:update` + codewiki `knowledge_enabled: true`）。
@@ -417,10 +440,13 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 .cnb.yml                              # 流水线（知识库入库 + npc:go 兜底 + codewiki）
 .codebuddy/skills/architect/SKILL.md  # ⭐ 架构师方法论（官方 @CodeBuddy 自动加载）
 AGENTS.md                             # 本文件：全局协作规则
+CONTEXT.md                            # 领域术语表·共享语言（Issue #98·纯 glossary 铁律）
+.out-of-scope/                        # 被否需求记录（Issue #98·防重复建议）
 docs/                                 # 架构文档（索引 / 路线图 / 八步模板 / Issue 版本管理）
   ├── ISSUE_MANAGEMENT.md             # Issue 声明与模块/Agent 双版本管理机制
   ├── REVIEWER_PRECURSOR.md           # 审核者前置助手·决策补全机制（3层时点+5类or分支）
   ├── REVIEW_DISPOSITION.md           # 统一审查处置标签机制（适合合并/推进/改bug/调研/交人/会诊/投票）
+  ├── REVIEW_DUAL_AXIS.md             # 双轴评审（Issue #98·Standards∥Spec 互不污染）
   ├── PEER_COLLAB_CLOSURE.md          # 同岗协作收尾闭环（会诊→审核者前置→人类 全自动）
   ├── DISPATCH_DEPTH.md               # 分发递进深度模型（L1声明→L4工作交付，经理锁 L4）
   ├── DEPTH_MODEL.md                   # 七层协作深度模型（L1表述→L7全自动到结果；路由真实唤醒）
@@ -429,6 +455,11 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── CACHE_ARCHITECTURE.md           # 全链路缓存架构（LLM→角色壳→编排→末端→数据 5 层复用）
   ├── CACHE_MONITOR.md                # 缓存命中监控（按 agent 量化效果/浪费判定）
   ├── ROUTER.md                       # 融合路由接线层（规模→拓扑→可执行节点集，run_pipeline 动态执行）
+  ├── CAPABILITY_INDEX.md           # ⭐ 能力/功能索引（唯一事实源·Issue #98，含 ask-matt 式路由速查）
+  ├── ISSUE_TRACKING.md             # 追踪问题 agent-ready brief 链路（Issue #98·借鉴 mattpocock）
+  ├── adr/                          # 决策记录 ADR（Issue #98，0001-0005 + README 纪律）
+  ├── KNOWLEDGE.md                  # 知识库·架构上下文索引入口
+  ├── ROADMAP.md                    # 工程实践路线图
   └── templates/issue-template.md     # Issue 结构化声明模板
 local-agent/depth/                    # 七层协作深度能力包（DepthAbility 全员能力 · Issue #47）
   ├── engine.py                        # 七层深度引擎（L1表述→L7全自动到结果，可执行）
