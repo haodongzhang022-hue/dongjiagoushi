@@ -453,13 +453,15 @@ def _has_receipt(task_id, agent_id):
     """
     if not task_id or not agent_id:
         return False
-    from data import repository as repo
-    for p in repo.recent_progress(limit=5000):
-        if (p.get("task_id") == task_id
-                and p.get("agent_id") == agent_id
-                and p.get("event") in ("accepted", "awake_ack")):
-            return True
-    return False
+    # 直接走 progress 表条件查询（命中 idx_progress_task 索引），
+    # 避免拉取全表 5000 条记录后 Python 线性扫描（性能优化）
+    from data import db
+    row = db.query_one(
+        "SELECT 1 FROM progress WHERE task_id=? AND agent_id=? "
+        "AND event IN ('accepted', 'awake_ack') LIMIT 1",
+        (task_id, agent_id),
+    )
+    return row is not None
 
 
 def dispatch_verify(assignments):
@@ -503,7 +505,6 @@ def dispatch_verify(assignments):
                  "存在未获 [接单] 回执的任务——仅投了接力卡未真唤醒，"
                  "不得假装到 L4，须重触发或升级，绝不静默放行"),
     }
-
 
 
 def dispatch(repo, assignments, enable_issue=True):
@@ -592,8 +593,23 @@ def dispatch(repo, assignments, enable_issue=True):
             "awake_count": verify["awake_count"],
             "awaiting_receipt_count": verify["awaiting_receipt_count"],
             "awaiting_receipt_tasks": [x.get("task_key") for x in l4_awaiting],
-            "levels_reached": (4 if started and all(x["status"] == "working" for x in started)
-                               else 3 if l3 and verify["awake_count"] > 0
+            # ---- 确认到达层级（max/min 两层 · 防歧义）----
+            # 混合场景（部分任务开工到 L4、部分未回执停在 L2）单值 levels_reached
+            # 报 4 会让调用方误以为全部到 L4——拆分两层：
+            #   levels_reached_max = 任务群中**任一任务**到达的最深层级
+            #   levels_reached_min = 任务群中**全部任务**都已到达的层级（保守值）
+            #   levels_reached     = min（向后兼容 · 取保守值不谎报）
+            # 每个任务的确认深度：receipt=True→dispatch_start 开工到 L4；
+            #                      receipt=False→dispatch_trigger 已投接力卡但
+            #                      未获 [接单] 回执确认 L3 完成，保守计为 L2。
+            "levels_reached_max": (4 if started
+                                   else 3 if l3 and verify["awake_count"] > 0
+                                   else 2 if l2 else
+                                   1 if l1 else 0),
+            "levels_reached_min": (4 if len(started) == len(l2) and len(l2) > 0
+                                   else 2 if l2 else
+                                   1 if l1 else 0),
+            "levels_reached": (4 if len(started) == len(l2) and len(l2) > 0
                                else 2 if l2 else
                                1 if l1 else 0),
             "note": ("已获真实 [接单] 回执并放行开工的任务数={started}；"

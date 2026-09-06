@@ -110,7 +110,13 @@ assert s["started_ok"] == 1, "只有已回执的 C 应开工"
 assert s["awaiting_receipt_count"] == 1, "D 未回执应暴露待唤醒"
 assert s["awaiting_receipt_tasks"] == ["D"]
 assert [x["task_key"] for x in res["L4_start"]] == ["C"]
+# levels_reached max/min 两层：混合场景 C(L4)+D(未回执L2)
+# → max=4 不误导最深，min=2 保守不谎报全局到 L4
+assert s["levels_reached_max"] == 4, f"max 应=4(C开工到 L4)，实际 {s['levels_reached_max']}"
+assert s["levels_reached_min"] == 2, f"min 应=2(D未回执保守计 L2)，实际 {s['levels_reached_min']}"
+assert s["levels_reached"] == 2, "levels_reached 兼容字段应取 min（保守不谎报）"
 print("  ✅ 混合：C(已回执)开工、D(未回执)阻塞暴露 awaiting_receipt —— 不假装全成")
+print(f"      levels_reached_max={s['levels_reached_max']} / min={s['levels_reached_min']} / 兼容={s['levels_reached']}")
 EOF
 
 echo "===== [verify] ALL PASS ====="
