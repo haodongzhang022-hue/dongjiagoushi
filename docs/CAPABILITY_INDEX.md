@@ -20,6 +20,7 @@
 | **全员** | 对结果负责·真实唤醒闸门 | 假装分配/断链/待回执/不报L4 | `dispatch_engine.py`·真实唤醒闸门 | docs/DISPATCH_DEPTH.md | Issue #100 |
 | **全员** | 派发能力（DispatchAbility）| 派发/接单/分发 | `local-agent/dispatch/` | docs/DISPATCH_ABILITY.md | Issue #33 |
 | **全员** | 深度能力（DepthAbility L1-L7）| 唤醒/协作深度/到结果 | `local-agent/depth/` | docs/DEPTH_MODEL.md | Issue #47 |
+| **全员** | 真实唤醒校验（dispatch_verify）| 假装分配/未唤醒/待回执 | `dispatch_engine.py` + `dispatch/` | docs/DISPATCH_DEPTH.md §八 | Issue #100 |
 | **全员** | @ 定位能力（HandleAbility）| 跨仓库/@ 格式/权限 | `local-agent/handle/` | docs/HANDLE_ABILITY.md | 通用 |
 | **全员** | 标签能力（LabelAbility）| 打标/进度/优先级/标签 | `local-agent/label/` | docs/LABEL_AUTOMATION.md | Issue #51 |
 | **全员** | 开发规范能力（StandardAbility）| 合规/规范/检查/标准 | `local-agent/dev-standard/` | docs/DEV_STANDARD.md | Issue #83 |
@@ -79,6 +80,7 @@
 | 我要把一个需求拆给多个 agent 干活 | 架构·经理 dispatch + DispatchAbility（L1-L4）|
 | 我要跨仓库召唤角色 | HandleAbility（不写死角色名）|
 | 我要"真唤醒"对端而非只描述 | DepthAbility awake（L3 校验回执）|
+| 我怕秘书/经理/产品"列个表假装完成" | dispatch_verify 真实唤醒校验（无回执暴露 awaiting_receipt）|
 | 我在做开发，想知道合规项 | StandardAbility（dev-standard 强制清单）|
 | 我在评审，该如何处置 | disposition（merge/proceed/fix_bug/...）+ 双轴 |
 | 我感觉一个 agent 在无效空转/停滞 | 监控哨兵（停滞/横跳/重复错误）|
