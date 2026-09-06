@@ -162,9 +162,7 @@ EOF
 "
 
 echo ""
-echo "===== 结果: $pass 通过 / $fail 失败 ====="
-[ "$fail" -eq 0 ] || exit 1
-exit 0
+
 
 echo "===== [编排接入] 7. orchestrator 端到端规模匹配字段 ====="
 t "run_pipeline 秘书阶段产出 scale_match" "$PY - <<'EOF'
@@ -186,3 +184,28 @@ assert 'system' in sm and 'topology' in sm and 'roles' in sm
 print('run_pipeline scale_match:', sm['tier'], '/', sm['system'], '/', sm['topology'])
 EOF
 "
+
+echo "===== [防再犯回归] 8. 秘书 prompt/契约含防再犯铁律（Issue #1 shengxuezhidao 用户纠偏） ====="
+t "SYSTEM_PROMPT 含 先读再做/主动发卡全路径唤醒/只认错不推诿" "$PY - <<'EOF'
+from roles.secretary import SecretaryRole
+sp = SecretaryRole.SYSTEM_PROMPT
+assert ('先读' in sp and '再输出' in sp) or '读全' in sp, '缺先读再做约束'
+assert '主动' in sp or '全路径' in sp or '接单' in sp, '缺主动发卡全路径唤醒约束'
+assert ('认错' in sp and '重发' in sp) or '推' in sp or '推诿' in sp, '缺只认错不推诿约束'
+print('秘书 SYSTEM_PROMPT 防再犯铁律 OK')
+EOF
+"
+t "output_contract 含 先读材料/发卡全路径唤醒/只认错改错重发" "$PY - <<'EOF'
+from roles.secretary import SecretaryRole
+contract = ' '.join(SecretaryRole().output_contract()['contract'])
+assert '先读材料' in contract, '契约缺先读材料'
+assert '全路径唤醒' in contract, '契约缺全路径唤醒'
+assert ('只认错改错重发' in contract) or ('禁止推诿' in contract), '契约缺只认错不推诿'
+print('秘书 output_contract 防再犯契约 OK')
+EOF
+"
+
+echo ""
+echo "===== 结果: $pass 通过 / $fail 失败 ====="
+[ "$fail" -eq 0 ] || exit 1
+exit 0
