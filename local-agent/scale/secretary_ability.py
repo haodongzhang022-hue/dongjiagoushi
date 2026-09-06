@@ -41,7 +41,7 @@ class SecretaryScaleAbility:
                                    interfaces=None):
         svc = self._m().register_secretary(domain, desc=desc, handoff_to=handoff_to,
                                            reuse=reuse, interfaces=interfaces)
-        self._m().log("register", {"actor": self._owner_name, "domain": domain})
+        # 留痕已在核心层 register_secretary 内统一落（避免重复）
         return svc
 
     def unregister_secretary_service(self, domain):
@@ -60,8 +60,8 @@ class SecretaryScaleAbility:
         return self._m().get_secretary(domain)
 
     # 路由层
-    def secretary_route(self, request):
-        return self._m().route_request(request)
+    def secretary_route(self, request, duty=None):
+        return self._m().route_request(request, duty=duty)
 
     # 权限护栏
     def secretary_guard(self, duty):

@@ -115,13 +115,61 @@ EOF
 echo "===== [secretary-scale] 6. 留痕可回溯 ====="
 $PY - <<'EOF'
 from scale import secretary_scale as ss
-before = len(ss.recent_logs())
-ss.log("identify", {"domain":"mcp","warrant":True})
-ss.log("route", {"domain":"mcp","to":"架构·开发"})
-after = len(ss.recent_logs())
-assert after >= before + 1
-assert ss.recent_logs()[-1]["action"] == "route"
-print("  ✅ 秘书层动作留痕可回溯")
+# 清理干净
+while ss.unregister_secretary("trace-svc"): pass
+# 核心动作各自留痕：identify/register/activate/route/guard/unregister
+ss.identify_secretary("trace-svc", reuse_count=5,
+    boundary_factor_scores={"clear_interface":0.9,"single_owner":0.9,"self_contained":0.8})
+ss.register_secretary("trace-svc", desc="留痕测试", handoff_to="架构·开发")
+ss.activate_secretary("trace-svc")
+ss.route_request({"domain":"trace-svc"})
+ss.guard("implement")
+ss.unregister_secretary("trace-svc")
+# 断言各核心动作均已落留痕
+actions = [l["action"] for l in ss.recent_logs()]
+for expected in ("identify","register","activate","route","guard","unregister"):
+    assert expected in actions, f"missing trace: {expected}"
+print("  ✅ 核心动作各自留痕（identify/register/activate/route/guard/unregister）可回溯")
+EOF
+
+echo "===== [secretary-scale] 7. 路由返回无自引用（可 JSON 序列化） ====="
+$PY - <<'EOF'
+import json
+from scale import secretary_scale as ss
+while ss.unregister_secretary("json-svc"): pass
+ss.register_secretary("json-svc", desc="JSON测试", handoff_to="架构·开发")
+ss.activate_secretary("json-svc")
+r = ss.route_request({"domain":"json-svc","payload":{"nested":True}})
+assert r["matched"] and r["handoff"]
+# 不应包含 original 自引用环，可 JSON 序列化
+json.dumps(r)   # 若仍含自引用 → RecursionError
+assert "original" not in r["request"], f"should not embed original ref: {r}"
+# 未命中分支的 request 同样可 JSON 序列化
+r2 = ss.route_request({"domain":"nope"})
+json.dumps(r2)
+ss.unregister_secretary("json-svc")
+print("  ✅ 路由命中/未命中返回均无自引用、可 JSON 序列化")
+EOF
+
+echo "===== [secretary-scale] 8. 护栏接入路由强制点（确定性拦截） ====="
+$PY - <<'EOF'
+from scale import secretary_scale as ss
+while ss.unregister_secretary("guard-svc"): pass
+ss.register_secretary("guard-svc", desc="护栏测试", handoff_to="架构·开发")
+ss.activate_secretary("guard-svc")
+# 终端执行类职责在路由入口被拦截，不路由到秘书
+r1 = ss.route_request({"domain":"guard-svc"}, duty="implement")
+assert r1["matched"] is False, r1
+assert r1.get("blocked") is True, r1
+assert "秘书只交接不执行" in r1.get("guard_reason",""), r1
+# 交接类职责可正常路由
+r2 = ss.route_request({"domain":"guard-svc"}, duty="handoff")
+assert r2["matched"] is True and r2["to"]=="架构·开发", r2
+# 未声明 duty 的请求也兼容（不强制）
+r3 = ss.route_request({"domain":"guard-svc"})
+assert r3["matched"] is True and r3["to"]=="架构·开发", r3
+ss.unregister_secretary("guard-svc")
+print("  ✅ 护栏在路由入口接入强制点：终端执行 duty 确定性拦截")
 EOF
 
 echo ""

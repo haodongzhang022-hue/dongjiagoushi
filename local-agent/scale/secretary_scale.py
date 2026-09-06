@@ -83,9 +83,12 @@ def identify_secretary(domain, reuse_count=0, boundary_factor_scores=None,
 
     reasons = []
     if requires_execution:
-        return {"warrant": False, "score": 0.0,
-                "reasons": ["requires_execution: 该场景需终端执行，秘书只交接不执行，"
-                            "应走开发线而非设秘书（边界护栏①）"]}
+        res = {"domain": domain, "warrant": False, "score": 0.0,
+               "reasons": ["requires_execution: 该场景需终端执行，秘书只交接不执行，"
+                           "应走开发线而非设秘书（边界护栏①）"]}
+        log("identify", {"domain": domain, "warrant": False,
+                         "blocked": "requires_execution"})
+        return res
 
     scores = boundary_factor_scores or {}
     score = 0.0
@@ -103,8 +106,11 @@ def identify_secretary(domain, reuse_count=0, boundary_factor_scores=None,
     warrant = (reuse_count >= thr) and (score >= bt)
     reasons.append(f"boundary_score={score:.2f} 复用={reuse_count} "
                    f"→ {'建议增设' if warrant else '暂不增设'}")
-    return {"domain": domain, "warrant": warrant, "score": round(score, 4),
-            "reasons": reasons}
+    res = {"domain": domain, "warrant": warrant, "score": round(score, 4),
+           "reasons": reasons}
+    log("identify", {"domain": domain, "warrant": warrant,
+                     "score": round(score, 4), "reuse": reuse_count})
+    return res
 
 
 # ======================================================================
@@ -146,6 +152,8 @@ def register_secretary(domain, desc="", handoff_to="", reuse=0,
         if domain in _SECRETARY_REGISTRY:
             raise ValueError(f"秘书服务域 {domain} 已注册（需先 unregister 再注册）")
         _SECRETARY_REGISTRY[domain] = svc
+    log("register", {"domain": domain, "handoff_to": handoff_to,
+                     "desc": desc, "reuse": int(reuse)})
     return dict(svc)
 
 
@@ -155,7 +163,8 @@ def activate_secretary(domain):
         if domain not in _SECRETARY_REGISTRY:
             raise KeyError(f"秘书服务 {domain} 未注册")
         _SECRETARY_REGISTRY[domain]["status"] = "active"
-        return dict(_SECRETARY_REGISTRY[domain])
+    log("activate", {"domain": domain})
+    return dict(_SECRETARY_REGISTRY[domain])
 
 
 def drain_secretary(domain):
@@ -164,7 +173,8 @@ def drain_secretary(domain):
         if domain not in _SECRETARY_REGISTRY:
             raise KeyError(f"秘书服务 {domain} 未注册")
         _SECRETARY_REGISTRY[domain]["status"] = "draining"
-        return dict(_SECRETARY_REGISTRY[domain])
+    log("drain", {"domain": domain})
+    return dict(_SECRETARY_REGISTRY[domain])
 
 
 def unregister_secretary(domain):
@@ -172,6 +182,7 @@ def unregister_secretary(domain):
     with _REGISTRY_LOCK:
         if domain in _SECRETARY_REGISTRY:
             del _SECRETARY_REGISTRY[domain]
+            log("unregister", {"domain": domain})
             return True
         return False
 
@@ -204,13 +215,27 @@ def bump_reuse(domain, n=1):
 # ======================================================================
 # ③ 路由层：层间路由（请求 → 命中秘书域 → 交接下游；未命中回终端开发线）
 # ======================================================================
-def route_request(request, domain_matcher=None):
+def route_request(request, domain_matcher=None, duty=None):
     """路由层：把请求路由到匹配的秘书服务，命中则交接给其 handoff_to。
 
     未命中任何秘书域 → 回默认终端开发线（秘书不吞活、不改形）。
     返回 {matched, secretary, handoff, to}。
     domain_matcher: 可选匹配函数 (request, svc) -> bool；默认按 request['domain']。
+    duty: 请求的职责类型（可选）。若为终端执行类职责，护栏在路由入口即拦截
+          （秘书只交接不执行），直接回终端开发线——确定性强制，不靠自觉调用。
     """
+    # ① 权限边界护栏接入强制点：请求声明终端执行类职责 → 拦截，不路由到秘书
+    if duty is not None:
+        g = guard(duty, role="架构·秘书")
+        if not g["allowed"]:
+            result = {"matched": False, "secretary": None,
+                      "handoff": False, "blocked": True, "guard_reason": g["reason"],
+                      "to": "终端开发线(默认)",
+                      "request": {"domain": request.get("domain")}}
+            log("route_blocked", {"domain": request.get("domain"), "duty": duty,
+                                  "reason": g["reason"]})
+            return result
+
     svc = None
     if domain_matcher is not None:
         for s in list_secretaries():
@@ -225,13 +250,19 @@ def route_request(request, domain_matcher=None):
                 svc = s
                 break
     if svc is None:
-        return {"matched": False, "secretary": None,
-                "handoff": False, "to": "终端开发线(默认)", "request": request}
+        result = {"matched": False, "secretary": None,
+                  "handoff": False, "to": "终端开发线(默认)",
+                  "request": dict(request)}
+        log("route_miss", {"domain": request.get("domain"), "to": "终端开发线(默认)"})
+        return result
     # 命中 → 秘书做的是"交接"，把请求转交其 handoff_to（只交接不执行）
     bump_reuse(svc["domain"])
-    return {"matched": True, "secretary": svc["domain"],
-            "handoff": True, "to": svc["handoff_to"],
-            "request": {"domain": request.get("domain"), "original": request}}
+    result = {"matched": True, "secretary": svc["domain"],
+              "handoff": True, "to": svc["handoff_to"],
+              "request": dict(request)}
+    log("route", {"domain": request.get("domain"), "secretary": svc["domain"],
+                  "handoff_to": svc["handoff_to"]})
+    return result
 
 
 # ======================================================================
@@ -254,14 +285,17 @@ def guard(duty, domain="", role="架构·秘书"):
     返回 {allowed, duty, reason}。
     """
     if duty in HANDOFF_DUTY:
-        return {"allowed": True, "duty": duty, "role": role,
-                "reason": "交接/路由类职责，秘书本职，放行"}
-    if duty in TERMINAL_DUTY:
-        return {"allowed": False, "duty": duty, "role": role,
-                "reason": "终端执行类职责（会承担落地结果），秘书越权，拦截——"
-                          "秘书只交接不执行，落地交专门开发线"}
-    return {"allowed": False, "duty": duty, "role": role,
-            "reason": "未知职责，按'需终端结果'倾向拦截（宁拦不放，防越权成长）"}
+        res = {"allowed": True, "duty": duty, "role": role,
+               "reason": "交接/路由类职责，秘书本职，放行"}
+    elif duty in TERMINAL_DUTY:
+        res = {"allowed": False, "duty": duty, "role": role,
+               "reason": "终端执行类职责（会承担落地结果），秘书越权，拦截——"
+                         "秘书只交接不执行，落地交专门开发线"}
+    else:
+        res = {"allowed": False, "duty": duty, "role": role,
+               "reason": "未知职责，按'需终端结果'倾向拦截（宁拦不放，防越权成长）"}
+    log("guard", {"duty": duty, "domain": domain, "allowed": res["allowed"]})
+    return res
 
 
 # ======================================================================
