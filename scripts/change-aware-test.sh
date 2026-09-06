@@ -150,7 +150,7 @@ declare -a MODULE_MAP=(
   "local-agent/pool/|local-agent/tests/test_scale.sh"
 
   # ---- 任务转交闭环 ----
-  "local-agent/roles/|local-agent/tests/test_review_tester_handoff.sh"
+  "local-agent/roles/|local-agent/tests/test_review_tester_handoff.sh,local-agent/tests/test_dual_axis_review.sh"
 
   # ---- 全局 gid/ops ----
   "local-agent/gid.py|local-agent/tests/test_ops_sim.sh"

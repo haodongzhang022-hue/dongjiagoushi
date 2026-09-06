@@ -299,6 +299,28 @@
 
 > 触发：显式 `[触发:架构·评审]` / 语义命中「评审/审查/走查/质量/合并/推进/改bug/调研/会诊/投票/移交人类/处置」/ rules 固定。规则层已落地引擎 `disposition.py` + 测试 `test_disposition.sh`，红灯可查到底有没有带标签。
 
+### 评审双轴必走（Review Dual-Axis · 固定规则）
+
+评审不能"单轴混评"或"散调各方法漏双轴"，必须**先拆两轴并行独立评审、缺任一轴即评审不完整**。
+本规则为仓库级固定 rules，对「架构·评审」与所有走评审的 agent 生效（详见 `docs/REVIEW_DUAL_AXIS.md`）：
+
+- **① 双轴必走（评审主流程统一入口）**：评审一律走 `ReviewerRole.do_review()`——**双轴 →
+  处置 → 路由** 一站式闭环。先把评审拆成 **Standards 轴**（规范/坏味道基线：语法/异味/最佳实践/
+  性能/重复）与 **Spec 轴**（忠实实现源 issue/spec：目标/做不做边界/验收标准）**并行独立产出、
+  互不污染**，防止一轴结论带偏另一轴（"这代码丑"≠"没忠实实现 spec"）。
+- **② 机器可核验双轴完整（axes_complete）**：`dual_axis_review()` 返回 `axes_complete`——
+  缺 **Standards 或 Spec 任一轴实质产出** 即 `axes_complete=False` → **评审不完整** →
+  `disposition=fix_bug`、`review_complete=False`、**禁止放行**（不能给 merge/proceed 假装评过双轴）。
+- **③ 与处置标签并列为双闸门**：双轴（`do_review`/`dual_axis_review`）与规范处置标签
+  （`dispose()`，见「统一审查处置标签」）是评审输出契约**双闸门**——**缺双轴、缺处置标签任一
+  即评审未完成、不视为有效评审**。
+- **④ 必改优先路由**：双轴均达标 → `merge`/`proceed`（放行转测试 `handoff_to_tester`）；
+  Standards 🔴必修 或 Spec 不忠实 → `fix_bug`（`[回转]`退回开发复评清零）。
+
+> 触发：显式 `[触发:架构·评审]` / 语义命中「评审/审查/走查/质量/双轴/标准轴/规范轴/忠实实现」/
+> rules 固定。规则层已落地 `reviewer.py`（`do_review` 主流程 + `dual_axis_review` 双轴完整核验）
+> + `tests/test_doc_consistency.sh` 运行时核验缺轴判不完整禁止放行，红灯可查到底有没有走双轴。
+
 ### 前期辅助与架构师渐进（规模预设 · 3 阶段）固定规则
 - **规模预设前置（可执行引擎）**：秘书/产品/架构师/调研在**需求澄清阶段**先按体量预设 `team_size + collab_plan + risk_level` + 检索经验方案库，作为增减基准锚点；架构明确后由**架构·经理按架构做增量修正**，不做从零规划。**已落地可执行引擎 `local-agent/scale/prescale.py`**（`prescale(req) → {team_size, collab_plan, risk_level, source}` + 经验方案库 `search_pattern` + 增量修正 `adjust_by_architect` + 强制留痕 `prescale_records`），并有测试断言『需求进入处理前必须先有预设记录』，红灯可查到底预没预设。
 - **规模金字塔 → 承接体系（固定规则 · Issue #41 纠偏）**：任务从最小到最大按规模分层承接，**小任务占比最高、最该优化**。micro/small（单任务修改/低复杂度）→ **简化体系·敏捷**（产品→开发→审查，不做重分工）；medium（中等）→ **加架构师**；large（高复杂度）→ **公司结构拉满**（DAG 全角色+分形+找工具/对齐）；huge（极高复杂度/大型）→ **完整体系** + 动态扩容 + 水龙头蔓延 + 带蔓延关系回传合并。**缓存命中为主线（cache-first）横贯所有档位**（micro/small 最简共享需求前缀 → huge 水龙头蔓延聚合）。已落地 `topology/fusion.py`（`TIER_SYSTEM` + `evaluate_scale` 含 micro 档）+ `topology/topologies.py` `agile` 极简拓扑；并由 `topology/router.py` 接线层接入真实执行链路——`run_pipeline` 按规模动态选择并执行对应拓扑（agile 4 节点 / dag 11 / prefix 17 / scatter 15），不再硬编码 team.yaml dag（详见 `docs/ROUTER.md`）。
@@ -404,6 +426,29 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 - **唯一负责**：数据写入 / 校验 / 统计 / 归档由「架构·数据管理员」统一执行，人类 / 总师只通过 `progress_report` / `task_overview` / `snapshot_stats` 二级信息俯瞰。
 - **后端可伸缩**：默认 SQLite 零依赖；生产 / 2500 级切 PostgreSQL（`DB_BACKEND`），同一套表结构与接口无缝迁移。
 
+## 领域文档 + 追踪问题纪律（Issue #98 · 借鉴 mattpocock/skills · 固定规则）
+
+为补强「领域文档」与「追踪问题」两套工程师作业纪律，沉淀为仓库级固定规则（详见
+`docs/CAPABILITY_INDEX.md` 能力索引 · 唯一事实源）：
+
+- **① 领域术语表 CONTEXT.md（共享语言）**：仓库根 `CONTEXT.md` 是唯一领域术语表，
+  只收领域专有词、纯 glossary、绝不含实现细节；每词带 `_Avoid_:` 弃用词收敛命名。
+  术语统一从此对齐，不各取名（详见 `CONTEXT.md` 铁律）。新增领域可建子 context + CONTEXT-MAP。
+- **② 决策记录 ADR（docs/adr/）**：架构取舍（难反转 + 无上下文会困惑 + 有真实权衡 三者皆满足）
+  写一条编号 ADR（`docs/adr/00NN-*.md`），记「做了 X、为什么」；被推翻不删除，改状态 Superseded。
+  现状取舍见 docs/adr/0001-0005。防后来 agent「修正」掉刻意决策。
+- **③ 能力/功能索引 CAPABILITY_INDEX（唯一事实源）**：`docs/CAPABILITY_INDEX.md` 是全仓库
+  能力/机制/角色/触发词/唯一事实源/版本线的**单一规范索引**（类比 mattpocock 顶层 README + ask-matt 路由）。
+  任何 agent「我这种情况该用哪个机制」先查此表；新增机制须在此表加行 + 建正文，正文变更先改正文再刷表。
+- **④ 追踪问题 agent-ready brief 链路**：把 Issue 磨到「任意 agent 拿了就能干」的清晰度。
+  分诊态：needs-triage / needs-info / ready-for-agent / wontfix（+ bug/enhancement 分类），
+  产出 **agent-ready brief**（一句话目标 + 做/不做边界 + 验收标准 + depends_on + 风险）。
+  详见 `docs/ISSUE_TRACKING.md`（含 to-tickets 垂直切片 + blocking edges、wayfinder 决策票地图）。
+- **⑤ .out-of-scope 记被否需求（防重复建议）**：凡被否 / wontfix 需求，写仓库
+  `.out-of-scope/<日期>-<slug>.md` 记「为何否 + 替代路径」，防未来重复建议同一件事。
+- **⑥ 护栏（P1-2）**：以上均有可核验产物（CONTEXT.md / docs/adr/ / docs/CAPABILITY_INDEX.md /
+  docs/ISSUE_TRACKING.md / .out-of-scope/），配套测试信号灯防"只写了没接上"。
+
 ## 知识库
 
 - 云端走 CNB 原生仓库知识库（`knowledge:update` + codewiki `knowledge_enabled: true`）。
@@ -417,10 +462,13 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 .cnb.yml                              # 流水线（知识库入库 + npc:go 兜底 + codewiki）
 .codebuddy/skills/architect/SKILL.md  # ⭐ 架构师方法论（官方 @CodeBuddy 自动加载）
 AGENTS.md                             # 本文件：全局协作规则
+CONTEXT.md                            # 领域术语表·共享语言（Issue #98·纯 glossary 铁律）
+.out-of-scope/                        # 被否需求记录（Issue #98·防重复建议）
 docs/                                 # 架构文档（索引 / 路线图 / 八步模板 / Issue 版本管理）
   ├── ISSUE_MANAGEMENT.md             # Issue 声明与模块/Agent 双版本管理机制
   ├── REVIEWER_PRECURSOR.md           # 审核者前置助手·决策补全机制（3层时点+5类or分支）
   ├── REVIEW_DISPOSITION.md           # 统一审查处置标签机制（适合合并/推进/改bug/调研/交人/会诊/投票）
+  ├── REVIEW_DUAL_AXIS.md             # 评审双轴必走（Issue #98·do_review 主流程强制·缺轴即评审不完整禁止放行）
   ├── PEER_COLLAB_CLOSURE.md          # 同岗协作收尾闭环（会诊→审核者前置→人类 全自动）
   ├── DISPATCH_DEPTH.md               # 分发递进深度模型（L1声明→L4工作交付，经理锁 L4）
   ├── DEPTH_MODEL.md                   # 七层协作深度模型（L1表述→L7全自动到结果；路由真实唤醒）
@@ -429,6 +477,11 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── CACHE_ARCHITECTURE.md           # 全链路缓存架构（LLM→角色壳→编排→末端→数据 5 层复用）
   ├── CACHE_MONITOR.md                # 缓存命中监控（按 agent 量化效果/浪费判定）
   ├── ROUTER.md                       # 融合路由接线层（规模→拓扑→可执行节点集，run_pipeline 动态执行）
+  ├── CAPABILITY_INDEX.md           # ⭐ 能力/功能索引（唯一事实源·Issue #98，含 ask-matt 式路由速查）
+  ├── ISSUE_TRACKING.md             # 追踪问题 agent-ready brief 链路（Issue #98·借鉴 mattpocock）
+  ├── adr/                          # 决策记录 ADR（Issue #98，0001-0005 + README 纪律）
+  ├── KNOWLEDGE.md                  # 知识库·架构上下文索引入口
+  ├── ROADMAP.md                    # 工程实践路线图
   └── templates/issue-template.md     # Issue 结构化声明模板
 local-agent/depth/                    # 七层协作深度能力包（DepthAbility 全员能力 · Issue #47）
   ├── engine.py                        # 七层深度引擎（L1表述→L7全自动到结果，可执行）

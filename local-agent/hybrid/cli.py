@@ -73,6 +73,7 @@ BUILTIN_CPU_SCRIPTS = [
     "local-agent/tests/test_cache_layer.sh",
     "local-agent/tests/test_label_automation.sh",
     "local-agent/tests/test_review_tester_handoff.sh",
+    "local-agent/tests/test_dual_axis_review.sh",
     "local-agent/tests/test_local_agent.sh",
     "local-agent/tests/test_dispatch_ability.sh",
     "tests/test_architect_system.sh",
