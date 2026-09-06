@@ -41,10 +41,15 @@
 
 三维都满足 → warrant=True（建议增设该秘书）；任一不满足 → 暂不增设。
 
-### 权限边界护栏（不靠自觉）
+### 权限边界护栏（不靠自觉 · 已接入路由强制点）
 `guard(duty)`：交接/路由/分诊（HANDOFF_DUTY）→ 放行；实现/开发/改bug/执行/交付结果
 （TERMINAL_DUTY）→ 拦截；未知职责 → 宁拦不放（防越权成长）。秘书只做**引导、交接、
 路由、调度**，不承担终端落地结果——那是专门开发线的职责。
+
+**运行时强制（不靠调用方自觉）**：`route_request(request, duty=...)` 在路由入口
+先调 `guard(duty)` 校验——若请求声明终端执行类职责（implement/develop/fix_bug/
+execute/write_code/deliver_result 等），护栏即确定性拦截、返回 `blocked: true`，
+不回路由到任何秘书域（`route_blocked` 留痕），直接回终端开发线。
 
 ## 三、与既有机制关系
 
