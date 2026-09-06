@@ -93,6 +93,24 @@
 **权限意识**：触发接单需对应角色有 @ 权限（`@dongdongxiaozu/dongjiagoushi (架构·经理)`
 或 CodeBuddy 兜底 / 专用派发 agent），权限不足导致派发断裂须显式上报，不静默失败。
 
+### 真实唤醒校验闸门（dispatch_verify · 固定规则 · Issue #100 防假装分配）
+
+"列个表 / 只投接力卡 / 只写字段" **都不等于派发完成**。任何派发方（秘书/经理/产品/开发）
+把工作派出去后，**必须用 `dispatch_verify()` 校验对端是否真实回执 `[接单]`**，否则不得把
+"已派发"当"已完成"。详见 `docs/DISPATCH_DEPTH.md` §八：
+
+- **列清单 ≠ 完成**：`dispatch()` 的 L3→L4 已改为**真实唤醒校验闸门**——对端未回执 `[接单]`/
+  `awake_ack` 的任务不再自动开工，标 `awaiting_receipt` 显式暴露，summary 诚实统计
+  `started_ok`/`awake_count`/`awaiting_receipt_count`，**不再谎报 levels_reached=4**；
+- **校验机制必须跑**：派发方派完必须 `dispatch_verify()`，检查是否有未唤醒（awaiting_receipt）
+  任务——有则重触发或升级（哨兵/总师/人类），**绝不静默放行**，补上"不检查后面交接卡和
+  唤醒是否成功"的断链；
+- **能力全员化**：`dispatch_verify` 已挂到所有角色（BaseRole 透传 DispatchAbility），
+  秘书/经理/产品/开发皆可用；
+- **云端/本地双轨语义**：云端真实唤醒 = 在 CNB Issue/PR 发 `[触发:角色]` 接力卡由对端真实
+  回执 `[接单]`；本地 `local-agent/` 的 `post_message` 只是本地模拟载体。两套 harness 分环境
+  承载、不互相覆盖（本地同步不得覆盖云端语义），`_has_receipt()` 判据两端对齐。
+
 ### 派发能力全员化（DispatchAbility · 通用复用能力 · 固定规则）
 
 派发工作是**高频复用的模块能力**，不应只属于经理。已统一开发为通用能力

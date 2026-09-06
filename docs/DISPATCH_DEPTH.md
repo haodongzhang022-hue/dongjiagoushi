@@ -144,3 +144,67 @@ L4 不是"多一个开关"，而是把「接单 → 工作」的整条链路跑�
 - [x] 工作推进写 **goal_meters** 进度尺刻度，sentinel 可判定推进/停滞；
 - [x] 交付经小组长汇总整合，看板自动可视化；
 - [x] 权限模型明确（@ 角色全名 / CodeBuddy 兜底 / 专用派发 agent），派发不静默失败。
+
+---
+
+## 八、真实唤醒校验闸门（Issue #100 · 防假装分配断链修复）
+
+> 对应 ISSUE #100 用户痛点：秘书/经理/产品"列个表"调 `dispatch()` 就当完成，
+> 实际没开 issue、没投递成功的交接卡、没唤醒 agent——却觉得自己算完成了。
+> 根因：`dispatch()` 的 L3→L4 **自动无条件放行**，从不校验对端是否真实回执。
+
+### 断链根因（定位到代码）
+
+| 环节 | 断链表现 |
+|------|---------|
+| L3 触发 | `dispatch_trigger()` 只 `post_message` 往消息管线投一条 `[触发:角色]`，**不真实触达对端 agent** |
+| L4 开工 | `dispatch_start()` **不等任何回执**，立即标 `working` 返回成功 |
+| 无校验 | `dispatch()` summary 曾无条件报 `levels_reached=4`，`started_ok=N`，把"派发动作"当"派发结果" |
+| 测试固化 | `test_dispatch_engine.sh` 曾断言"从未接单也 levels_reached=4"，把假装当验收标准 |
+
+### 修复：真实唤醒校验闸门（已落地）
+
+- **`_has_receipt(task_id, agent_id)`**：检测某任务对端 agent 是否真实回执 `[接单]`/`awake_ack`
+  （progress 事件）。仅在消息管线投了 `[触发]` **不算唤醒**，必须对端回执才算真唤醒。
+- **`dispatch_verify(assignments)`**：派发方/哨兵核验真实唤醒状态。返回
+  `verified_all_awake` + `awaiting_receipt`（未回执任务明细）+ `awake_count` +
+  `awaiting_receipt_count`。未回执即暴露，绝不静默放行。
+- **`dispatch()` 语义修正**：L3 触发后校验——已回执的任务才放行 L4 开工；未回执的任务标
+  `awaiting_receipt`（**不假装开工**），通过 `verification` / `awaiting_receipt` 显式暴露，
+  summary 诚实统计 `started_ok` / `awake_count` / `awaiting_receipt_count`，**不再谎报 levels_reached=4**。
+- **到达层级 max/min 两层（防混合场景歧义）**：混合场景（部分任务开工到 L4、部分未回执停在 L2）
+  时单值 `levels_reached` 报 4 有歧义（会让调用方误以为全部到 L4）。summary 增加两层——
+  `levels_reached_max`（任一任务最深到达层级）与 `levels_reached_min`（全部任务都已到达的
+  保守层级）；`levels_reached` 保留为 min（向后兼容 · 不谎报）。
+- **能力全员化**：`dispatch_verify` 已透传到 `DispatchAbility` + `BaseRole`，秘书/经理/产品/
+  开发等任意角色都可调用，**不再"列个表就自认完成"**。
+
+### 校验机制为什么必要
+
+"列了清单 / 只投了接力卡 / 写了接力卡字段" 都不等于派发完成。真正完成 = 对端**真实回执
+`[接单]` + 开工 + 进度尺推进 + 交付**。派发方必须用 `dispatch_verify` 核验，未回执任务
+须重触发或升级（绝不静默放行），这才补上了"他们不检查后面交接卡和唤醒是否成功"的断链。
+
+---
+
+## 九、云端 ⇄ 本地 环境双轨语义边界（防机制互相覆盖）
+
+> 对应 ISSUE #100 用户第二点担忧：本地 deepseek harness 与当前 CNB 云端 harness 机制不同，
+> 若把本地版本同步/传输到云端，可能**用本地的"消息管线模拟唤醒"语义覆盖掉云端的"真实触发"语义**。
+
+### 原则：云端与本地是**分环境双轨**，不是二选一互相覆盖
+
+| 语义 | 云端（CNB harness） | 本地（deepseek harness） |
+|------|--------------------|--------------------------|
+| 真实唤醒 | **在 Issue/PR 发 `[触发:角色]` 接力卡**，由 CodeBuddy/NPC 语义触发对端真实执行 | 本地 `local-agent/` 消息管线 + 脚本触发 agent |
+| 接力卡载体 | **CNB Issue 评论**（平台留痕、可核验回执） | `state/relay_card.json` / SQLite `messages` 表 |
+| 回执 | 对端在 Issue **回复 `[接单]`**（平台可见） | `progress` 事件 `accepted`/`awake_ack` |
+| 判定真唤醒 | 平台可见的 `[接单]` 回执 | `_has_receipt()` 查 progress 事件 |
+
+**防覆盖纪律**：
+- `local-agent/` 的 `post_message`（写 SQLite）在**云端语境下只是"模拟"接力卡载体**，
+  不等于在 CNB 平台真实 `@` 出对端 agent；
+- 云端真正"唤醒" = 在 CNB Issue/PR 落地 `[触发:角色]` 接力卡，由对端真实回执 `[接单]`；
+- **同步代码/文档时不得用本地语义覆盖云端语义**——两套 harness 各自承载各自的环境；
+- `dispatch_verify` 的 `_has_receipt()` 在校验"对端真实回执"这一判据上云端与本地对齐，
+  云端以 Issue 平台的 `[接单]` 回执为准，本地以 progress 事件为准。
