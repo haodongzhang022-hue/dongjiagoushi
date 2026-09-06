@@ -162,6 +162,8 @@ EOF
 
 echo "===== [dispatch·engine] 6. 一站式四层分发（dispatch 入口） ====="
 $PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_dispatch6.db")  # 独立 DB，隔离前面已接单回执
 from data import admin, schema
 admin.init()
 import dispatch_engine
@@ -178,14 +180,32 @@ assert summary["total_tasks"] == 2
 assert summary["declared_ok"] == 2
 assert summary["dispatched_ok"] == 2
 assert summary["triggered_ok"] == 2
-assert summary["started_ok"] == 2
-assert summary["levels_reached"] == 4
 assert len(result["L1_declare"]) == 2
 assert len(result["L2_dispatch"]) == 2
 assert len(result["L3_trigger"]) == 2
-assert len(result["L4_start"]) == 2
-print("  ✅ 一站式四层分发：L1→L2→L3→L4 全链路 通过")
+# ⚠️ Issue #100 防假装分配：没有任何对端回执 [接单]，不得谎报开工到 L4
+assert summary["started_ok"] == 0, f"无接单回执不得开工，实际 {summary['started_ok']}"
+assert summary["awake_count"] == 0, "无回执不得计入已唤醒"
+assert summary["awaiting_receipt_count"] == 2, f"应暴露 2 个待真实唤醒任务"
+assert summary["levels_reached"] < 4, "未获接单回执不得谎报到 L4"
+assert len(result["L4_start"]) == 0, "无回执不应有 L4 开工"
+assert len(result["awaiting_receipt"]) == 2, "应返回 2 个 awaiting_receipt 明细"
+assert len(result["verification"]["awaiting_receipt"]) == 2
+assert result["verification"]["verified_all_awake"] == False
+print("  ✅ 一站式四层分发（防假装分配）：无回执→阻塞 L4、显式暴露 awaiting_receipt 通过")
 print(f"      summary={summary}")
+
+# --- 追加：给任务补真实接单回执后再核验，放行开工到 L4 ---
+l2 = result["L2_dispatch"]
+for a in l2:
+    dispatch_engine.accept_assignment(a["task_key"], a["agent_id"],
+                                       role=a["role"], note="[接单] 已回执")
+verify = dispatch_engine.dispatch_verify(l2)
+assert verify["verified_all_awake"] == True, "补回执后应全部真唤醒"
+assert verify["awake_count"] == 2
+l4 = dispatch_engine.dispatch_start(l2)
+assert len(l4) == 2 and all(x["status"] == "working" for x in l4)
+print("  ✅ 一站式后续：补真实接单回执 → dispatch_verify 全部真唤醒 → 放行 L4 通过")
 EOF
 
 echo "===== [dispatch·engine] 7. 经理角色可调用 dispatch 方法 ====="
@@ -209,10 +229,13 @@ assignments = [
      "domain": "测试域", "priority": "P0", "detail": "测试"},
 ]
 result = manager.dispatch("", assignments, enable_issue=False)
-assert result["summary"]["levels_reached"] == 4
+# ⚠️ Issue #100：经理一站式 dispatch 无回执时不得谎报 L4（防假装分配）
+assert result["summary"]["levels_reached"] < 4, "无接单回执经理不得谎报到 L4"
+assert result["summary"]["awaiting_receipt_count"] == 1, "应暴露 1 个待真实唤醒任务"
+assert hasattr(manager, "dispatch_verify"), "经理应具备 dispatch_verify() 真实唤醒核验方法"
 # dispatch_depth 别名也存在
 assert hasattr(manager, "dispatch_depth")
-print("  ✅ 经理角色：SYSTEM_PROMPT 含四层深度模型 + dispatch() 方法可用 通过")
+print("  ✅ 经理角色：SYSTEM_PROMPT 含四层深度模型 + dispatch() 无回执不谎报 L4 + 可核验唤醒 通过")
 EOF
 
 echo "===== [dispatch·engine] 8. 差异化补强：深度俯瞰 + L4 action 路由 + 防跳层 ====="

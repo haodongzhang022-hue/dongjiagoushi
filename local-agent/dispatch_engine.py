@@ -433,17 +433,97 @@ def deliver(task_key, agent_id, output, issue_ref="", role="架构·开发"):
 # ============================================================
 # 一站式四层次分发（供经理角色直接调用）
 # ============================================================
+
+# ============================================================
+# 真实唤醒回执校验（防假装分配 · 修复断链）
+# ------------------------------------------------------------
+# 用户痛点（Issue #100）：秘书/经理/产品"列个表"调 dispatch() 就当完成，
+# 实际没人接单、没唤醒 agent。根因是 dispatch() 的 L3→L4 自动无条件放行，
+# 从不校验对端是否真实回执 [接单]。这里补上硬校验：
+#   - _has_receipt()    ：某任务的对端 agent 是否有真实接单回执（accepted/awake_ack）
+#   - dispatch_verify() ：派发方/哨兵在一站式 dispatch() 后核验真实唤醒状态，
+#                         无回执的任务会显式暴露 awaiting_receipt，绝不假装到 L4。
+# ============================================================
+def _has_receipt(task_id, agent_id):
+    """检测某任务的对端 agent 是否有真实接单回执（accepted / awake_ack）。
+
+    这是「真实唤醒」的核心判据：只在本地消息管线投了 [触发] 不算唤醒，
+    必须对端回执 [接单]/awake_ack（progress 事件）才算真唤醒。
+    返回 True=已回执真唤醒 / False=仅投递未唤醒。
+    """
+    if not task_id or not agent_id:
+        return False
+    from data import repository as repo
+    for p in repo.recent_progress(limit=5000):
+        if (p.get("task_id") == task_id
+                and p.get("agent_id") == agent_id
+                and p.get("event") in ("accepted", "awake_ack")):
+            return True
+    return False
+
+
+def dispatch_verify(assignments):
+    """核验一组已派发任务的真实唤醒状态（L4 闸门）。
+
+    输入：dispatch()/dispatch_assign() 产出的分发记录清单（含 task_id/agent_id/role）
+    输出：
+      verified_all_awake : 是否所有任务都已真实接单（True=可放行到 L4）
+      awaiting_receipt   : 未获接单回执、待真实唤醒的任务清单（假装分配会在这里现形）
+      detail             : 每个任务的真实唤醒核验明细
+    """
+    awaiting = []
+    detail = []
+    for a in assignments:
+        task_id = a.get("task_id") or a.get("gid") or ""
+        agent_id = a.get("agent_id") or ""
+        ok = _has_receipt(task_id, agent_id)
+        if not ok:
+            awaiting.append({
+                "task_key": a.get("task_key", ""),
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "role": a.get("role", ""),
+                "issue": a.get("issue_number") or a.get("issue", ""),
+            })
+        detail.append({
+            "task_key": a.get("task_key", ""), "task_id": task_id,
+            "agent_id": agent_id, "role": a.get("role", ""),
+            "issue": a.get("issue_number") or a.get("issue", ""),
+            "receipt": ok,
+        })
+    return {
+        "verified_all_awake": len(awaiting) == 0,
+        "total": len(assignments),
+        "awake_count": len(assignments) - len(awaiting),
+        "awaiting_receipt_count": len(awaiting),
+        "awaiting_receipt": awaiting,
+        "detail": detail,
+        "note": ("所有任务均已获对端 [接单] 回执，真实唤醒成立，可放行到 L4"
+                 if len(awaiting) == 0 else
+                 "存在未获 [接单] 回执的任务——仅投了接力卡未真唤醒，"
+                 "不得假装到 L4，须重触发或升级，绝不静默放行"),
+    }
+
+
+
 def dispatch(repo, assignments, enable_issue=True):
     """
-    经理四层次分发一站式入口。
+    经理四层次分发一站式入口（含真实唤醒校验 · Issue #100）。
 
-    L1 声明 → L2 分发 → L3 触发 → L4 开工
+    L1 声明 → L2 分发 → L3 触发 → (真实唤醒校验闸门) → L4 开工
+
+    ⚠️ 防假装分配：L3 触发只投 [触发] 接力卡，不等于唤醒。本函数会校验对端是否
+       真实回执 [接单]/awake_ack——已回执才放行开工（进 L4_start），未回执的
+       任务标 awaiting_receipt（不假装开工），并通过 verification / awaiting_receipt
+       显式暴露。派发方必须对未回执任务重触发或升级，绝不把"列了清单"当完成。
 
     输入：
       repo: 仓库名（如 "dongdongxiaozu/dongjiagoushi"）
       assignments: [{task_key, title, role, domain, depends_on, priority, detail}]
 
-    输出：完整的四层分发结果报告
+    输出：{ L1_declare, L2_dispatch, L3_trigger, L4_start,
+            verification(真实唤醒核验), awaiting_receipt(待真实唤醒任务),
+            summary(含 started_ok/awake_count/awaiting_receipt_count/levels_reached) }
     """
     # L1 声明
     l1 = declare_assignments(assignments)
@@ -475,26 +555,51 @@ def dispatch(repo, assignments, enable_issue=True):
             })
     # L3 触发接单
     l3 = dispatch_trigger(l2)
-    # L4 开工
-    l4 = dispatch_start(l2)
+    # ---- 真实唤醒回执校验（防假装分配 · Issue #100）----
+    # 只在本地消息管线投了 [触发] 接力卡≠真唤醒。必须对端回执 [接单] 才算 L3 完成，
+    # 才能放行到 L4。未回执的任务标 awaiting_receipt，不假装开工。
+    # verify.detail 已按 task_id/agent_id 逐条判过真实回执，直接复用，避免二次查询
+    verify = dispatch_verify(l2)
+    l4 = []
+    l4_awaiting = []
+    for a, vd in zip(l2, verify["detail"]):
+        a = dict(a)
+        if vd["receipt"]:
+            l4.append(a)          # 已有回执 → 放行开工
+        else:
+            a["status"] = "awaiting_receipt"
+            a["depth"] = "L3·待真实唤醒"
+            l4_awaiting.append(a) # 未回执 → 阻塞，禁止假装开工
+
+    # 仅对"已获真实回执"的任务开工（未回执的不开工）
+    started = dispatch_start(l4) if l4 else []
 
     return {
         "L1_declare": l1,
         "L2_dispatch": l2,
         "L3_trigger": l3,
-        "L4_start": l4,
+        "L4_start": started,
+        "verification": verify,          # 真实唤醒核验结果（含 awaiting_receipt 明细）
+        "awaiting_receipt": l4_awaiting, # 未获接单回执、待真实唤醒的任务
         "summary": {
             "total_tasks": len(assignments),
             "declared_ok": len(l1),
             "dispatched_ok": len(l2),
             "triggered_ok": len(l3),
-            "started_ok": len(l4),
             "issues_created": sum(1 for x in l2 if x.get("issue_number")),
-            "levels_reached": 4 if l4 and all(x["status"] == "working" for x in l4) else
-                              3 if l3 else
-                              2 if l2 else
-                              1 if l1 else 0,
-            "note": "L4 需接单回执 + 进度尺推进 + 交付才算完成，当前为开工状态",
+            # ⚠️ 真实唤醒统计：只有对端回执 [接单] 并开工的才计入 started/awake
+            "started_ok": len(started),
+            "awake_count": verify["awake_count"],
+            "awaiting_receipt_count": verify["awaiting_receipt_count"],
+            "awaiting_receipt_tasks": [x.get("task_key") for x in l4_awaiting],
+            "levels_reached": (4 if started and all(x["status"] == "working" for x in started)
+                               else 3 if l3 and verify["awake_count"] > 0
+                               else 2 if l2 else
+                               1 if l1 else 0),
+            "note": ("已获真实 [接单] 回执并放行开工的任务数={started}；"
+                     "另有 {aw} 个任务仅投了接力卡未获回执（awaiting_receipt），"
+                     "未真实唤醒不得假装到 L4，须由对端回执 [接单] 或派发方重触发/升级。"
+                     .format(started=len(started), aw=verify["awaiting_receipt_count"])),
         },
     }
 

@@ -120,6 +120,11 @@ class DispatchAbility:
         """别名：四层分发深度一站式入口（与 dispatch 相同）。"""
         return self.dispatch(repo, assignments, enable_issue=enable_issue)
 
+    def dispatch_verify(self, assignments):
+        """真实唤醒核验（L4 闸门 · Issue #100）：核验一组已分发任务的对端
+        是否真实回执 [接单]，无回执即 awaiting_receipt，绝不假装到 L4。"""
+        return self._engine().dispatch_verify(assignments)
+
     # ------------------------------------------------------------
     # 被派发方侧（接单闭环）
     # ------------------------------------------------------------

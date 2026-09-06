@@ -250,6 +250,14 @@ class BaseRole:
         """别名：四层分发深度一站式入口（与 dispatch 相同）。"""
         return self.dispatch(repo, assignments, enable_issue=enable_issue)
 
+    def dispatch_verify(self, assignments):
+        """真实唤醒核验（L4 闸门）：核验已分发任务的对端是否真实回执 [接单]。
+        未回执的任务暴露为 awaiting_receipt——派发方/哨兵据此重触发或升级，
+        不把"列了清单/只投了接力卡"当派发完成。"""
+        if self.dispatch_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
+        return self.dispatch_ability.dispatch_verify(assignments)
+
     def accept(self, task_key, agent_id, role=None, note=""):
         """接单回执：收到 [触发:<角色>] 接力卡后回执 [接单] 确认接手。"""
         if self.dispatch_ability is None:
