@@ -100,6 +100,12 @@ class BaseRole:
             self.review_metrics_ability = ReviewMetricsAbility(owner=self)
         except Exception:
             self.review_metrics_ability = None
+        # 懒加载秘书层动态扩展能力（SecretaryScaleAbility · Issue #100 决策①：识别/注册/路由+权限护栏）
+        try:
+            from scale import secretary_ability as _ssa_mod
+            self.secretary_scale_ability = _ssa_mod.SecretaryScaleAbility(owner=self)
+        except Exception:
+            self.secretary_scale_ability = None
 
     # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
@@ -504,6 +510,48 @@ class BaseRole:
         """最近有效性度量留痕。"""
         return self._rm().metrics_trace_recent(limit=limit)
 
+    # ------------------------------------------------------------
+    # 秘书层动态扩展能力透传（SecretaryScaleAbility · Issue #100 决策①）
+    # ------------------------------------------------------------
+    def _ssa(self):
+        if getattr(self, "secretary_scale_ability", None) is None:
+            raise RuntimeError(f"角色 {self.name} 未加载秘书层动态扩展能力")
+        return self.secretary_scale_ability
+
+    def secretary_scale_suggest(self, domain, reuse_count=0, scores=None,
+                                requires_execution=False):
+        """识别层：判定某场景/信息流是否值得设一个秘书。"""
+        return self._ssa().secretary_scale_suggest(
+            domain, reuse_count=reuse_count, scores=scores,
+            requires_execution=requires_execution)
+
+    def register_secretary_service(self, domain, desc="", handoff_to="", reuse=0,
+                                   interfaces=None):
+        """注册层：动态挂载一个秘书服务（交接域）。"""
+        return self._ssa().register_secretary_service(
+            domain, desc=desc, handoff_to=handoff_to, reuse=reuse, interfaces=interfaces)
+
+    def unregister_secretary_service(self, domain):
+        """注册层：动态卸载一个秘书服务。"""
+        return self._ssa().unregister_secretary_service(domain)
+
+    def list_secretary_services(self, status=None):
+        """注册表：列出秘书服务。"""
+        return self._ssa().list_secretary_services(status=status)
+
+    def secretary_route(self, request, duty=None):
+        """路由层：层间路由请求到匹配秘书域（未命中回终端开发线）。
+        duty: 请求职责类型（可选），终端执行类职责在路由入口即被护栏拦截。"""
+        return self._ssa().secretary_route(request, duty=duty)
+
+    def secretary_guard(self, duty):
+        """权限护栏：判定某职责是否秘书可合法承担（越权接终端任务即拦）。"""
+        return self._ssa().secretary_guard(duty)
+
+    def secretary_scale_logs(self, limit=50):
+        """秘书层动作留痕（可回溯）。"""
+        return self._ssa().secretary_scale_logs(limit=limit)
+
     def capability(self):
         """返回本角色的能力清单（含三大全员通用能力）。"""
         base = {"role": self.name}
@@ -521,6 +569,8 @@ class BaseRole:
             base["standard_ability"] = self.standard_ability.capability()
         if getattr(self, "review_metrics_ability", None) is not None:
             base["review_metrics_ability"] = self.review_metrics_ability.capability()
+        if getattr(self, "secretary_scale_ability", None) is not None:
+            base["secretary_scale_ability"] = self.secretary_scale_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----
