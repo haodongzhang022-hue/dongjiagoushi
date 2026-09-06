@@ -144,3 +144,31 @@ L4 不是"多一个开关"，而是把「接单 → 工作」的整条链路跑�
 - [x] 工作推进写 **goal_meters** 进度尺刻度，sentinel 可判定推进/停滞；
 - [x] 交付经小组长汇总整合，看板自动可视化；
 - [x] 权限模型明确（@ 角色全名 / CodeBuddy 兜底 / 专用派发 agent），派发不静默失败。
+
+---
+
+## 八、真实唤醒闸门：对结果负责，防「假装分配」断链（Issue #100 补强）
+
+**问题**：旧 `dispatch()` 一站式入口把「派发动作」当「派发结果」——投了接力卡就当
+对方接了单，`levels_reached` 无条件报到 L4，没人回执也报"完成"。秘书/经理/产品等
+角色据此"列个清单、调一下 dispatch()"就当工作完成了，交接链对结果不负责 = 链条断裂。
+
+**修复（引擎层硬闸门）**：
+1. **L4 必须以对端真实回执为唯一事实来源**：`dispatch()` 对每个子任务调用
+   `has_receipt(task_id)` 核验是否存在真实 `[接单]`/`awake_ack` 记录；
+2. **无回执禁止假装 L4**：未获回执的任务诚实停在 L3，写入返回的
+   `awaiting_receipt`（待回执清单），`levels_reached` 诚实反映**已核验**的最深层级；
+3. **全员暴露核验接口**：任何上级角色可调 `handoff_status()`，一次看清派发的
+   子任务里 `accepted`（下级已接单对结果负责）与 `broken`（链条断裂待唤醒）各多少。
+
+**对每个上下级的落地规则**：
+- 上级派发后**必须核验**下级真实接单（`[接单]`/`awake_ack`），不核验不得自认完成；
+- `handoff_status().broken > 0` = 有下级未接单 = 链条断裂 → 重触发/升级，不静默放行；
+- 「列了清单/调了 dispatch()」≠ 完成，**以「下级真接了单、在干活、交付了」为完成**。
+
+**承载代码**：
+- `dispatch_engine.dispatch()` → 真实唤醒闸门（awaiting_receipt / verified_ok / started_ok / levels_reached 诚实）
+- `dispatch_engine.has_receipt(task_id)` → 单点回执核验
+- `dispatch_engine.handoff_status()` → 上级对结果负责核验
+- `DispatchAbility.handoff_status()` / `BaseRole.handoff_status()` → 全员可用
+- 测试 `tests/test_dispatch_engine.sh`（含红灯：无回执不得报 L4）

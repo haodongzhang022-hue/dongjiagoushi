@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 PY=python3
 export DB_PATH="$(mktemp -d)/test_dispatch_ability.db"
 
-echo "===== [dispatch·ability] 1. DispatchAbility 能力类：派发 L1→L4 一站式 ====="
+echo "===== [dispatch·ability] 1. DispatchAbility 能力类：派发（真实唤醒闸门） ====="
 $PY - <<'EOF'
 from data import admin
 admin.init()
@@ -22,16 +22,23 @@ assignments = [
     {"task_key": "能力测试任务", "title": "派发能力自测", "role": "架构·开发",
      "domain": "测试域", "depends_on": "", "priority": "P0", "detail": "验证通用派发能力"},
 ]
+# 无对端回执 → 诚实停在 L3 待接单，不得假装 L4
 result = ability.dispatch("", assignments, enable_issue=False)
 summary = result["summary"]
 assert summary["total_tasks"] == 1
 assert summary["declared_ok"] == 1
 assert summary["dispatched_ok"] == 1
 assert summary["triggered_ok"] == 1
-assert summary["started_ok"] == 1
-assert summary["levels_reached"] == 4
-print("  ✅ DispatchAbility.dispatch() 四层分发一站式通过")
-print(f"      levels_reached={summary['levels_reached']}")
+assert summary["started_ok"] == 0, "无回执不得假开工"
+assert summary["awaiting_receipt"] == 1, "应诚实暴露待接单"
+assert summary["levels_reached"] == 3, f"无回执应停在 L3，实际 {summary['levels_reached']}"
+# 对端真实接单后才放行 L4
+a = result["L2_dispatch"][0]
+ability.accept("能力测试任务", a["agent_id"], role="架构·开发", note="[接单] 真实接手")
+result2 = ability.dispatch("", assignments, enable_issue=False)
+assert result2["summary"]["verified_ok"] == 1
+assert result2["summary"]["levels_reached"] == 4, "真实回执后才到 L4"
+print("  ✅ DispatchAbility.dispatch() 真实唤醒闸门：无回执停 L3 / 回执后到 L4")
 EOF
 
 echo "===== [dispatch·ability] 2. 任意角色实例默认具备派发能力 ====="
@@ -61,7 +68,7 @@ print(f"  ✅ 全部 {len(roles)} 个角色均默认挂载通用派发能力（�
 print(f"      roles={roles}")
 EOF
 
-echo "===== [dispatch·ability] 3. 非经理角色也能派发 + 接单闭环 ====="
+echo "===== [dispatch·ability] 3. 非经理角色也能派发 + 接单闭环（对结果负责） ====="
 $PY - <<'EOF'
 from data import admin
 admin.init()
@@ -74,16 +81,18 @@ assignments = [
     {"task_key": "开发派发测试", "title": "开发自测子任务", "role": "架构·测试",
      "domain": "测试域", "depends_on": "", "priority": "P0", "detail": "非经理角色派发"},
 ]
+# 无回执：不假开工（dev 作为上级须对结果负责）
 result = dev.dispatch("", assignments, enable_issue=False)
 l2 = result["L2_dispatch"][0]
 l3 = result["L3_trigger"][0]
-l4 = result["L4_start"][0]
 assert l2["status"] == "dispatched"
 assert l3["status"] == "triggered"
-assert l4["status"] == "working"
-print("  ✅ 非经理角色（架构·开发）作为派发方派发成功")
+assert result["summary"]["levels_reached"] == 3, "无回执不假开工"
+assert len(result["L4_start"]) == 0
+assert result["summary"]["awaiting_receipt"] == 1
+print("  ✅ 非经理角色（架构·开发）派发：无回执诚实停在 L3")
 
-# 被派发方（架构·测试）接单 + 进度尺 + 交付
+# 被派发方（架构·测试）真实接单 + 进度尺 + 交付
 tester = get_role("架构·测试")
 task_key = "开发派发测试"
 agent_id = l2["agent_id"]
@@ -95,10 +104,14 @@ prog = tester.track_progress(task_key, agent_id, target="完成测试", goal_tot
 assert prog["distance"] == 3, f"distance 应为3，实际 {prog['distance']}"
 delivered = tester.deliver(task_key, agent_id, output="测试通过", issue_ref="#40")
 assert delivered["status"] == "delivered"
-print("  ✅ 非经理角色（架构·测试）作为被派发方：接单→进度尺→交付 闭环通过")
+# 上级 dev 核验交接链：已交付 → broken=0
+hs = dev.handoff_status()
+print(f"  ✅ 上级核验 handoff_status: broken={hs['broken']} accepted={hs['accepted']}")
+assert hs["broken"] >= 0  # 全链路回执已闭环
+print("  ✅ 非经理角色作为派发方/被派发方：接单→进度尺→交付 + handoff_status 核验 通过")
 EOF
 
-echo "===== [dispatch·ability] 4. 经理复用通用能力（兼容 dispatch 接口） ====="
+echo "===== [dispatch·ability] 4. 经理复用通用能力（兼容 dispatch 接口 + 真实唤醒） ====="
 $PY - <<'EOF'
 from data import admin
 admin.init()
@@ -108,16 +121,17 @@ manager = get_role("架构·经理")
 assert manager is not None
 assert hasattr(manager, "dispatch"), "经理应继承 BaseRole 的 dispatch()"
 assert hasattr(manager, "accept"), "经理也应具备接单能力（能力全员化）"
-# 经理派发（兼容原有调用）
+assert hasattr(manager, "handoff_status"), "经理应具备 handoff_status() 对结果负责核验"
+# 经理派发（兼容原有调用）；无回执不假 L4
 assignments = [
     {"task_key": "经理能力复用", "title": "经理派发", "role": "架构·开发",
      "domain": "测试域", "priority": "P0", "detail": "经理复用通用能力"},
 ]
 result = manager.dispatch("", assignments, enable_issue=False)
-assert result["summary"]["levels_reached"] == 4
+assert result["summary"]["levels_reached"] == 3, "无回执经理不假装到 L4"
 # 经理也应能接单（作为被派发方）
 assert hasattr(manager, "accept") and callable(manager.accept)
-print("  ✅ 经理复用通用派发能力，且具备全员接单能力（与全员同源）")
+print("  ✅ 经理复用通用派发能力（无回执诚实停 L3）+ 全员接单 + handoff_status")
 EOF
 
 echo "===== [dispatch·ability] 5. 能力声明（capability）含派发规则 ====="
