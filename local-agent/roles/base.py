@@ -94,6 +94,12 @@ class BaseRole:
             self.standard_ability = StandardAbility(owner=self)
         except Exception:
             self.standard_ability = None
+        # 懒加载有效性度量全员能力（ReviewMetricsAbility · Issue #100 决策⑤：维度化+概率×程度分档+留痕）
+        try:
+            from review_metrics import ReviewMetricsAbility
+            self.review_metrics_ability = ReviewMetricsAbility(owner=self)
+        except Exception:
+            self.review_metrics_ability = None
 
     # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
@@ -462,6 +468,42 @@ class BaseRole:
             raise RuntimeError(f"角色 {self.name} 未加载开发规范能力")
         return self.standard_ability.report_compliance(entity, results, format=format)
 
+    # ------------------------------------------------------------
+    # 有效性度量全员能力透传（ReviewMetricsAbility · Issue #100 决策⑤）
+    # ------------------------------------------------------------
+    def _rm(self):
+        if self.review_metrics_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载有效性度量能力")
+        return self.review_metrics_ability
+
+    def metrics_dims(self):
+        """列出有效性维度（唯一事实源）。"""
+        return self._rm().metrics_dims()
+
+    def metrics_spec(self):
+        """机器可读规范摘要。"""
+        return self._rm().metrics_spec()
+
+    def metrics_band_names(self):
+        """返回档位名。"""
+        return self._rm().metrics_band_names()
+
+    def measure_review(self, observation, trace=True, meta=None):
+        """提交一次评审/交付观测，分档度量并留痕。"""
+        return self._rm().measure_review(observation, trace=trace, meta=meta)
+
+    def metrics_aggregate(self, observations):
+        """归并多次观测 → 每维 + 总体有效度。"""
+        return self._rm().metrics_aggregate(observations)
+
+    def metrics_judge(self, observations):
+        """确定性达标判定（对照测试信号灯等客观事实）。"""
+        return self._rm().metrics_judge(observations)
+
+    def metrics_trace_recent(self, limit=20):
+        """最近有效性度量留痕。"""
+        return self._rm().metrics_trace_recent(limit=limit)
+
     def capability(self):
         """返回本角色的能力清单（含三大全员通用能力）。"""
         base = {"role": self.name}
@@ -477,6 +519,8 @@ class BaseRole:
             base["dev_team_ability"] = self.dev_team_ability.capability()
         if getattr(self, "standard_ability", None) is not None:
             base["standard_ability"] = self.standard_ability.capability()
+        if getattr(self, "review_metrics_ability", None) is not None:
+            base["review_metrics_ability"] = self.review_metrics_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----

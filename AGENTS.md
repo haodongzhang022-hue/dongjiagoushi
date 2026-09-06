@@ -339,7 +339,27 @@
 > rules 固定。规则层已落地 `reviewer.py`（`do_review` 主流程 + `dual_axis_review` 双轴完整核验）
 > + `tests/test_doc_consistency.sh` 运行时核验缺轴判不完整禁止放行，红灯可查到底有没有走双轴。
 
-### 前期辅助与架构师渐进（规模预设 · 3 阶段）固定规则
+### 有效性度量模型（Review Metrics · 固定规则 · Issue #100 决策⑤）
+
+评审/交付"是否有效解决问题"不能靠"笼统解决率 / 主观看法"，必须用**可量化、分档、
+留痕、以测试为准**的有效性度量。本规则为仓库级固定 rules，对所有评审/测试/交付
+agent 生效（详见 `docs/REVIEW_METRICS.md`）：
+
+- **① 维度化**：有效性从 5 个正交维度度量（`resolution` 问题解决度 / `bug_rate`
+  小八哥率 / `stability` 稳定性 / `generality` 通用性 / `consistency` 跨场景一致性），
+  维度唯一事实源 `local-agent/review_metrics/spec.py`，**禁止自造指标**（引擎遇未知维度拒绝）。
+- **② 概率×程度分档**：不用单一均值，用 `(prob, degree)` 分布表达"以多少概率达到
+  多高程度"（如 10% 概率 99% 解决），归并输出档位质量分布（low/mid/high/full）+
+  达标质量占比，规避"10 个 30%/60% 平均算增算减"的歧义。
+- **③ 留痕**：每次度量观测 + 分档结果写 `review_metrics_trace`（尽力同步 data/
+  archives），可回溯、可被监控哨兵发现高未解决率/高小八哥率并打断升级。
+- **④ 以测试为准（确定性判定）**：判定只认客观"唯一事实源"（测试信号灯 / 回归红绿 /
+  崩溃数据 / 复评通过），对照 `JUDGE_THRESHOLDS` 给出确定性达标/不达标，不认主观看法。
+
+> 触发：显式 `[触发:架构·评审]` / 语义命中「度量/有效性/解决度/小八哥/稳定性/通用性/
+> 跨场景一致性/有没有效解决」/ rules 固定。规则层已落地 `review_metrics/` 引擎 +
+> `tests/test_review_metrics.sh`（7 组信号灯），红灯可查到底有没有走分档量化判定。
+
 - **规模预设前置（可执行引擎）**：秘书/产品/架构师/调研在**需求澄清阶段**先按体量预设 `team_size + collab_plan + risk_level` + 检索经验方案库，作为增减基准锚点；架构明确后由**架构·经理按架构做增量修正**，不做从零规划。**已落地可执行引擎 `local-agent/scale/prescale.py`**（`prescale(req) → {team_size, collab_plan, risk_level, source}` + 经验方案库 `search_pattern` + 增量修正 `adjust_by_architect` + 强制留痕 `prescale_records`），并有测试断言『需求进入处理前必须先有预设记录』，红灯可查到底预没预设。
 - **规模金字塔 → 承接体系（固定规则 · Issue #41 纠偏）**：任务从最小到最大按规模分层承接，**小任务占比最高、最该优化**。micro/small（单任务修改/低复杂度）→ **简化体系·敏捷**（产品→开发→审查，不做重分工）；medium（中等）→ **加架构师**；large（高复杂度）→ **公司结构拉满**（DAG 全角色+分形+找工具/对齐）；huge（极高复杂度/大型）→ **完整体系** + 动态扩容 + 水龙头蔓延 + 带蔓延关系回传合并。**缓存命中为主线（cache-first）横贯所有档位**（micro/small 最简共享需求前缀 → huge 水龙头蔓延聚合）。已落地 `topology/fusion.py`（`TIER_SYSTEM` + `evaluate_scale` 含 micro 档）+ `topology/topologies.py` `agile` 极简拓扑；并由 `topology/router.py` 接线层接入真实执行链路——`run_pipeline` 按规模动态选择并执行对应拓扑（agile 4 节点 / dag 11 / prefix 17 / scatter 15），不再硬编码 team.yaml dag（详见 `docs/ROUTER.md`）。
 - **架构师 3 阶段渐进**（避免一轮直出最大框架出错）：**阶段1 粗纲**（功能架构顶层框架）→ **阶段2 功能域**（逐模块填充实现架构）→ **阶段3 细纲**（接口/数据结构/伪代码细纲供开发接）。每阶段独立检查点，错误在早期暴露修正。
