@@ -151,6 +151,15 @@ class DispatchAbility:
     # ------------------------------------------------------------
     # 能力元信息
     # ------------------------------------------------------------
+    def handoff_status(self, task_ids=None):
+        """对结果负责核验：检查本角色派发的子任务交接链是否闭环。
+
+        broken>0 = 有下级未真实接单 → 链条断裂，须重触发/升级，不静默放行。
+        任何「上级」角色在派发后都应调用，而非以『列了清单』代替派发结果。
+        """
+        return self._engine().handoff_status(task_ids=task_ids,
+                                             from_role=self._owner_name)
+
     def capability(self):
         """返回能力声明（供 AGENTS.md / 文档 / 各 agent 人设引用）。"""
         return {

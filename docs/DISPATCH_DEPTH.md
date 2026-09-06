@@ -178,6 +178,10 @@ L4 不是"多一个开关"，而是把「接单 → 工作」的整条链路跑�
   保守层级）；`levels_reached` 保留为 min（向后兼容 · 不谎报）。
 - **能力全员化**：`dispatch_verify` 已透传到 `DispatchAbility` + `BaseRole`，秘书/经理/产品/
   开发等任意角色都可调用，**不再"列个表就自认完成"**。
+- **上级「对结果负责」纵向俯瞰（`handoff_status`）**：与 `dispatch_verify`（面向"一组派发"在
+  派发时刻核验）互补，`handoff_status(task_ids, from_role)` 面向**上级角色**做纵向俯瞰——一次看清
+  该角色派发的所有子任务里 `accepted`（下级已接单对结果负责）与 `broken`（链条断裂待唤醒）各多少；
+  `broken>0` 即断链，须重触发/升级，不静默放行。经 `DispatchAbility`/`BaseRole` 挂载，全员可用。
 
 ### 校验机制为什么必要
 

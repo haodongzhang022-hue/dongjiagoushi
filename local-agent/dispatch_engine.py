@@ -687,6 +687,62 @@ def dispatch_depth_overview():
     }
 
 
+# ============================================================
+# 上级「对结果负责」核验：交接责任链是否闭环（Issue #100）
+# ------------------------------------------------------------
+# dispatch_verify() 面向"一组派发"在派发时刻核验真实唤醒；
+# handoff_status() 面向"上级角色"做纵向俯瞰——一次看清该角色
+# 派发的所有子任务里 accepted(下级已接单) 与 broken(链条断裂待唤醒)。
+# 两者互补：verify 管派发动作，handoff 管"每个上下级对结果负责"。
+# ============================================================
+def handoff_status(task_ids=None, from_role=""):
+    """上级「对结果负责」核验：检查所有派发子任务的交接责任链是否闭环。
+
+    这是用户核心诉求「每个上下级都要对结果负责，不对结果负责链条就是断的」
+    的程序化落点——上级角色派发后调本方法，即知哪些下级已真实接单、
+    哪些还在『断链待唤醒』，不再凭「列了清单」就当完成。
+
+    返回：
+      total       派发任务总数
+      accepted    已有 [接单]/awake_ack 真实回执的任务数（下级已对结果负责）
+      broken      无回执、链条断裂的任务数（须重触发/升级，不能放行）
+      broken_tasks 断链明细
+    """
+    from data import repository as repo
+    progress = repo.recent_progress(limit=10000)
+    tasks = repo.list_tasks()
+    if task_ids:
+        id_set = set(task_ids)
+    else:
+        id_set = {t.get("task_id") for t in tasks if t.get("task_id")}
+    accepted, broken = [], []
+    for tid in sorted(id_set):
+        evs = [p for p in progress if p.get("task_id") == tid]
+        has_accept = any(p.get("event") in ("accepted", "awake_ack") for p in evs)
+        has_deliver = any(p.get("event") == "delivered" for p in evs)
+        if has_deliver:
+            status = "L4·已交付"
+        elif has_accept:
+            status = "L3·已接单(working)"
+        else:
+            status = "L2/L3·断链待接单"
+        item = {"task_id": tid, "status": status,
+                "accepted": has_accept, "delivered": has_deliver}
+        if has_accept or has_deliver:
+            accepted.append(item)
+        else:
+            broken.append(item)
+    return {
+        "total": len(accepted) + len(broken),
+        "accepted": len(accepted),
+        "broken": len(broken),
+        "from_role": from_role,
+        "broken_tasks": broken,
+        "note": ("对结果负责 = 每个派发子任务都必须有下级真实接单回执并交付；"
+                 "broken>0 即链条断裂，须重触发/升级，不得静默放行。"),
+    }
+
+
 if __name__ == "__main__":
     import json
     import argparse
