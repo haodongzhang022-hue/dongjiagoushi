@@ -114,16 +114,12 @@ main:
             for t in selected:
                 print(f'    bash {t}')
 
-            failed = False
-            for t in selected:
-                print(f'\n==== 运行: {t} ====')
-                rc = subprocess.call(['bash', t], cwd='.')
-                if rc != 0:
-                    print(f'  ❌ {t} 失败')
-                    failed = True
-                else:
-                    print(f'  ✅ {t} 通过')
-            sys.exit(1 if failed else 0)
+            # ---- 整批计划执行（Issue #93）：把本轮选定的一批测试作为一个批次计划，在
+            #      单次 CI 构建内整批跑完 + 统一 sync/cost/quota 收尾，而非逐脚本独立构建
+            #      （BusRunner · scripts/ci-bus-batch.py）----
+            print(f'  整批计划执行（BusRunner · 单次构建内一批跑完 + 统一 sync/cost/quota）:')
+            rc = subprocess.call(['python3', 'scripts/ci-bus-batch.py'] + selected, cwd='.')
+            sys.exit(rc)
             PY
     - name: dev-standard check
       docker:
@@ -144,6 +140,29 @@ main:
             echo "  ✅ 开发规范检查通过（无 hard 失败）"
 
 
+  pull_request.approved:
+    - name: review gate batch test
+      docker:
+        image: python:3.11
+      stages:
+        - name: test
+          # 评审门禁整批测试（Issue #93 · Bus 接入云端 CI 后续增量）
+          # 云端核时大头在"评审触发的测试"。评审动作（PR 审批）触发时，
+          # 由 scripts/ci-review-batch.py 做变更感知选择（IncrementalSelector）
+          # 并把选中的一批测试作为【一个批次】交给 ci-bus-batch.py 整批跑完
+          # （BusRunner · 单次构建内整批 + 统一 sync/cost/quota），
+          # 而非评审单发多次冷启动 / 逐测试单独拉起。并行度默认 1 规避冲突。
+          script: |
+            set -e
+            echo "==== 评审门禁整批测试（pull_request.approved · Issue #93 后续增量） ===="
+            echo "云端评审触发核时大头：由单发/逐测试改为 Bus 单次构建内整批计划执行"
+            echo "变更感知选择命中受影响测试，未命中跑核心冒烟兜底；整批失败即门禁红。"
+            echo ""
+            pip install -q -r local-agent/requirements.txt 2>/dev/null || true
+            python3 scripts/ci-review-batch.py || exit 1
+            echo "  ✅ 评审整批测试通过（Bus · 一批跑完 + sync/cost/quota 留痕）"
+
+
 # NPC 任务兜底（Issue/PR 评论 @NPC 触发）
 # 主路线是官方 @CodeBuddy 自动加载 architect skill；
 # 此处保留 npc:go 兜底，供未来按 .cnb/settings.yml 定义自建 NPC 或平台触发时使用。
@@ -153,11 +172,12 @@ main:
     - name: npc go
       type: npc:go
       options:
-        role: "架构·总师"            # 对应 .cnb/settings.yml 中的角色（兜底人设）
+        role: "架构·秘书"            # 对应 .cnb/settings.yml 中的角色（兜底人设）
         model: deepseek-v4-flash     # 项目默认基座模型（用户指定：deepseek v4 flash）
           # 其他可选模型（按需切换）：
           # model: hy3                # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
           # model: glm-5              # GLM 模型
+          # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
 
 # 看板自动化：基于 Issue 声明头自动刷新模块版本演进看板 + 里程碑表
 # 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md

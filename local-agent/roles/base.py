@@ -286,6 +286,16 @@ class BaseRole:
             task_key, agent_id, target=target, goal_total=goal_total,
             current=current, note=note, role=role or self.name)
 
+    def handoff_status(self, task_ids=None):
+        """对结果负责核验：检查本角色派发的子任务交接链是否闭环。
+
+        上级派发后应调用：broken>0 = 有下级未真实接单 → 链条断裂，
+        须重触发/升级，不得凭『列了清单』自认为完成。任何上下级均适用。
+        """
+        if self.dispatch_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
+        return self.dispatch_ability.handoff_status(task_ids=task_ids)
+
     def deliver(self, task_key, agent_id, output, issue_ref="", role=None):
         """向上交付：标记任务 done + 归档产物 + 留痕。"""
         if self.dispatch_ability is None:

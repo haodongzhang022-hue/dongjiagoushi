@@ -83,28 +83,57 @@ class FingerprintCache(object):
 
 
     def _resolve_covered(self, covered):
-        """把 covers 路径解析成实际候选路径（兼容 local-agent/ 前缀与裸路径）。"""
+        """把 covers 路径解析成实际候选路径（兼容 local-agent/ 前缀与裸路径）。
+
+        与 selector._find_by_source 一致的双向归一化：无论 covered / root_dir
+        是否带 `local-agent/` 前缀、root_dir 是仓库根还是 local-agent 目录，
+        都生成「带前缀 / 裸路径」两个变体参与匹配，保证：
+          - covered=`local-agent/engine/host.py` 且 root_dir=仓库根 → 命中；
+          - covered=`local-agent/engine/host.py` 且 root_dir=local-agent 目录
+            （default_cache 以 os.getcwd() 为根）→ 命中；
+          - covered=`engine/host.py`（裸路径）→ 同样双向兼容。
+        """
         candidates = []
         # 绝对路径
         if os.path.isabs(covered):
             candidates.append(covered)
+            return candidates
+        # 双向归一化：covered 同时生成「裸路径 / 带 local-agent/ 前缀」两个变体
+        variants = {covered}
+        if covered.startswith("local-agent/"):
+            variants.add(covered[len("local-agent/"):])
         else:
-            # 裸路径（registry 约定相对 local-agent/）
-            candidates.append(os.path.join(self.root_dir, "local-agent", covered))
-            candidates.append(os.path.join(self.root_dir, covered))
+            variants.add("local-agent/" + covered)
+        # 每个变体再在 root_dir 及其 local-agent 子目录下各试一次，
+        # 兼容 root_dir 是仓库根 或 已指向 local-agent 目录两种情况。
+        for v in variants:
+            candidates.append(os.path.join(self.root_dir, "local-agent", v))
+            candidates.append(os.path.join(self.root_dir, v))
         return candidates
 
     def _expand_covered(self, covered):
-        """把 covers 里的目录/前缀展开成实际文件清单。"""
+        """把 covers 里的目录/前缀展开成实际文件清单（兼容前缀/裸路径/绝对路径）。"""
         import glob
-        path = os.path.join(self.root_dir, covered) if not os.path.isabs(covered) else covered
-        # 如果是目录
-        if os.path.isdir(path):
-            return [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
-        # 可能是前缀/glob
-        if "*" in covered:
-            return glob.glob(os.path.join(self.root_dir, covered))
-        return [path]
+        paths = []
+        if os.path.isabs(covered):
+            paths.append(covered)
+        else:
+            # 与 _resolve_covered 相同归一化：兼容前缀/裸路径 + root_dir 层级
+            for cand in self._resolve_covered(covered):
+                paths.append(cand)
+        for path in paths:
+            # 目录：展开成实际文件
+            if os.path.isdir(path):
+                return [os.path.join(path, f) for f in os.listdir(path)
+                        if os.path.isfile(os.path.join(path, f))]
+            # 前缀/glob
+            if "*" in covered:
+                g = glob.glob(path)
+                if g:
+                    return g
+            elif os.path.isfile(path):
+                return [path]
+        return [paths[0]] if paths else []
 
     # ---------- 命中判定 ----------
     def _row(self, script, fp):

@@ -453,13 +453,15 @@ def _has_receipt(task_id, agent_id):
     """
     if not task_id or not agent_id:
         return False
-    from data import repository as repo
-    for p in repo.recent_progress(limit=5000):
-        if (p.get("task_id") == task_id
-                and p.get("agent_id") == agent_id
-                and p.get("event") in ("accepted", "awake_ack")):
-            return True
-    return False
+    # 直接走 progress 表条件查询（命中 idx_progress_task 索引），
+    # 避免拉取全表 5000 条记录后 Python 线性扫描（性能优化）
+    from data import db
+    row = db.query_one(
+        "SELECT 1 FROM progress WHERE task_id=? AND agent_id=? "
+        "AND event IN ('accepted', 'awake_ack') LIMIT 1",
+        (task_id, agent_id),
+    )
+    return row is not None
 
 
 def dispatch_verify(assignments):
@@ -503,7 +505,6 @@ def dispatch_verify(assignments):
                  "存在未获 [接单] 回执的任务——仅投了接力卡未真唤醒，"
                  "不得假装到 L4，须重触发或升级，绝不静默放行"),
     }
-
 
 
 def dispatch(repo, assignments, enable_issue=True):
@@ -592,8 +593,23 @@ def dispatch(repo, assignments, enable_issue=True):
             "awake_count": verify["awake_count"],
             "awaiting_receipt_count": verify["awaiting_receipt_count"],
             "awaiting_receipt_tasks": [x.get("task_key") for x in l4_awaiting],
-            "levels_reached": (4 if started and all(x["status"] == "working" for x in started)
-                               else 3 if l3 and verify["awake_count"] > 0
+            # ---- 确认到达层级（max/min 两层 · 防歧义）----
+            # 混合场景（部分任务开工到 L4、部分未回执停在 L2）单值 levels_reached
+            # 报 4 会让调用方误以为全部到 L4——拆分两层：
+            #   levels_reached_max = 任务群中**任一任务**到达的最深层级
+            #   levels_reached_min = 任务群中**全部任务**都已到达的层级（保守值）
+            #   levels_reached     = min（向后兼容 · 取保守值不谎报）
+            # 每个任务的确认深度：receipt=True→dispatch_start 开工到 L4；
+            #                      receipt=False→dispatch_trigger 已投接力卡但
+            #                      未获 [接单] 回执确认 L3 完成，保守计为 L2。
+            "levels_reached_max": (4 if started
+                                   else 3 if l3 and verify["awake_count"] > 0
+                                   else 2 if l2 else
+                                   1 if l1 else 0),
+            "levels_reached_min": (4 if len(started) == len(l2) and len(l2) > 0
+                                   else 2 if l2 else
+                                   1 if l1 else 0),
+            "levels_reached": (4 if len(started) == len(l2) and len(l2) > 0
                                else 2 if l2 else
                                1 if l1 else 0),
             "note": ("已获真实 [接单] 回执并放行开工的任务数={started}；"
@@ -668,6 +684,62 @@ def dispatch_depth_overview():
         "reached_L4": depth_count.get("L4_工作交付", 0),
         "note": "L4_工作交付才算派活完成；仅 L1 声明/L2 分发为「名义派活」，须追到接单+工作",
         "detail": detail,
+    }
+
+
+# ============================================================
+# 上级「对结果负责」核验：交接责任链是否闭环（Issue #100）
+# ------------------------------------------------------------
+# dispatch_verify() 面向"一组派发"在派发时刻核验真实唤醒；
+# handoff_status() 面向"上级角色"做纵向俯瞰——一次看清该角色
+# 派发的所有子任务里 accepted(下级已接单) 与 broken(链条断裂待唤醒)。
+# 两者互补：verify 管派发动作，handoff 管"每个上下级对结果负责"。
+# ============================================================
+def handoff_status(task_ids=None, from_role=""):
+    """上级「对结果负责」核验：检查所有派发子任务的交接责任链是否闭环。
+
+    这是用户核心诉求「每个上下级都要对结果负责，不对结果负责链条就是断的」
+    的程序化落点——上级角色派发后调本方法，即知哪些下级已真实接单、
+    哪些还在『断链待唤醒』，不再凭「列了清单」就当完成。
+
+    返回：
+      total       派发任务总数
+      accepted    已有 [接单]/awake_ack 真实回执的任务数（下级已对结果负责）
+      broken      无回执、链条断裂的任务数（须重触发/升级，不能放行）
+      broken_tasks 断链明细
+    """
+    from data import repository as repo
+    progress = repo.recent_progress(limit=10000)
+    tasks = repo.list_tasks()
+    if task_ids:
+        id_set = set(task_ids)
+    else:
+        id_set = {t.get("task_id") for t in tasks if t.get("task_id")}
+    accepted, broken = [], []
+    for tid in sorted(id_set):
+        evs = [p for p in progress if p.get("task_id") == tid]
+        has_accept = any(p.get("event") in ("accepted", "awake_ack") for p in evs)
+        has_deliver = any(p.get("event") == "delivered" for p in evs)
+        if has_deliver:
+            status = "L4·已交付"
+        elif has_accept:
+            status = "L3·已接单(working)"
+        else:
+            status = "L2/L3·断链待接单"
+        item = {"task_id": tid, "status": status,
+                "accepted": has_accept, "delivered": has_deliver}
+        if has_accept or has_deliver:
+            accepted.append(item)
+        else:
+            broken.append(item)
+    return {
+        "total": len(accepted) + len(broken),
+        "accepted": len(accepted),
+        "broken": len(broken),
+        "from_role": from_role,
+        "broken_tasks": broken,
+        "note": ("对结果负责 = 每个派发子任务都必须有下级真实接单回执并交付；"
+                 "broken>0 即链条断裂，须重触发/升级，不得静默放行。"),
     }
 
 

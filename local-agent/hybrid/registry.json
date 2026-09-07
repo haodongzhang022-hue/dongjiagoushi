@@ -642,6 +642,33 @@
       "cpu_cost_est": 2.0,
       "time_est": 6.0,
       "kind": "cpu-dense"
+    },
+    "tests/test_ci_bus_batch.sh": {
+      "name": "test_ci_bus_batch",
+      "covers": [
+        ".cnb.yml",
+        "scripts/ci-bus-batch.py",
+        "docs/HYBRID_CI_BUS.md"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_ci_review_batch.sh": {
+      "name": "test_ci_review_batch",
+      "covers": [
+        ".cnb.yml",
+        "scripts/ci-bus-batch.py",
+        "scripts/ci-review-batch.py",
+        "docs/HYBRID_CI_BUS.md"
+      ],
+      "depends_on": [
+        "tests/test_ci_bus_batch.sh"
+      ],
+      "cpu_cost_est": 2.0,
+      "time_est": 5.0,
+      "kind": "cpu-dense"
     }
   }
 }

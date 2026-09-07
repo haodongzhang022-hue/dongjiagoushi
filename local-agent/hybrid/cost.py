@@ -1,14 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-CostMonitor · 成本监测与报表
-=============================
-量化「云端 CPU 本地化」带来的成本收益：统计被判为 local 的脚本原本
-占用的云端 CPU 核·分钟，与本地化后的实际执行情况对比，输出节省报表。
+CostMonitor · 成本监测与报表（Issue #57 + Issue #65 T6 扩展）
+=============================================================
+量化「云端 CPU 本地化 + 测试智能优化」带来的成本收益：
+
+v1.0（Issue #57）能力：
+  - report()：本地化路由成本报表（总节省 / 剩余云端 / 回滚量）
+
+v2.0（Issue #65 T6）扩展：
+  - report_optimizer()：**三合一节省报表**（增量 + 缓存 + 并行）：
+      * 增量节省：未受影响测试原本的云端 CPU 成本
+      * 缓存节省：指纹未变化被跳过的测试成本
+      * 并行节省：并行 vs 串行的墙钟时间节省（折算成本）
+      * 合计节省：三合一净节省 + 命中率/并行加速比
 
 口径（统一）：
   - cloud_cpu_est：某脚本原本在云端消耗的 CPU 核·分钟；
   - 本地化后该笔云端成本归零 → 节省 = 原 cloud_cpu_est；
-  - 报表给出 总节省 / 剩余云端成本 / 本地失败需回滚量 三个关键指标。
+  - 增量/缓存跳过意味着这些测试本次完全不执行 → 节省全部成本；
+  - 并行节省用「墙钟时间差 × 单价」估算（并行越快 = 成本越低）。
 """
 import time
 
@@ -20,7 +30,7 @@ class CostMonitor(object):
         # 每核·分钟的云端成本单价（默认 1 单位，供相对对比）
         self.unit_cost = unit_cost_per_core_min
 
-    # ---------- 报表 ----------
+    # ---------- v1.0 报表（本地化路由） ----------
     def report(self, decisions, run_result=None):
         """根据路由决策 + 本地执行结果，生成成本报表。
 
@@ -68,6 +78,94 @@ class CostMonitor(object):
             "net_save": net_save,
             "net_save_unit_cost": round(net_save * self.unit_cost, 3),
             "localization_ratio": round(localized_cpu / total_cloud_cpu, 4) if total_cloud_cpu else 0,
+        }
+
+    # ---------- v2.0 三合一节省报表（T6 扩展） ----------
+    def report_optimizer(self, plan, run_result=None, costs=None):
+        """三合一节省报表：增量 + 缓存 + 并行。
+
+        plan: policy.build_plan() 返回的 dict，含 run/skip/reason/mode。
+        run_result: 执行结果（可选，含 summary）。
+        costs: 可选，{test_script: cloud_cpu_est} 字典，为每个测试预估云端成本。
+               未提供时默认每脚本 10 核·分钟。
+
+        返回报表（含三合一节省明细）：
+          - incremental_saved: 增量跳过节省（未受影响测试成本）
+          - cache_saved: 缓存跳过节省（指纹未变化测试成本）
+          - parallel_time_saved: 并行节省的墙钟时间（分钟）
+          - parallel_cost_saved: 并行节省折算成本
+          - total_saved: 三合一合计节省（核·分钟）
+          - hit_rate / speedup: 命中率 / 并行加速比
+        """
+        if costs is None:
+            # 默认成本估算：每测试脚本 10 核·分钟
+            costs = {s: 10.0 for s in set(plan.get("run", [])) | set(plan.get("skip", []))}
+
+        total = plan.get("run", []) + plan.get("skip", [])
+        total_cpu = sum(costs.get(s, 10.0) for s in total)
+
+        # 1. 增量节省：跳过原因含 "not affected" 的测试
+        reason = plan.get("reason", {})
+        inc_saved = sum(
+            costs.get(s, 10.0)
+            for s in plan.get("skip", [])
+            if "not affected" in reason.get(s, "")
+        )
+
+        # 2. 缓存节省：跳过原因含 "cache hit" 或 "fingerprint" 的测试
+        cache_saved = sum(
+            costs.get(s, 10.0)
+            for s in plan.get("skip", [])
+            if "cache hit" in reason.get(s, "") or "fingerprint" in reason.get(s, "")
+        )
+
+        # 3. 并行节省：基于 run_result 的时间数据
+        parallel_time_saved = 0.0
+        if run_result:
+            summary = run_result.get("summary", {})
+            total_duration = summary.get("total_duration", 0)  # 秒
+            total_run = max(summary.get("total", 0), 1)
+            # 估算串行时间：每个脚本 2 分钟基准 + 实测平均
+            est_serial_min = max(summary.get("total", 0) * 2.0,
+                                 total_duration / 60)
+            # 并行墙钟时间 = 总时长 / 并行度（估算，至少 1 分钟）
+            est_parallel_min = max(total_duration / 60, 0.1)
+            parallel_time_saved = round(est_serial_min - est_parallel_min, 3)
+        else:
+            # 无 run_result 时按跳过比例估算
+            skip_ratio = len(plan.get("skip", [])) / max(len(total), 1)
+            parallel_time_saved = round(skip_ratio * 10.0, 3)
+
+        # 并行节省折算成本（节省的 CPU 核·分钟 = 节省的时间 × 并行度估算）
+        parallel_cost_saved = round(parallel_time_saved * self.unit_cost, 3)
+
+        # 合计
+        total_saved = round(inc_saved + cache_saved + parallel_cost_saved, 3)
+
+        # 命中率（跳过数 / 总数）
+        hit_rate = round(len(plan.get("skip", [])) / max(len(total), 1), 4)
+
+        # 并行加速比（串行时间 / 并行时间）
+        speedup = round(est_serial_min / max(est_parallel_min, 0.1), 2) if run_result else 0.0
+
+        return {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "mode": plan.get("mode", "unknown"),
+            # 三合一明细
+            "incremental_saved": round(inc_saved, 3),
+            "cache_saved": round(cache_saved, 3),
+            "parallel_time_saved": parallel_time_saved,
+            "parallel_cost_saved": parallel_cost_saved,
+            "total_saved": total_saved,
+            "total_saved_unit_cost": round(total_saved * self.unit_cost, 3),
+            # 指标
+            "total_scripts": len(total),
+            "run_scripts": len(plan.get("run", [])),
+            "skip_scripts": len(plan.get("skip", [])),
+            "hit_rate": hit_rate,
+            "speedup": speedup,
+            # 明细
+            "skip_reasons": reason,
         }
 
     # ---------- 单任务成本 ----------
