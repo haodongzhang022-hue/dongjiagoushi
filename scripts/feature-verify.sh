@@ -125,6 +125,8 @@ select_by_changes() {
           if echo "$CHANGED_FILES" | grep -qE "scripts/generate-dashboard\.py|docs/DASHBOARD\.md"; then match=1; fi ;;
         dispatch)
           if echo "$CHANGED_FILES" | grep -qE "local-agent/dispatch_engine\.py|local-agent/dispatch/"; then match=1; fi ;;
+        entry-guard)
+          if echo "$CHANGED_FILES" | grep -qE "local-agent/scale/profile.py|local-agent/scale/prescale.py"; then match=1; fi ;;
       esac
     fi
     if [ "$match" = "1" ]; then SEL+=("$f"); fi
