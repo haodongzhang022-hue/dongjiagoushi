@@ -22,6 +22,6 @@ harness-AI）统一在一套仓库内、用「多层适配 + 配置管差异」�
   - `adapter`  宿主无关的适配器抽象基类 + 三入口具体适配器 + 配置驱动的注册路由
   - `route`    入口归一化路由（把任意入口的一句话收敛到秘书主入口并落位适配器）
 """
-from . import adapter, route
+from . import adapter, route, bridge
 
-__all__ = ["adapter", "route"]
+__all__ = ["adapter", "route", "bridge"]

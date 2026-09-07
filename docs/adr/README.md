@@ -38,6 +38,8 @@
 | [0003-skill承载架构方法论](0003-skill-carries-architect.md) | 架构方法论走 .codebuddy/skills 而非 npc:go | Accepted |
 | [0004-能力全员化而非加角色](0004-ability-generalize.md) | 把作业纪律沉淀为全员通用能力（Dispatch/Depth/Label/Handle/Standard…）| Accepted |
 | [0005-一库多角色解耦与防冲突](0005-module-decoupling.md) | 功能模块解耦、独立PR base=main、防耦合冲突 | Accepted |
+| [0006-三入口归一化](0006-one-repo-three-entry-adapt.md) | 网页/cnb/local 收敛一套仓库+多层适配+配置管差异，不拆3仓 | Accepted |
+| [0007-桥接闭环体系内落地](0007-bridge-closed-loop-in-framework.md) | 本地⇄网页桥⇄cnb云端异步开发→本地测试先行，作为体系能力非独立产品 | Accepted |
 
 ## 维护纪律
 

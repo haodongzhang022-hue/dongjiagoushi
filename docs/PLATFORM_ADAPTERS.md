@@ -60,6 +60,30 @@ support 系模板强制经秘书；harness 内嵌因调用方已定角色允许�
 
 **执行地分工**：本地 vs 云端执行走 `docs/CLOUD_LOCAL_COOP.md` 边界，由适配器 `locus` 配置承载
 （web=hybrid / cnb=cloud / local=local），非逻辑硬编码。
+
+### 三.6 本地⇄云端桥接闭环（最常用链路深化 · module platform-adapter v0.3.0）
+
+> 背景：用户点名**最常用链路**是「本地 deepseek harness ⇄（网页/gemini 工具桥）⇄ cnb.cool
+> 云端做异步开发 → 云端产出回传本地对齐 → **本地测试先行**（云端建环境贵，本地 CPU 便宜）」。
+> v0.2.0 把三入口归一层做好了；本轮把**这条最常用闭环链路**做成可执行能力。
+
+**落地**：新增 `local-agent/entries/bridge.py`（本地⇄云端桥接闭环能力），复用一个
+「本地 ⇄ 云端桥」通道（cnb.cool=原生接力卡/Issue 评论；web/gemini 工具桥=同一套桥协议）：
+
+- `request_cloud_dev(req, entry)`：本地/web 发卡 → 云端**异步开发**，返回**桥接句柄**
+  （CloudDevHandle，带 gid，跨对话/跨 PR 稳定寻址、二次触发取回同一句柄不漂移）；
+- `collect_cloud_result(handle_id, cloud_state, pr_ids)`：云端产出（merged/done/need_fix +
+  PR 列表）**跨 PR 归集**收集；need_fix（评审打回）如实记录供续跑，不吞异常；
+- `align_local(handle_id)`：云端产出**回写本地**（relay 接力卡 + data 归档 + messages 消息），
+  双向对齐，本地 harness/网页桥读同一份本地对齐后状态；
+- `local_test_first(handle_id)`：**本地测试先行门**——识别 CPU 密集/长耗时测试下放本地执行
+  （skipped_cloud_build=True），降云端建环境成本（用户点名的主要成本点）；
+- `loop_overview()`：闭环状态俯瞰（句柄按状态归集 + 四步闭环步骤）。
+- `run.py` 新增 `--bridge request|collect|align|localtest|overview` + `--handle/--collect-state/
+  --bridge-pr-ids`，全链 CLI 可调。
+
+**成本模型**：云端建环境贵 → CPU 密集测试下放本地（对齐 `CLOUD_LOCAL_COOP.md`），云端只保留
+LLM 强相关 + 评审；本地测试先行让长时云端开发（跨对话/跨 PR/跨仓库）的验收不等云端重复建环境。
 ---
 
 ## 四、各宿主适配详解
