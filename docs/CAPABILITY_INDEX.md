@@ -28,6 +28,7 @@
 | **协作** | 同岗收尾闭环 | 会诊未收敛/收尾 | `local-agent/collab/closure.py` | docs/PEER_COLLAB_CLOSURE.md | Issue #47 |
 | **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 |
 | **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
+| **质量** | 功能级校验（feature-verify）| 功能校验/功能做完/feature-verify/feature-regress/坏功能定位 | `scripts/feature-verify/` + `scripts/feature-verify.sh` | docs/FEATURE_VERIFY.md | Issue #109 |
 | **质量** | 审核前置助手（决策补全）| 二选一/拿不准/解决不掉/换方案 | `roles/manager.py`(审核前置) | docs/REVIEWER_PRECURSOR.md | Issue #47 |
 | **防无效** | 监控哨兵 | 监控/哨兵/停滞/横跳/无效努力 | `local-agent/sentinel/` | docs/SENTINEL.md | Issue #33 |
 | **规模** | 规模预设 + 3 阶段渐进 | prescale/规模/档位/阶段 | `local-agent/scale/prescale.py` | docs/ENTRY_PRESCALE.md | Issue #41 |
@@ -80,6 +81,8 @@
 | 我要把一个需求拆给多个 agent 干活 | 架构·经理 dispatch + DispatchAbility（L1-L4）|
 | 我要跨仓库召唤角色 | HandleAbility（不写死角色名）|
 | 我要"真唤醒"对端而非只描述 | DepthAbility awake（L3 校验回执）|
+| 我怕一个功能只"列个表/断言/通畅"就算做完 | feature-verify（功能级校验：一 PR 一脚本，跑不过=没做完）|
+| 崩了/升级后想定位是哪个功能坏 | scripts/feature-regress.sh（全量回归逐个定位坏功能）|
 | 我怕秘书/经理/产品"列个表假装完成" | dispatch_verify 真实唤醒校验（无回执暴露 awaiting_receipt）|
 | 我在做开发，想知道合规项 | StandardAbility（dev-standard 强制清单）|
 | 我在评审，该如何处置 | disposition（merge/proceed/fix_bug/...）+ 双轴 |

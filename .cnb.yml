@@ -140,6 +140,26 @@ main:
             echo "  ✅ 开发规范检查通过（无 hard 失败）"
 
 
+    - name: feature-verify gate
+      docker:
+        image: python:3.11
+      stages:
+        - name: feature gate
+          # 功能级校验合并闸门（Issue #109）：feature-verify 是 S05 的功能级延伸——
+          # 每个目标功能先写机器可判校验脚本，一 PR 一脚本；按本 PR 变更选测受影响
+          # 功能模块并真实跑其 feature-verify 脚本。跑不过 = 功能没做完，标
+          # blocked_on: feature_unverified 阻断合并（不以"断言/通畅"替代功能级判据）。
+          script: |
+            set -e
+            echo "==== 功能级校验闸门（feature-verify · Issue #109） ===="
+            echo "S05 延伸：每个 PR 自带 feature-verify 校验脚本，跑不过 = 功能没做完"
+            echo "base: ${CNB_PULL_REQUEST_TARGET_BRANCH:-main}  source: ${CNB_PULL_REQUEST_SOURCE_BRANCH:-auto/unknown}"
+            echo ""
+            # 按变更选测 + 真实跑受影响功能模块的校验脚本
+            bash scripts/feature-verify.sh --changed || exit 1
+            echo "  ✅ 功能级校验通过（feature_unverified=0，目标功能完成）"
+            # 证据库盘点（留痕）
+            bash scripts/feature-verify.sh --list || true
   pull_request.approved:
     - name: review gate batch test
       docker:
