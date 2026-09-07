@@ -66,9 +66,16 @@ _HOST_META = {
 
 
 def resolve_host(alias):
-    """别名归一：把入口一句话/宿主别名收敛到规范 host key；未知别名原样透传。"""
+    """别名归一：把入口一句话/宿主别名收敛到规范 host key；未知别名原样透传。
+
+    大小写不敏感（CNB/cnb/Cnb → cnb-live；LOCAL/Local → local-harness）。
+    """
     alias = (alias or "").strip()
-    return _ALIAS.get(alias, alias or "cnb-live")
+    key = alias.lower()
+    hit = _ALIAS.get(key)
+    if hit:
+        return hit
+    return alias or "cnb-live"  # 未知别名原样透传（host_transport 兜底报错不静默）
 
 
 def hosts():

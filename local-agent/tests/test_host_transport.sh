@@ -121,10 +121,15 @@ t "run.py --bridge request --bridge-via local-harness 可调" "$PY run.py --brid
 t "run.py --bridge-via unknown 如实报错不静默 mock" "$PY - <<'EOF'
 import sys; sys.path.insert(0,'.')
 from entries import host_transport as ht
+# ① host_transport.send 直接报错
 tr = ht.host_transport('no-such-host')
 r = tr['send']({'req':'x'})
 assert r.get('ok') is False and '未知宿主' in r.get('error','')
-print('ok 未知宿主如实报错不静默 mock')
+# ② bridge_via 完整路径 handle 标 blocked + 带 send_error（不假成功 in_cloud_dev）
+bv = ht.bridge_via('x', via='no-such-host')
+assert bv['handle']['status'] == 'blocked', bv['handle']['status']
+assert '未知宿主' in bv['handle'].get('send_error','')
+print('ok 未知宿主如实报错不静默 mock（send + bridge_via 双路径）')
 EOF
 "
 

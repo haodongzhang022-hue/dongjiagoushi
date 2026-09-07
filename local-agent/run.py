@@ -234,6 +234,9 @@ def main():
             via_txt = (" | via=%s/%s" % (out.get("via"), out.get("transport"))) if "via" in out else ""
             print("[bridge 发起云端开发] handle=%s | status=%s | entry=%s%s"
                   % (h.get("handle_id"), h.get("status"), h.get("entry"), via_txt))
+            if h.get("status") in ("blocked", "pending") and h.get("send_error"):
+                print("  ✗ 请求未成功投递：%s" % h.get("send_error"))
+                return 1
             print("  云开发请求已投递，句柄可跨对话/跨 PR 定位收集结果（真实宿主传输）")
         elif args.bridge == "collect":
             print("[bridge 收集云端产出] ok=%s | state=%s | pr_ids=%s"

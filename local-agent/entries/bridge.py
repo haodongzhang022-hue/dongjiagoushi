@@ -139,9 +139,15 @@ def request_cloud_dev(req, entry="local", target_repo=None, issue_id="", pr_ids=
     try:
         sent = tr["send"](handle)
         handle["cloud_ref"] = sent.get("cloud_ref", {})
-        handle["status"] = sent.get("status", "in_cloud_dev")
+        # 用户「模拟数据不可信」→ transport send 必须显式 ok=True 才算投递成功；
+        # ok 缺失/False（如未知宿主、无 cnb CLI、HTTP 不可达）→ 如实标 blocked 不假成功。
+        if sent.get("ok", True) is not False:
+            handle["status"] = sent.get("status", "in_cloud_dev")
+        else:
+            handle["status"] = "blocked"
+            handle["send_error"] = sent.get("error", "transport send 未明确 ok（真实通道不可达）")
     except Exception as e:  # noqa: BLE001
-        handle["status"] = "pending"
+        handle["status"] = "blocked"
         handle["send_error"] = str(e)
     handle["updated_at"] = datetime.utcnow().isoformat()
     handles[handle_id] = handle
