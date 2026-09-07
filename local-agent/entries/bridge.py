@@ -77,7 +77,7 @@ def _new_handle_id(req_key):
 # 二、发起云端开发请求（桥：本地/web → cnb.cool 云端异步开发）
 # ---------------------------------------------------------------------------
 def request_cloud_dev(req, entry="local", target_repo=None, issue_id="", pr_ids=None,
-                      transport=None, **meta):
+                      transport=None, live=False, **meta):
     """发起一次云端异步开发请求，返回桥接句柄（可跨对话/跨 PR 轮询收集）。
 
     参数：
@@ -86,7 +86,10 @@ def request_cloud_dev(req, entry="local", target_repo=None, issue_id="", pr_ids=
       target_repo 目标云端仓库（默认 cnb.cool 本体系仓库）
       issue_id    若已有关联云端 Issue，可带上做锚定
       pr_ids      云端 PR 列表（随句柄留痕，跨 PR 定位产出）
-      transport   传输通道（None=本地模拟传输；真实 cnb/web 桥由宿主注入）
+      transport   传输通道（显式注入时优先；真实 cnb/web 桥宿主注入）
+      live        True → 走默认真实通道 cnb_live.default_transport()（用户：模拟数据不可信）；
+                  False → 默认 mock（兼容单测确定性，无 transport 显式注入时）。
+                  注：真实 CLI/真实使用应传 live=True 或用 run.py --bridge --live。
 
     返回 CloudDevHandle：
       { handle_id, status, entry, target_repo, req,
@@ -120,8 +123,19 @@ def request_cloud_dev(req, entry="local", target_repo=None, issue_id="", pr_ids=
         "cloud_result": None,
         "meta": meta,
     }
-    # 通过传输通道把云开发请求投递给云端（默认本地模拟 = 入列 pending）
-    tr = transport or {"name": "mock", "send": _mock_send}
+    # 通过传输通道把云开发请求投递给云端。
+    # 用户（#105）「模拟数据不可信」→ live=True 或显式注入真实 transport 时走真实；
+    # 默认 mock 仅为兼容单测确定性（单测不传 transport / live）。
+    tr = transport
+    if tr is None:
+        if live:
+            try:
+                from entries import cnb_live
+                tr = cnb_live.default_transport(target_repo)
+            except Exception:  # noqa: BLE001
+                tr = {"name": "mock", "send": _mock_send}
+        else:
+            tr = {"name": "mock", "send": _mock_send}
     try:
         sent = tr["send"](handle)
         handle["cloud_ref"] = sent.get("cloud_ref", {})
@@ -334,11 +348,11 @@ def handle_summary(handle_id):
 # 七、CLI 便捷：本地⇄云端桥接闭环 一步触发
 # ---------------------------------------------------------------------------
 def cli_bridge(req, entry="local", action="request", handle_id=None, collect_state=None,
-               pr_ids=None):
+               pr_ids=None, live=False):
     """run.py --bridge 的语义入口：request → collect → align → local-test 全链。
 
     action:
-      request  发起云端异步开发请求（返回句柄）
+      request  发起云端异步开发请求（返回句柄；live=True → 真实通道）
       collect  按句柄收集云端产出（--collect-state merged/...  + --pr-ids）
       align    按句柄做本地数据对齐
       localtest 按句柄下发本地测试先行计划
@@ -347,7 +361,7 @@ def cli_bridge(req, entry="local", action="request", handle_id=None, collect_sta
     if action == "overview":
         return loop_overview()
     if action == "request":
-        return request_cloud_dev(req, entry=entry)
+        return request_cloud_dev(req, entry=entry, live=live)
     if not handle_id:
         return {"ok": False, "error": "--bridge collect/align/localtest 需要 --handle"}
     if action == "collect":

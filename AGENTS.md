@@ -77,6 +77,15 @@
   **每端一个面板** web/cnb/local / `control` 一键动作回写真实桥状态机非假状态 / `html_page` 人可读
   HTML 聚合页），run.py 加 `--dashboard action` + `--dashboard-html`，全链可调。详见
   `docs/PLATFORM_ADAPTERS.md` 三.7 + ADR-0008。
+  **真实本地实测通道（模拟数据不可信 → 默认真实传输 · entries.cnb_live · v0.5.0）**：
+  用户点名「使用模拟数据的我们一般认为是不可信的…发送信号尝试做配合，不行再适配」——
+  bridge/dashboard 默认从 mock transport 升级为**真实 cnb.cool 传输**。落地为
+  `local-agent/entries/cnb_live.py`（`live_transport` 真实通道 / `send` 真实建云开发请求 Issue
+  作 cloud_ref 锚 / `poll` 真实读云端 Issue 状态不臆造 PR / `ack` 真实结果回执 / `probe` 通道探测
+  默认只读不污染 / `default_transport` **有 cnb CLI 即默认真实**，mock 仅单测/无 cnb 兜底显式标注
+  不骗人），dashboard health 反映真实通道可达性（红灯即通道不可达不假装成功），run.py 加
+  `--live probe/probe-send/transport` + `--serve <port>`（把聚合页挂可常驻 HTTP 服务浏览器直开）。
+  详见 `docs/PLATFORM_ADAPTERS.md` 三.8 + ADR-0009。
 
 ### 秘书层动态扩展机制（Secretary Scale · 固定规则 · Issue #100 决策①）
 

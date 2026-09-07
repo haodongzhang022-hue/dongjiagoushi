@@ -111,6 +111,53 @@ LLM 强相关 + 评审；本地测试先行让长时云端开发（跨对话/跨
 交互顺畅、不散点状态；「每个端一个面板」延续三入口每端适配器思路，每端只维护本端视角。
 测试 `local-agent/tests/test_dashboard.sh`（12 项信号灯）。
 
+### 三.8 真实本地实测通道（v0.5.0 · entries.cnb_live — 模拟数据不可信 → 真实传输）
+
+> 背景：用户（Issue #105）明确点破 mock 的局限——「**使用模拟数据的我们一般认为是不可信的**，
+> 所以你开发完成这一部分之后，下一步就要尝试去用**本地实测**了。**发送信号尝试做配合**，
+> 看看能不能达成好的效果，不行的话，然后去做适配。」v0.3.0 bridge / v0.4.0 dashboard 默认走
+> **本地模拟传输（mock transport）**，只能证明「协议/状态机对」，不能证明「真实跨端配合能达成」。
+> 本轮把默认传输从 mock 升级为**真实 cnb.cool 通道**（cnb CLI / git remote 驱动），发真实信号做配合。
+
+**落地**：新增 `local-agent/entries/cnb_live.py`（真实 cnb.cool 传输通道），可注入 bridge /
+dashboard 的 transport 抽象，把「云开发请求 → 云端异步开发 → 产出回传」从**模拟**提升为**真实信号配合**：
+
+- `live_transport()`：真实通道字典 `{name:'live-cnb', send, poll, ack}`，可注入 `bridge.request_cloud_dev`
+  与 `collect_cloud_result`；
+- `send()`：真实发信号——request 时在目标仓库**真实创建云开发请求 Issue** 作 cloud_ref 锚
+  （复用既有 issue_id 则发真实信号评论），走真实 `cnb issues create-issue / post-issue-comment`；
+- `poll()`：真实读云端——`cnb issues get-issue` 读真实 Issue state/comment_count，据此判
+  `done`（云端收尾/有回执）/ `in_progress`（云端仍在异步开发），**不臆造 PR 列表**（真实 PR
+  关联由 collect 时开发者显式填）；
+- `ack()`：真实回执——collect 完成后给云端 Issue 发真实**结果回执评论**（留痕、闭环）；
+- `probe()`：**通道探测**（用户要的「发送信号尝试配合」落点）——默认只读（list-issues + list-pulls，
+  证明通道可达、**不污染仓库**），`send_signal=True` 才真实建一次信号 Issue；
+- `default_transport()`：**默认真实**——有真实 cnb CLI → live-cnb（用户：模拟数据不可信），
+  无 cnb CLI → mock 兜底（单测/本地无 cnb 环境），mock 显式标注不骗人；
+- `cli_live()`：`run.py --live probe / probe-send / transport` 语义入口。
+
+**与 mock 的取舍（用户诉求优先）**：
+- **默认真实**：`bridge.request_cloud_dev(..., live=True)` / run.py `--bridge request`（默认 live）/
+  dashboard `control('request')`（自动探测真实）都走真实通道；
+- **单测保留 mock**：`live=False`（bridge 函数默认）仍走 mock，保单测确定性、不污染真实仓库
+  （test_cnb_live.sh 6 项全绿）；真实信号由 CLI/dashboard 的真实使用发出。
+
+**跨端聚合页真实化**：dashboard `snapshot()` health 现含 `live_transport`（真实通道可达性探测），
+`transport_default` 显示 live-cnb/mock——控制台不再是「看起来 ok 的假状态」，health 红灯即真实
+通道不可达（诚实暴露，不假装成功）。
+
+**常驻 HTTP 服务（上轮 PR #113 点名的候选）**：`run.py --serve <port>` 把聚合控制页挂可常驻
+HTTP 服务（标准库 http.server，FastAPI /docs 式，零重依赖）——`GET /` HTML 大盘、`GET /entry/{e}`
+某端面板、`GET /api` JSON 快照、`GET /api/health`、`POST /api/control` 一键控制，浏览器直接开。
+
+**真实信号配合实证（本地实测，2026-09-07）**：在本工作区（有真实 cnb CLI）完整跑通真实闭环——
+真实 request 在 dongdongxiaozu/dongjiagoushi **真实创建 Issue #124** 作 cloud_ref 锚（transport=
+live-cnb）→ 真实 poll 读云端 #124（open+comment=2）判 done → collect collected/merged →
+真实 ack 给 #124 发结果回执评论 → align_local 本地 relay/data 双向对齐。**真实通道达成配合**；
+channel 受限则 probe 如实降级暴露，不假装成功。
+
+测试 `local-agent/tests/test_cnb_live.sh`（6 项信号灯）+ 注册进 hybrid BUILTIN_CPU_SCRIPTS。
+
 ---
 
 ## 四、各宿主适配详解
@@ -176,3 +223,5 @@ scale_swarm(tasks, n)    # 分形扩展到 n 个小组
 | 角色库 | `local-agent/roles/*.py` |
 | 接力卡 | `local-agent/relay.py` |
 | 三入口适配层（web/cnb/local） | `local-agent/entries/` |
+| 真实 cnb.cool 传输通道（live） | `local-agent/entries/cnb_live.py` |
+| 跨端聚合控制页（含 --serve） | `local-agent/entries/dashboard.py` |

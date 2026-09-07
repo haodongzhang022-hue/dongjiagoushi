@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-跨端聚合控制页（entries.dashboard · Issue #105 最常用链路深化 · module platform-adapter v0.4.0）
+跨端聚合控制页（entries.dashboard · Issue #105 最常用链路深化 · module platform-adapter v0.5.0 真实本地实测）
 ================================================================================================
 用户诉求（#105 评论）："做一个方便控制的聚合，类似于 fastapi 聚合页包括状态显示，
 然后每个端我都尝试建立一个，这样跨端交互的就会更加顺畅。"
@@ -64,6 +64,24 @@ ENDPOINTS = {
 # ---------------------------------------------------------------------------
 # 一、聚合数据采集（宿主无关，统一从既有真实模块读，不造假）
 # ---------------------------------------------------------------------------
+def _live_probe():
+    """真实 cnb.cool 传输通道探测（entries.cnb_live.probe 映射为 ok/transport）。
+
+    真实通道可达成配合 → ok=True/transport=live-cnb；被限/无 cnb → mock 兜底并如实暴露。
+    """
+    try:
+        from entries import cnb_live
+        pr = cnb_live.probe()
+        h = pr.get("health") or {}
+        return {"ok": h.get("status") == "ok",
+                "light": h.get("light"), "note": h.get("note"),
+                "transport": pr.get("transport", "mock"),
+                "cnb_cli": pr.get("cnb_cli")}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "light": "🔴",
+                "note": f"真实通道探测失败: {e}", "transport": "mock"}
+
+
 def _adapters_view():
     """三端适配器矩阵（沿用 entries.adapter.list_adapters + 秘书主入口护栏）。"""
     try:
@@ -134,16 +152,18 @@ def snapshot():
     relay = _relay_view()
     cost = _cost_view()
     now = datetime.utcnow().isoformat()
-    # 聚合健康度：适配层 + 句柄层 + 接力卡是否都可用
+    # 真实传输通道探测（cnb_live）：用户「模拟数据不可信」→ health 反映真实通道可达性
+    live = _live_probe()
     healthy = (
         adapters.get("ok", True) is not False
         and handles.get("ok", True) is not False
         and relay.get("ok", True) is not False
+        and live.get("ok", True) is not False
     )
     return {
         "module": "platform-adapter",
         "issue": "Issue #105",
-        "capability": "entries.dashboard (跨端聚合控制页 · v0.4.0)",
+        "capability": "entries.dashboard (跨端聚合控制页 · v0.5.0 真实本地实测通道)",
         "generated_at": now,
         "health": {
             "status": "ok" if healthy else "degraded",
@@ -151,8 +171,10 @@ def snapshot():
             "adapters": adapters.get("ok", True) is not False,
             "handles": handles.get("ok", True) is not False,
             "relay": relay.get("ok", True) is not False,
+            "live_transport": live,          # 真实 cnb 通道可达性（live/mock 取舍）
         },
         "main_entry": "架构·秘书",   # 三入口都只是触达通道，主入口唯一
+        "transport_default": live.get("transport", "mock"),
         "entries": adapters.get("entries", []),
         "handles": handles,
         "relay": relay,
@@ -251,8 +273,14 @@ def control(action, handle_id=None, collect_state=None, pr_ids=None, req=None,
     if action == "request":
         if not req:
             return {"action": action, "ok": False, "error": "request 需 req 参数"}
+        # 真实通道：一键 request 默认真实（用户：模拟数据不可信）；mock 仅测试/无cnb兜底
+        try:
+            from entries import cnb_live as _live
+            _live_ok = _live.default_transport()["name"] == "live-cnb"
+        except Exception:  # noqa: BLE001
+            _live_ok = False
         return {"action": action, "ok": True,
-                "data": _bridge.request_cloud_dev(req, entry=entry)}
+                "data": _bridge.request_cloud_dev(req, entry=entry, live=_live_ok)}
     if action in ("collect", "align", "localtest"):
         if not handle_id:
             return {"action": action, "ok": False,
@@ -338,7 +366,7 @@ button{{cursor:pointer;padding:3px 10px;border-radius:4px;border:1px solid #999}
 </style></head><body>
 <h1>🔧 {title}</h1>
 <p class="light">控制台健康度：<span>{health.get('light','🟢')}</span> <b>{health.get('status','ok')}</b>
- · 主入口 <code>{s.get('main_entry','架构·秘书')}</code> · module platform-adapter v0.4.0 · Issue #105</p>
+ · 主入口 <code>{s.get('main_entry','架构·秘书')}</code> · module platform-adapter v0.5.0 · Issue #105 · 真实本地实测通道</p>
 <h2>{table_title}</h2>
 <table><tr><th>入口</th><th>名称</th><th>执行地 locus</th><th>profile</th><th>宿主接口</th></tr>{''.join(rows)}</table>
 <h2>桥接句柄状态（按状态归集）</h2>
