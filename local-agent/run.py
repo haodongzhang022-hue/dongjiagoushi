@@ -38,6 +38,86 @@ from roles import list_roles
 from scale import engine, spec, profile, prescale, plugin
 
 
+def _serve_http(dash_mod, port=8080):
+    """把跨端聚合控制页挂到常驻 HTTP 服务（FastAPI /docs 式，零重依赖 http.server）。
+
+    GET  /           全端大盘人可读 HTML 聚合页
+    GET  /entry/{e}  某端面板 HTML
+    GET  /api        全端快照 JSON（FastAPI 风格聚合）
+    GET  /api/entry/{e}  某端面板 JSON
+    POST /api/control   一键控制（body: JSON action/handle_id/...）
+    这即上轮（PR #113）点名的候选：把 html_page 挂可常驻服务供浏览器直接开。
+    """
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import json as _json
+    import urllib.parse
+
+    class _H(BaseHTTPRequestHandler):
+        def log_message(self, *a):  # 静默访问日志
+            pass
+
+        def _send(self, code, ctype, body):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _api(self, obj):
+            data = _json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
+            self._send(200, "application/json", data)
+
+        def do_GET(self):
+            path = urllib.parse.urlparse(self.path).path
+            # /api 前缀 → JSON
+            if path == "/api" or path == "/api/":
+                return self._api(dash_mod.snapshot())
+            if path.startswith("/api/entry/"):
+                e = path.split("/")[-1]
+                return self._api(dash_mod.panel(e))
+            if path.startswith("/api/handles"):
+                return self._api(dash_mod._handles_view())
+            if path == "/api/health":
+                return self._api(dash_mod.snapshot().get("health"))
+            # 其余 → HTML 聚合页
+            if path.startswith("/entry/"):
+                e = path.split("/")[-1]
+                body = dash_mod.html_page(e).encode("utf-8")
+            else:
+                body = dash_mod.html_page().encode("utf-8")
+            return self._send(200, "text/html", body)
+
+        def do_POST(self):
+            path = urllib.parse.urlparse(self.path).path
+            if path != "/api/control" and not path.endswith("/control"):
+                return self._send(404, "text/plain", b"not found")
+            try:
+                ln = int(self.headers.get("Content-Length") or 0)
+                payload = _json.loads(self.rfile.read(ln) or b"{}")
+            except Exception as e:  # noqa: BLE001
+                return self._api({"ok": False, "error": f"body 解析失败: {e}"})
+            action = payload.get("action") or "overview"
+            out = dash_mod.control(
+                action,
+                handle_id=payload.get("handle_id"),
+                collect_state=payload.get("collect_state"),
+                pr_ids=payload.get("pr_ids"),
+                req=payload.get("req"),
+                entry=payload.get("entry") or "local",
+            )
+            return self._api(out)
+
+    srv = HTTPServer(("127.0.0.1", int(port)), _H)
+    print("   控制台: GET  http://127.0.0.1:%s   (HTML 聚合页)" % port)
+    print("   API:    GET  http://127.0.0.1:%s/api   (JSON 快照)" % port)
+    print("   API:    POST http://127.0.0.1:%s/api/control  (一键控制)" % port)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[serve] 已停止")
+        srv.server_close()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="本地 Agent 团队入口（替代云端 @ 触发）"
@@ -75,7 +155,14 @@ def main():
     parser.add_argument("--handle", default=None, help="--bridge 操作对应的桥接句柄 handle_id")
     parser.add_argument("--collect-state", default=None, help="--bridge collect 云端完成信号 merged/done/need_fix")
     parser.add_argument("--bridge-pr-ids", default=None, help="--bridge collect 云端PR列表(逗号分隔)")
-    # ---- 跨端聚合控制页（Issue #105 · entries.dashboard · v0.4.0）----
+    parser.add_argument("--bridge-live", action="store_true",
+                        help="--bridge request 走真实 cnb.cool 传输通道（默认真实，用户：模拟数据不可信）")
+    # ---- 真实 cnb.cool 传输通道（Issue #105 · entries.cnb_live · v0.5.0）----
+    parser.add_argument("--live", default=None,
+                        help="真实 cnb.cool 通道 action: probe/transport (发送信号探测真实配合)")
+    parser.add_argument("--serve", default=None,
+                        help="把跨端聚合控制页挂到常驻 HTTP 服务 (FastAPI 风格)，--serve 8080")
+    # ---- 跨端聚合控制页（Issue #105 · entries.dashboard · v0.5.0 真实本地实测）----
     parser.add_argument("--dashboard", default=None,
                         help="跨端聚合控制台 action: health/overview/panel/handles/relay/request/collect/align/localtest/html (FastAPI风格聚合页)")
     parser.add_argument("--dashboard-html", action="store_true",
@@ -104,15 +191,33 @@ def main():
         print(json.dumps(ov, ensure_ascii=False, indent=2))
         return 0
 
+    # ---- 真实 cnb.cool 传输通道（Issue #105 · entries.cnb_live · v0.5.0）----
+    if args.live:
+        from entries import cnb_live
+        out = cnb_live.cli_live(action=args.live)
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0
+
+    # ---- 常驻 HTTP 聚合控制服务（Issue #105 上轮候选：html_page --serve）----
+    if args.serve:
+        from entries import dashboard as _dash_serve
+        port = int(args.serve)
+        print("[serve] 跨端聚合控制页 HTTP 服务启动 @ http://127.0.0.1:%s  (Ctrl+C 停止)"
+              % port)
+        _serve_http(_dash_serve, port)
+        return 0
+
     # ---- 本地⇄云端桥接闭环（Issue #105 最常用链路 · entries.bridge）----
     if args.bridge:
         from entries import bridge
         pr_ids = None
         if args.bridge_pr_ids:
             pr_ids = [x.strip() for x in args.bridge_pr_ids.split(",") if x.strip()]
+        # 真实 CLI：--bridge request 默认走真实 cnb.cool 通道（用户：模拟数据不可信）
         out = bridge.cli_bridge(
             args.req or "", entry=args.entry or "local", action=args.bridge,
-            handle_id=args.handle, collect_state=args.collect_state, pr_ids=pr_ids)
+            handle_id=args.handle, collect_state=args.collect_state, pr_ids=pr_ids,
+            live=args.bridge_live or args.bridge == "request")
         if args.bridge == "overview":
             print(json.dumps(out, ensure_ascii=False, indent=2))
         elif args.bridge == "request":
@@ -133,7 +238,7 @@ def main():
             print("  成本注记: %s" % out.get("cost_note"))
         return 0
 
-    # ---- 跨端聚合控制页（Issue #105 最常用链路 · entries.dashboard · v0.4.0）----
+    # ---- 跨端聚合控制页（Issue #105 最常用链路 · entries.dashboard · v0.5.0 真实本地实测）----
     if args.dashboard or args.dashboard_html:
         from entries import dashboard as _dash
         action = args.dashboard or ("html" if args.dashboard_html else "overview")
@@ -144,7 +249,7 @@ def main():
         if action == "html" or args.dashboard_html or "html" in out:
             print(out.get("html", out.get("data", out)))
             return 0
-        print("[跨端聚合控制台] action=%s | ok=%s | main_entry=架构·秘书 (module v0.4.0)"
+        print("[跨端聚合控制台] action=%s | ok=%s | main_entry=架构·秘书 (module v0.5.0 真实本地实测)"
               % (action, out.get("ok")))
         if action in ("health", "overview"):
             d = out.get("data", {})
