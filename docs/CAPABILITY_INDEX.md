@@ -30,6 +30,7 @@
 | **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
 | **质量** | 审核前置助手（决策补全）| 二选一/拿不准/解决不掉/换方案 | `roles/manager.py`(审核前置) | docs/REVIEWER_PRECURSOR.md | Issue #47 |
 | **防无效** | 监控哨兵 | 监控/哨兵/停滞/横跳/无效努力 | `local-agent/sentinel/` | docs/SENTINEL.md | Issue #33 |
+| **裁决** | 主链路裁决规则 ②③④ | 暂停点分级/AI优先/沿原意图/以测试为准 | AGENTS.md·主链路裁决规则 | docs/MAINLINE_RULES.md | Issue #100 |
 | **规模** | 规模预设 + 3 阶段渐进 | prescale/规模/档位/阶段 | `local-agent/scale/prescale.py` | docs/ENTRY_PRESCALE.md | Issue #41 |
 | **规模** | 秘书层动态扩展机制 | 秘书层/动态扩展/识别/注册/路由/秘书护栏 | `local-agent/scale/secretary_scale.py` | docs/SECRETARY_SCALE.md | Issue #100 决策① |
 | **拓扑** | 融合路由（规模→拓扑）| 拓扑/路由/agile/dag | `local-agent/topology/` | docs/ROUTER.md + FUSION_TOPOLOGY.md | Issue #41 |
@@ -82,6 +83,9 @@
 | 我要跨仓库召唤角色 | HandleAbility（不写死角色名）|
 | 我要"真唤醒"对端而非只描述 | DepthAbility awake（L3 校验回执）|
 | 我怕秘书/经理/产品"列个表假装完成" | dispatch_verify 真实唤醒校验（无回执暴露 awaiting_receipt）|
+| 我在裁决暂停/放行，哪些卡人哪些 AI 自动 | 主链路裁决规则②（暂停点分级：低中 AI 自动+错改，高风险卡人）|
+| 我想给一个失败实现补好（不主导方向） | 主链路裁决规则③（修复=沿原意图：先复述原意图再补）|
+| 评审/测试到底怎么判有效 | 主链路裁决规则④（以测试为准，不靠看法）→ 既有客观闸门（dev_standard 检查器 + do_review 双轴 + 统一处置标签）|
 | 我在做开发，想知道合规项 | StandardAbility（dev-standard 强制清单）|
 | 我在评审，该如何处置 | disposition（merge/proceed/fix_bug/...）+ 双轴 |
 | 我感觉一个 agent 在无效空转/停滞 | 监控哨兵（停滞/横跳/重复错误）|
