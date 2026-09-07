@@ -31,6 +31,7 @@
 | **质量** | 审核前置助手（决策补全）| 二选一/拿不准/解决不掉/换方案 | `roles/manager.py`(审核前置) | docs/REVIEWER_PRECURSOR.md | Issue #47 |
 | **防无效** | 监控哨兵 | 监控/哨兵/停滞/横跳/无效努力 | `local-agent/sentinel/` | docs/SENTINEL.md | Issue #33 |
 | **规模** | 规模预设 + 3 阶段渐进 | prescale/规模/档位/阶段 | `local-agent/scale/prescale.py` | docs/ENTRY_PRESCALE.md | Issue #41 |
+| **规模** | 秘书层动态扩展机制 | 秘书层/动态扩展/识别/注册/路由/秘书护栏 | `local-agent/scale/secretary_scale.py` | docs/SECRETARY_SCALE.md | Issue #100 决策① |
 | **拓扑** | 融合路由（规模→拓扑）| 拓扑/路由/agile/dag | `local-agent/topology/` | docs/ROUTER.md + FUSION_TOPOLOGY.md | Issue #41 |
 | **流水线** | 小组闭环（DevTeam）| 小组/开发小组/整合 | `local-agent/dev_team.py` | docs/DEV_TEAM.md | Issue #74 |
 | **流水线** | 接线驱动层（dev-team-driver）| 驱动/接线/开发小组 | `local-agent/dev_team_driver.py` | docs/DEV_TEAM.md | Issue #74 |
@@ -87,6 +88,7 @@
 | 我面对"二选一都不够好" | 架构·审核前置助手（决策补全）|
 | 我不知道某个机制的最新规则 | 回本表找「唯一事实源」，改正文再刷本表 |
 | 我想知道"某次评审/交付到底有没有效解决" | 有效性度量模型（review-metrics：维度化+分档+留痕）|
+| 我想判断"某个场景要不要设个秘书/加个秘书层" | 秘书层动态扩展机制（识别/注册/路由+权限护栏）|
 | 我想了解统一术语别叫混 | CONTEXT.md（共享语言）|
 | 我想知道某个架构取舍为什么这么做 | docs/adr/（决策记录）|
 | 我想推进度/打标/调优先级 | LabelAbility / 进度推手 |
