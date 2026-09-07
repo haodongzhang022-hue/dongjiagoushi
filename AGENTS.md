@@ -450,7 +450,7 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
   （测试信号灯/回归红绿/崩溃数据/复评通过）为准，不以主观"看法"为准；不额外增设第五轮
   评审（维持现状：现有评审→开发→评审天然多轮 + 模型多变能发现新问题）。
   承接：`dev-standard` 确定性检查 + 评审主流程（`do_review` 双轴 + 统一处置标签）；
-  评审有效性量化度量（review-metrics）为 Issue #100 待补交付，落成独立模块后回链。
+  评审有效性量化度量（review-metrics）已作为独立模块落地（见 `docs/REVIEW_METRICS.md` + `local-agent/review_metrics/`，Issue #100 决策⑤ / #106），作④的量化闸门补充。
 
 > 触发：显式 `[触发:架构·评审/测试/交付]` / 语义命中「暂停点分级/AI优先放行/修复沿原意图/
 > 以测试为准/不追业界一致/不加第五轮评审」/ rules 固定。文档层已落地 `docs/MAINLINE_RULES.md`。
