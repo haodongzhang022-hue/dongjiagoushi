@@ -19,7 +19,7 @@
 
 ### ① 维度化
 5 个正交维度（见 local-agent/review_metrics/spec.py · 唯一事实源）：
-问题解决度 resolution / 小八哥率 bug_rate / 稳定性 stability /
+问题解决度 resolution / 缺陷率 bug_rate / 稳定性 stability /
 通用性 generality / 跨场景一致性 consistency。方向、量纲、口径、权重均规范声明，
 禁止角色自造指标（未知维度引擎直接拒绝）。
 
@@ -51,7 +51,7 @@
 | do_review 双轴评审 | 双轴产出"发现项+严重级"；本模型把"修复是否有效"量化成客观依据 |
 | disposition 处置标签 | 度量达标 → merge/proceed；不达标 → fix_bug/consult 的依据 |
 | dev-standard / 测试信号灯 | 客观"唯一事实源"即来自测试/回归红绿，本模型读它们做判定 |
-| sentinel 监控哨兵 | 本模型留痕可供哨兵发现"高未解决率/高小八哥率"并打断升级 |
+| sentinel 监控哨兵 | 本模型留痕可供哨兵发现"高未解决率/高缺陷率"并打断升级 |
 | data/archives | trace 尽力同步到 archives 供回溯 |
 
 
