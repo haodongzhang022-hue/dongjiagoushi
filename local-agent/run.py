@@ -67,6 +67,14 @@ def main():
     parser.add_argument("--guard-entry", action="store_true", help="校验强制入口（是否必须经架构·秘书）")
     parser.add_argument("--direct-role", default=None, help="显式 @ 的角色（用于校验是否跳过秘书）")
     parser.add_argument("--prescale-records", action="store_true", help="列出规模预设留痕记录")
+    parser.add_argument("--platform-overview", action="store_true", help="三入口归一化俯瞰 (Issue #105)")
+    parser.add_argument("--entry", default=None, help="入口归一化: web/cnb/local (收敛到秘书主入口并落位适配器)")
+    # ---- 本地⇄云端桥接闭环（Issue #105 最常用链路 · entries.bridge）----
+    parser.add_argument("--bridge", default=None,
+                        help="本地⇄云端桥接闭环 action: request/collect/align/localtest/overview")
+    parser.add_argument("--handle", default=None, help="--bridge 操作对应的桥接句柄 handle_id")
+    parser.add_argument("--collect-state", default=None, help="--bridge collect 云端完成信号 merged/done/need_fix")
+    parser.add_argument("--bridge-pr-ids", default=None, help="--bridge collect 云端PR列表(逗号分隔)")
     args = parser.parse_args()
 
     if args.prescale_records:
@@ -82,6 +90,56 @@ def main():
                       f"risk={p.get('risk_level')} source={p.get('source')}")
         return 0
 
+    # ---- 三入口归一化（Issue #105）：entries 适配层入口 ----
+    if args.platform_overview:
+        from entries import route as _er
+        ov = _er.overview()
+        print(json.dumps(ov, ensure_ascii=False, indent=2))
+        return 0
+
+    # ---- 本地⇄云端桥接闭环（Issue #105 最常用链路 · entries.bridge）----
+    if args.bridge:
+        from entries import bridge
+        pr_ids = None
+        if args.bridge_pr_ids:
+            pr_ids = [x.strip() for x in args.bridge_pr_ids.split(",") if x.strip()]
+        out = bridge.cli_bridge(
+            args.req or "", entry=args.entry or "local", action=args.bridge,
+            handle_id=args.handle, collect_state=args.collect_state, pr_ids=pr_ids)
+        if args.bridge == "overview":
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        elif args.bridge == "request":
+            print("[bridge 发起云端开发] handle=%s | status=%s | entry=%s"
+                  % (out.get("handle_id"), out.get("status"), out.get("entry")))
+            print("  云开发请求已投递，句柄可跨对话/跨 PR 定位收集结果")
+        elif args.bridge == "collect":
+            print("[bridge 收集云端产出] ok=%s | state=%s | pr_ids=%s"
+                  % (out.get("ok"), out.get("handle", {}).get("cloud_result", {}).get("state"),
+                     out.get("handle", {}).get("cloud_result", {}).get("pr_ids")))
+        elif args.bridge == "align":
+            print("[bridge 本地对齐] ok=%s | relay=%s | data=%s"
+                  % (out.get("ok"), out.get("relay_aligned"), out.get("data_archived")))
+        elif args.bridge == "localtest":
+            print("[bridge 本地测试先行] ok=%s | 下放本地=%s | skipped_cloud_build=%s"
+                  % (out.get("ok"), len(out.get("routed_local", [])),
+                     out.get("skipped_cloud_build")))
+            print("  成本注记: %s" % out.get("cost_note"))
+        return 0
+
+    if args.entry:
+        # 入口归一化：把「入口 + 任务」收敛到秘书主入口并落位适配器；
+        # 若显式 @ 了某角色，先校验是否跳过秘书（强制入口护栏）。
+        from entries import route as _er
+        rt = _er.route(args.entry, args.req or "", role=args.direct_role,
+                       direct_role=args.direct_role)
+        print("[入口归一化] main_entry=架构·秘书 | entry=%s | guard_ok=%s | routed_to=%s"
+              % (rt["entry"], rt["guard"]["ok"], rt.get("routed_to", "-")))
+        if not rt["ok"]:
+            print("强制入口护栏：%s" % rt["guard"]["message"])
+            return 2
+        # 落位适配器后继续走单份核心编排（不在此处 if 分支污染核心）
+        print("  适配器: %s (locus=%s) -> 交单份核心编排处理" %
+              (rt["adapter"]["key"], rt["adapter"]["locus"]))
     if args.guard_entry:
         if not args.req:
             parser.error("--guard-entry 需要 --req 需求文本")
