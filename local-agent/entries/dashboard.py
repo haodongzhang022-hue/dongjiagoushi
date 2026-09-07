@@ -82,6 +82,19 @@ def _live_probe():
                 "note": f"真实通道探测失败: {e}", "transport": "mock"}
 
 
+def _hosts_view():
+    """三宿主真实传输可达性矩阵（entries.host_transport.overview · v0.6.0）。
+
+    同「一套核心 + 每端适配层」：本地/网页/cnb 三宿主各实现真实 transport
+    （cnb-live CLI / local-harness relay / web-bridge --serve HTTP），health 反映真实可达。
+    """
+    try:
+        from entries import host_transport as _ht
+        return _ht.overview()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
 def _adapters_view():
     """三端适配器矩阵（沿用 entries.adapter.list_adapters + 秘书主入口护栏）。"""
     try:
@@ -154,6 +167,7 @@ def snapshot():
     now = datetime.utcnow().isoformat()
     # 真实传输通道探测（cnb_live）：用户「模拟数据不可信」→ health 反映真实通道可达性
     live = _live_probe()
+    hosts_view = _hosts_view()
     healthy = (
         adapters.get("ok", True) is not False
         and handles.get("ok", True) is not False
@@ -176,6 +190,7 @@ def snapshot():
         "main_entry": "架构·秘书",   # 三入口都只是触达通道，主入口唯一
         "transport_default": live.get("transport", "mock"),
         "entries": adapters.get("entries", []),
+        "hosts": hosts_view,                 # 三宿主真实传输矩阵（v0.6.0）
         "handles": handles,
         "relay": relay,
         "cost": cost,

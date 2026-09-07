@@ -22,18 +22,21 @@ else
 fi }
 
 echo "===== [dashboard] 1. snapshot 全端聚合大盘 ====="
-t "snapshot 聚合三端矩阵+句柄+接力卡+成本，健康 ok" "$PY - <<'EOF'
-import sys; sys.path.insert(0,'.')
+t "snapshot 聚合三端矩阵+句柄+接力卡+成本，健康反映真实通道" "$PY - <<'EOF'
+import sys, shutil; sys.path.insert(0,'.')
 from entries import dashboard
 d = dashboard.snapshot()
 assert d['module'] == 'platform-adapter'
-assert d['health']['status'] == 'ok'
+# health 反映真实通道（无 cnb CLI 环境=degraded，有 cnb=ok；核心三件 adapters/handles/relay 恒健康）
+lt = d['health'].get('live_transport') or {}
+assert lt.get('transport') == ('live-cnb' if shutil.which('cnb') else 'mock')
+assert d['health']['adapters'] and d['health']['handles'] and d['health']['relay']
 assert len(d['entries']) == 3
 assert {e['entry'] for e in d['entries']} == {'web','cnb','local'}
 assert 'handles' in d and 'relay' in d and 'cost' in d
 assert d['main_entry'] == '架构·秘书'
 assert len(d['endpoints']) >= 9
-print('ok 聚合大盘 三端=%s 路由=%d' % (','.join(e['entry'] for e in d['entries']), len(d['endpoints'])))
+print('ok 聚合大盘 三端=%s 路由=%d live=%s' % (','.join(e['entry'] for e in d['entries']), len(d['endpoints']), lt.get('transport')))
 EOF
 "
 
@@ -68,13 +71,18 @@ EOF
 
 echo "===== [dashboard] 3. FastAPI 风格控制动作（回写真实状态机）====="
 t "health/overview/handles/relay 结构化快照" "$PY - <<'EOF'
-import sys; sys.path.insert(0,'.')
+import sys, shutil; sys.path.insert(0,'.')
 from entries import dashboard
-assert dashboard.control('health')['data']['health']['status']=='ok'
+# health 状态反映真实通道（有 cnb=ok，无 cnb=degraded）；overview/handles/relay 恒定可用
+h = dashboard.control('health')['data']['health']
+lt = h.get('live_transport') or {}
+assert h['status'] in ('ok','degraded')
+assert h['status'] == 'ok' if shutil.which('cnb') else h['status'] in ('degraded','ok')
+assert lt.get('transport') == ('live-cnb' if shutil.which('cnb') else 'mock')
 assert dashboard.control('overview')['ok']
 assert dashboard.control('handles')['ok']
 assert dashboard.control('relay')['ok']
-print('ok health/overview/handles/relay')
+print('ok health=%s/%s' % (h['status'], lt.get('transport')))
 EOF
 "
 t "request collect merged+多PR align localtest 一键闭环" "$PY - <<'EOF'

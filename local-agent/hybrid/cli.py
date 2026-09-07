@@ -53,6 +53,7 @@ BUILTIN_CPU_SCRIPTS = [
     "local-agent/tests/test_bridge_loop.sh",   # 本地⇄云端桥接闭环 (Issue #105)
     "local-agent/tests/test_dashboard.sh",    # 跨端聚合控制页 (Issue #105)
     "local-agent/tests/test_cnb_live.sh",     # 真实 cnb 传输通道 (Issue #105)
+    "local-agent/tests/test_host_transport.sh",  # 三宿主真实传输注册表 (Issue #105 v0.6.0)
     "local-agent/tests/test_engine.sh",
     "local-agent/tests/test_data_layer.sh",
     "local-agent/tests/test_collab.sh",
