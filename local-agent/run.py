@@ -75,6 +75,13 @@ def main():
     parser.add_argument("--handle", default=None, help="--bridge 操作对应的桥接句柄 handle_id")
     parser.add_argument("--collect-state", default=None, help="--bridge collect 云端完成信号 merged/done/need_fix")
     parser.add_argument("--bridge-pr-ids", default=None, help="--bridge collect 云端PR列表(逗号分隔)")
+    # ---- 跨端聚合控制页（Issue #105 · entries.dashboard · v0.4.0）----
+    parser.add_argument("--dashboard", default=None,
+                        help="跨端聚合控制台 action: health/overview/panel/handles/relay/request/collect/align/localtest/html (FastAPI风格聚合页)")
+    parser.add_argument("--dashboard-html", action="store_true",
+                        help="输出人可读 HTML 聚合控制页（全端大盘）")
+    parser.add_argument("--dashboard-pr-ids", default=None,
+                        help="--dashboard collect 云端PR列表(逗号分隔)")
     args = parser.parse_args()
 
     if args.prescale_records:
@@ -124,6 +131,51 @@ def main():
                   % (out.get("ok"), len(out.get("routed_local", [])),
                      out.get("skipped_cloud_build")))
             print("  成本注记: %s" % out.get("cost_note"))
+        return 0
+
+    # ---- 跨端聚合控制页（Issue #105 最常用链路 · entries.dashboard · v0.4.0）----
+    if args.dashboard or args.dashboard_html:
+        from entries import dashboard as _dash
+        action = args.dashboard or ("html" if args.dashboard_html else "overview")
+        out = _dash.cli_dashboard(
+            entry=args.entry or "local", action=action, handle_id=args.handle,
+            collect_state=args.collect_state,
+            pr_ids=args.dashboard_pr_ids, req=args.req)
+        if action == "html" or args.dashboard_html or "html" in out:
+            print(out.get("html", out.get("data", out)))
+            return 0
+        print("[跨端聚合控制台] action=%s | ok=%s | main_entry=架构·秘书 (module v0.4.0)"
+              % (action, out.get("ok")))
+        if action in ("health", "overview"):
+            d = out.get("data", {})
+            print("  健康度: %s %s" % (d.get("health", {}).get("light", ""),
+                                       d.get("health", {}).get("status", "")))
+            print("  三端适配器: %s" % ", ".join(
+                [e["entry"] for e in d.get("entries", [])]))
+            print("  桥接句柄总数: %s | 按状态: %s"
+                  % (d.get("handles", {}).get("total", 0),
+                     {k: len(v) for k, v in d.get("handles", {}).get("by_status", {}).items()}))
+        elif action == "panel":
+            d = out.get("data", {})
+            pan = d.get("panel", {})
+            print("  面板: %s | 本端状态 %s %s | 本端句柄 %s | 可用动作 %s"
+                  % (pan.get("title"), pan.get("health_light"), pan.get("status"),
+                     pan.get("my_handles_total"),
+                     ", ".join(a["action"] for a in pan.get("actions", []))))
+        elif action == "request":
+            print("  [控制台发起云开发] handle=%s | entry=%s" %
+                  (out.get("data", {}).get("handle_id"), out.get("data", {}).get("entry")))
+        elif action in ("collect", "align", "localtest"):
+            d = out.get("data", {})
+            if action == "collect":
+                h = d.get("handle", {})
+                print("  [控制台 %s] ok=%s | state=%s | pr_ids=%s"
+                      % (action, d.get("ok"), (h.get("cloud_result") or {}).get("state"),
+                         (h.get("cloud_result") or {}).get("pr_ids")))
+            else:
+                print("  [控制台 %s] ok=%s" % (action, d.get("ok", out.get("ok"))))
+        elif action == "handles":
+            print("  句柄总数: %s" % out.get("data", {}).get("total", 0))
         return 0
 
     if args.entry:

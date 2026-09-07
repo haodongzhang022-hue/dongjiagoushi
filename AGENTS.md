@@ -71,6 +71,12 @@
   CPU 便宜）」。落地为 `local-agent/entries/bridge.py`（`request_cloud_dev` 发卡拿跨对话句柄 /
   `collect_cloud_result` 跨 PR 收集 / `align_local` 云端产出回写本地 relay+data / `local_test_first`
   CPU 密集测试下放本地 sk 成本）。详见 `docs/PLATFORM_ADAPTERS.md` 三.6 + ADR-0007。
+  **跨端聚合控制页（本地⇄网页⇄云端交互·一张控制台 · entries.dashboard · v0.4.0）**：
+  延续最常用链路，给跨端交互加一块**聚合控制面**（类 FastAPI 聚合页、含状态显示，用户诉求）——
+  落地为 `local-agent/entries/dashboard.py`（`snapshot` 全端聚合大盘 + 健康灯 / `panel(entry)`
+  **每端一个面板** web/cnb/local / `control` 一键动作回写真实桥状态机非假状态 / `html_page` 人可读
+  HTML 聚合页），run.py 加 `--dashboard action` + `--dashboard-html`，全链可调。详见
+  `docs/PLATFORM_ADAPTERS.md` 三.7 + ADR-0008。
 
 ### 秘书层动态扩展机制（Secretary Scale · 固定规则 · Issue #100 决策①）
 

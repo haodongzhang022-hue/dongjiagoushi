@@ -51,6 +51,7 @@ BUILTIN_CPU_SCRIPTS = [
     "local-agent/tests/test_prescale_entry.sh",
     "local-agent/tests/test_platform_adapter.sh",
     "local-agent/tests/test_bridge_loop.sh",   # 本地⇄云端桥接闭环 (Issue #105)
+    "local-agent/tests/test_dashboard.sh",    # 跨端聚合控制页 (Issue #105)
     "local-agent/tests/test_engine.sh",
     "local-agent/tests/test_data_layer.sh",
     "local-agent/tests/test_collab.sh",
