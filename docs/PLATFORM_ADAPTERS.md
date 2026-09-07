@@ -37,6 +37,29 @@
 | **deepseek harness** | 本地 harness 驱动 agent | `local-agent/` 作为 harness 的 agent 团队；`run.py` 为入口脚本 | `team.yaml` DAG + 角色库直接被 harness 逐节点调度；接力卡落到 `state/relay_card.json` |
 | **MCP（蜂群）** | MCP 工具调用 | 把团队流水线暴露为 MCP 工具（`dag_run` / `role_invoke` / `swarm_scale`） | 接力卡 → MCP 会话上下文；DAG/分形 → MCP 资源/工具；`[触发]` → 工具参数；蜂群 agent 通过标准协议调用 |
 
+## 三.5 三入口归一化落地（Issue #105 · module platform-adapter v0.2.0）
+
+> 背景：用户提出「网页对话 / cnb.cool / 本地 AI 三个，谁当入口」的架构疑问。结论：
+> **三入口不是 3 个产品，是「入口 + 执行地」的组合**，收敛为「一套仓库 + 多层适配 +
+> 配置管差异」，不拆 3 个仓库。
+
+**主入口主从规则**：三入口都是「把话送到秘书面前」的通道，**主入口永远一个「架构·秘书」
+（→路由）**，其余只是触达方式。`guard_entry` 强制护栏已落地——default/company/acquisition/
+support 系模板强制经秘书；harness 内嵌因调用方已定角色允许直入产品。
+
+**代码落地**：新增 `local-agent/entries/`（Issue #105 适配层模块）：
+- `adapter.py`：宿主无关 `HostAdapter` 抽象 + 三入口具体适配器（`CnbAdapter` cnb.cool 原生 /
+  `LocalAdapter` 本地 harness / `WebAdapter` 网页），各自实现最小宿主接口
+  `trigger / read_card / write / run_dag / scale_swarm`（`run_dag`/`scale_swarm` 委托单份核心
+  编排 orchestrator/fractal，核心仅一份、无入口 if 分支污染）；`ENTRY_LOCI` 配置承载
+  入口→(适配器/执行地/profile)。
+- `route.py`：入口归一化路由 `resolve_entry/entry_guard/route`——把任意入口别名
+  （网页/cnb.cool/本地 run.py…）收敛为规范入口 web/cnb/local，经秘书主入口护栏后落位适配器；
+  `overview()` 提供三入口归一化矩阵 + 主入口护栏二级俯瞰。
+- `run.py` 新增 `--entry web|cnb|local` 与 `--platform-overview`：入口归一化后继续走单份核心编排。
+
+**执行地分工**：本地 vs 云端执行走 `docs/CLOUD_LOCAL_COOP.md` 边界，由适配器 `locus` 配置承载
+（web=hybrid / cnb=cloud / local=local），非逻辑硬编码。
 ---
 
 ## 四、各宿主适配详解
@@ -101,3 +124,4 @@ scale_swarm(tasks, n)    # 分形扩展到 n 个小组
 | 团队/DAG 配置 | `local-agent/team.yaml` |
 | 角色库 | `local-agent/roles/*.py` |
 | 接力卡 | `local-agent/relay.py` |
+| 三入口适配层（web/cnb/local） | `local-agent/entries/` |

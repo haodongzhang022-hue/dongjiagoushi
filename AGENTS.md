@@ -64,6 +64,7 @@
 - **入口形式多样**：既支持「销售获取信息→开始沟通」，也支持「直接对话默认到产品经理/秘书」，结构上两者并存。
 - **规模匹配落位秘书/产品澄清阶段（非第一步、非优先级）**：选择规模不是"优先级"，而是"秘书→产品澄清时评估项目层级 → 据此走后续流程"。秘书/产品在澄清阶段用 `SecretarySense.scale_match()`（复用 `fusion.route()`）匹配承接体系/拓扑/角色子集，作为后续协作基准锚点；经理再按架构做增量修正，不二次评估（`local-agent/roles/secretary_sense.py`，Issue #41）。
 - **秘书价值（需求明确 + 决策博弈 + 成果测试兜底接管）**：秘书充分了解需求→需求明确→提示词优化→跟产品明确细节→方案确定→确保成本与结果复合要求→**甚至包含成果测试**。开发说完成但测试跑不通时"想法也是继续开发，不可能存在其他说法"，由秘书直接接管（`test_takeover`）并交人类继续开发；常规"二选一都不够好"的疑问，秘书因多信息/探索规则/多选项博弈/本地环境能解决大部分（`decision_game` 对抗生成式立场校验），能自决即自决、需担责结果前置交人（`docs/SECRETARY_SENSE.md`，Issue #41）。
+- **三入口归一化（issue：#105 · platform-adapter）**：网页对话 / cnb.cool 云端 NPC / 本地 harness-AI 三个执行入口不是 3 个产品，而是「入口 + 执行地」组合——统一收敛为「一套仓库 + 多层适配 + 配置管差异」，不拆 3 个仓库。主入口永远一个「架构·秘书」（触达通道只有 web/cnb/local，靠 `guard_entry` 强制护栏 + `local-agent/entries/` 适配层承载：各实现 `trigger/read_card/run_dag/scale_swarm` 最小宿主接口，差异由 `ENTRY_LOCI` 配置管，核心编排仅一份、无入口 if 分支污染；本地/云端执行走 `CLOUD_LOCAL_COOP.md` 分工边界）。详见 `docs/PLATFORM_ADAPTERS.md` 三.5。
 
 ### 秘书层动态扩展机制（Secretary Scale · 固定规则 · Issue #100 决策①）
 

@@ -67,6 +67,8 @@ def main():
     parser.add_argument("--guard-entry", action="store_true", help="校验强制入口（是否必须经架构·秘书）")
     parser.add_argument("--direct-role", default=None, help="显式 @ 的角色（用于校验是否跳过秘书）")
     parser.add_argument("--prescale-records", action="store_true", help="列出规模预设留痕记录")
+    parser.add_argument("--platform-overview", action="store_true", help="三入口归一化俯瞰 (Issue #105)")
+    parser.add_argument("--entry", default=None, help="入口归一化: web/cnb/local (收敛到秘书主入口并落位适配器)")
     args = parser.parse_args()
 
     if args.prescale_records:
@@ -82,6 +84,27 @@ def main():
                       f"risk={p.get('risk_level')} source={p.get('source')}")
         return 0
 
+    # ---- 三入口归一化（Issue #105）：entries 适配层入口 ----
+    if args.platform_overview:
+        from entries import route as _er
+        ov = _er.overview()
+        print(json.dumps(ov, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.entry:
+        # 入口归一化：把「入口 + 任务」收敛到秘书主入口并落位适配器；
+        # 若显式 @ 了某角色，先校验是否跳过秘书（强制入口护栏）。
+        from entries import route as _er
+        rt = _er.route(args.entry, args.req or "", role=args.direct_role,
+                       direct_role=args.direct_role)
+        print("[入口归一化] main_entry=架构·秘书 | entry=%s | guard_ok=%s | routed_to=%s"
+              % (rt["entry"], rt["guard"]["ok"], rt.get("routed_to", "-")))
+        if not rt["ok"]:
+            print("强制入口护栏：%s" % rt["guard"]["message"])
+            return 2
+        # 落位适配器后继续走单份核心编排（不在此处 if 分支污染核心）
+        print("  适配器: %s (locus=%s) -> 交单份核心编排处理" %
+              (rt["adapter"]["key"], rt["adapter"]["locus"]))
     if args.guard_entry:
         if not args.req:
             parser.error("--guard-entry 需要 --req 需求文本")
