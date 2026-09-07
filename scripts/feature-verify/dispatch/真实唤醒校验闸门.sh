@@ -27,7 +27,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "  ⏭️  python3 缺失，本 python 依赖样例优雅跳过（CI python 环境全量跑）"
   exit 0
 fi
-export PYTHONPATH="local-agent:$PYTHONPATH"
+export PYTHONPATH="local-agent${PYTHONPATH:+:$PYTHONPATH}"
 python3 - <<'PYEOF'
 import sys
 sys.path.insert(0, "local-agent")
