@@ -192,10 +192,12 @@ main:
     - name: npc go
       type: npc:go
       options:
-        role: "架构·秘书"   # 对应 .cnb/settings.yml 中的角色（兜底人设）
+        role: "架构·秘书"            # 对应 .cnb/settings.yml 中的角色（兜底人设）
+        model: deepseek-v4-flash     # 项目默认基座模型（用户指定：deepseek v4 flash）
+          # 其他可选模型（按需切换）：
+          # model: hy3                # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
+          # model: glm-5              # GLM 模型
           # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
-          # model: hy3    # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
-          # model: glm-5  # GLM 模型
 
 # 看板自动化：基于 Issue 声明头自动刷新模块版本演进看板 + 里程碑表
 # 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md

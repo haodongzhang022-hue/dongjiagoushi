@@ -12,9 +12,11 @@
   - profile  前置流程区分（不同位置的流程模板，含秘书强制入口护栏）
   - prescale 规模预设（澄清阶段体量/协作/风险基准锚点 + 经验方案库检索）
   - plugin   角色插件化注册（灵活增减角色的规则支撑）
+  - secretary_scale  秘书层动态扩展机制（识别/注册/路由三层 + 权限边界护栏，
+                      不写死层数、秘书只交接不执行 · Issue #100 决策①）
 
 对外统一入口：`run_scaled_pipeline()`（见 scale/engine.py）。
 """
-from . import broker, store, pool, spec, profile, prescale, plugin
+from . import broker, store, pool, spec, profile, prescale, plugin, secretary_scale
 
-__all__ = ["broker", "store", "pool", "spec", "profile", "prescale", "plugin"]
+__all__ = ["broker", "store", "pool", "spec", "profile", "prescale", "plugin", "secretary_scale"]
