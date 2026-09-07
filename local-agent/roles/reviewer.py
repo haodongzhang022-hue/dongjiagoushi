@@ -152,6 +152,64 @@ class ReviewerRole(BaseRole):
         return disposition.route_for_review(problem=problem, severity=severity,
                                             signals=signals, scenario_hint=scenario_hint)
 
+
+    # ------------------------------------------------------------
+    # 评审有效性深度集成（Issue #100 决策⑤ · review-metrics 接入评审主流程）
+    # 评审每次走 do_review 时，自动对"本次处置"做一次确定性观测留痕，
+    # 供"评审有效性监控"统计：多少次放行 merge / 打回 fix_bug / 评审不完整。
+    # 注意：此处只留"处置观测"（评审当下客观状态），resolution 的"最终是否
+    # 真解决"由后续复评/测试回填（见 settle_review），不虚报评审自判有效。
+    # ------------------------------------------------------------
+    def _record_review_disposition(self, *, disposition_label, blocked,
+                                   axes_complete, task_key, source=""):
+        """评审处置观测留痕：确定性映射处置状态 → review-metrics 观测。
+
+        - kind=review_disposition：区分于复评回填(review_settled)；
+        - 评审当下只记录处置分派状态，不冒充"已解决"；
+        - 返回 {trace_id, disposition, blocked, axes_complete, recorded}。
+        """
+        if not hasattr(self, "measure_review"):
+            return {"recorded": False, "reason": "metrics 能力不可用"}
+        label = (disposition_label or "").strip().lower()
+        # 确定性状态 → 有效性观测（保守，不虚报解决度；语义按客观状态）
+        if not axes_complete:
+            # 评审不完整：处置本身无效（缺轴即未评全，禁止放行）
+            disp_obs = {"resolution": 0.0, "bug_rate": 1.0,
+                        "stability": 0.5, "generality": 0.5, "consistency": 0.5}
+        elif label in ("merge", "proceed"):
+            # 评审放行：处置建议通过（resolution 保守中性，最终以复评回填）
+            disp_obs = {"resolution": 0.6, "bug_rate": 0.1,
+                        "stability": 0.7, "generality": 0.6, "consistency": 0.7}
+        else:
+            # fix_bug / research / human / consult：处置为"未通过需返工"
+            disp_obs = {"resolution": 0.3, "bug_rate": 0.4,
+                        "stability": 0.6, "generality": 0.6, "consistency": 0.6}
+
+        obs = {
+            "target": task_key,
+            "kind": "review_disposition",
+            "dims": {dim: [{"prob": 1.0, "degree": disp_obs[dim]}]
+                     for dim in disp_obs},
+        }
+        meta = {
+            "actor": getattr(self, "name", "架构·评审"),
+            "task_key": task_key,
+            "source": source,
+            "disposition": label,
+            "blocked": bool(blocked),
+            "axes_complete": bool(axes_complete),
+            "phase": "review",
+        }
+        try:
+            out = self.measure_review(obs, trace=True, meta=meta)
+            return {"recorded": True, "trace_id": out.get("trace_id"),
+                    "disposition": label, "blocked": bool(blocked),
+                    "axes_complete": bool(axes_complete),
+                    "verdict": out.get("verdict", {})}
+        except Exception as e:  # noqa: BLE001
+            return {"recorded": False, "reason": f"留痕失败: {e}",
+                    "disposition": label}
+
     # ------------------------------------------------------------
     # 评审主流程统一入口（修复"双轴未接入评审主流程"→ 双轴强制必走闸门）
     # 评审一律走 do_review，机器核验双轴完整 + 处置标签，缺双轴/缺标签即评审不完整
@@ -188,6 +246,9 @@ class ReviewerRole(BaseRole):
                 reason="评审双轴不完整：" + axis_report["note"],
                 next_requirement="补齐 Standards ∥ Spec 双轴后重新提交评审",
             )
+            eff = self._record_review_disposition(
+                disposition_label="fix_bug", blocked=False,
+                axes_complete=False, task_key=task_key, source=source)
             return {
                 "task_key": task_key,
                 "source": source,
@@ -196,6 +257,7 @@ class ReviewerRole(BaseRole):
                 "review_complete": False,
                 "disposition": "fix_bug",
                 "disposition_result": disposition_result,
+                "effectiveness": eff,
                 "route": route,
                 "note": "评审未走完双轴，不完整，禁止放行（打回补齐双轴）。",
             }
@@ -234,6 +296,11 @@ class ReviewerRole(BaseRole):
             route = None
             route_type = "manual"
 
+        eff = self._record_review_disposition(
+            disposition_label=disposition_label,
+            blocked=axis_report["blocked"],
+            axes_complete=True,
+            task_key=task_key, source=source)
         return {
             "task_key": task_key,
             "source": source,
@@ -245,6 +312,7 @@ class ReviewerRole(BaseRole):
             "blocked": axis_report["blocked"],
             "disposition": disposition_label,
             "disposition_result": disp,
+            "effectiveness": eff,
             "route_type": route_type,
             "route": route,
             "note": (

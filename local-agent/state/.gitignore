@@ -11,3 +11,6 @@ prod_*.json
 test_*.json
 # 秘书感知决策缓存分片（运行时产物，不纳入版本库）
 secretary_sense/
+
+# review-metrics 留痕（运行时产物，不纳入版本库）
+review_metrics_trace.json
