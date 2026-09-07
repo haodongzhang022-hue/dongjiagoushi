@@ -2,7 +2,7 @@
 # ============================================================
 # [feature-verify] dev-team / 确定性状态机（dev 只做不判，全 APPROVED 才整合）
 # ============================================================
-# module:   dev-team（开发小组确定性状态机 · DevTeamEngine，Issue #74/#118）
+# module:   dev-team（开发小组确定性状态机 · DevTeamEngine，Issue #118 / #109）
 # feature:  dev 只做不判 / 客观验证器裁定 / 未通过不交付 / 超限熔断上报 Leader
 # 五要素:
 #   Given   一组开发（dev0..devN-1）产出已按"执行→客观验证"上报给 DevTeamEngine
@@ -123,35 +123,62 @@ else:
     FAIL += 1
 
 # ============================================================
-# 负向自证 —— 引擎被改坏（误放行未全通过的 dev）时本样例必须判红
-#   构造一个"谎称全通过就放行"的坏引擎变体，验证我们的判据真抓得住，
-#   证明"只做不判 / 以测试为准"语义不是空转。
+# 负向自证 —— 真实引擎被改坏（误放行未全通过的 dev）时本样例必须判红
+#   判据【挂在真实引擎上】而非自造子类自比：
+#     护栏只信引擎真实内部 devs 状态（approved==total 与否），
+#     只要 decide() 返回 DONE/INTEGRATE（放行/交付类）而实际未全部
+#     APPROVED，即判违规。真实引擎坏成"谎报 DONE"时本护栏必须抓红。
 # ============================================================
-# 构造一个坏引擎变体：忽略 dev 被 REJECTED 的事实，擅自放行整合（应被校验判红）。
-class _BrokenEngine(DevTeamEngine):
-    """坏引擎：谎称全通过就 DONE 放行（回归场景——破坏'只做不判'）。"""
-    def decide(self, *a, **k):
-        return {
-            "verdict": "DONE", "stage": "done", "remaining": 0.0,
-            "reason": "全部通过（谎报）", "approved_devs": self.devs_per_team,
-            "total_devs": self.devs_per_team,
-        }
+def _delivery_guard(engine, verdict):
+    """护栏判据（确定性、挂在任意引擎实例的真实状态上）：
+    返回 (violation, real_approved, real_total)。
+    violation = True 当且仅当 verdict 是放行/交付类(DONE/INTEGRATE)
+    而引擎内部真实 approved < total —— 即"未全通过却被放行整合"（谎报）。
+    ESCALATED/REWORK 不是交付放行，不触发本护栏（ESCALATED 是超限熔断上报）。"""
+    real_approved = sum(1 for dv in engine.devs.values() if dv["approved"])
+    real_total = len(engine.devs)
+    if verdict in ("DONE", "INTEGRATE"):
+        violation = real_approved < real_total
+    else:
+        violation = False   # REWORK / ESCALATED 非交付放行，不判违规
+    return violation, real_approved, real_total
 
-broken = _BrokenEngine(goal_total=10.0, devs_per_team=2, max_attempts=3)
-broken.developer_output("dev0", "t5", ok=False)   # dev0 客观验证 REJECTED（0/2 通过）
-d_broken = broken.decide()
-# 负向自证：判据不轻信引擎自报的 approved_devs，而以引擎真实内部状态（devs 表）为准。
-#   坏引擎虽谎报 DONE/approved_devs=2，但真实状态里 dev0 仍 approved=False（0/2 通过）——
-#   "未全部 APPROVED 却放行整合"即违规 → 判据必须能把它抓红（证明护栏真抓得住谎报）。
-real_approved = sum(1 for dv in broken.devs.values() if dv["approved"])
-real_total = len(broken.devs)
-caught = (d_broken["verdict"] in ("INTEGRATE", "DONE", "ESCALATED")) and (real_approved < real_total)
-if caught:
-    ok("负向自证: 坏引擎谎报 DONE、实际 %d/%d 未通过 → 被判据抓红 ⇒ '只做不判/以测试为准'是真护栏（抓得住谎报）"
-       % (real_approved, real_total))
+# —— ① 正向护栏：真实引擎正确时，dev 被 REJECTED → decide 是 REWORK，不触发违规
+g_team = DevTeamEngine(goal_total=10.0, devs_per_team=2, max_attempts=3)
+g_team.developer_output("dev0", "t6", ok=False)          # 0/2 客观验证 REJECTED
+g_v = g_team.decide()
+g_viol, g_ap, g_tot = _delivery_guard(g_team, g_v["verdict"])
+if g_v["verdict"] == "REWORK" and not g_viol and g_ap == 0 and g_tot == 2:
+    ok("负向①(真实引擎): REJECTED 未全通过 → decide=REWORK，护栏无违规（真实引擎守住'只做不判'）")
 else:
-    bad("负向自证: 判据未识破坏引擎谎报 → 护栏失效")
+    bad("负向①(真实引擎): 真实引擎未守'只做不判'（verdict=%s, violation=%s）→ 引擎已坏" % (g_v["verdict"], g_viol))
     FAIL += 1
+
+# —— ② 变异验证：把【真实 DevTeamEngine.decide 改坏成谎报 DONE】（这才是该被护栏抓住的
+#   回归——真实引擎坏掉），护栏必须抓红；证明护栏不是"自造子类自比"的空转。
+_orig_decide = DevTeamEngine.decide
+def _fake_done_decide(self, *a, **k):
+    # 真实引擎被"修坏"成：无视 dev 被 REJECTED，谎称全通过直接 DONE 放行
+    return {
+        "verdict": "DONE", "stage": "done", "remaining": 0.0,
+        "reason": "全部通过（谎报）", "approved_devs": self.devs_per_team,
+        "total_devs": self.devs_per_team,
+    }
+DevTeamEngine.decide = _fake_done_decide               # 变异：污染真实类
+try:
+    m_team = DevTeamEngine(goal_total=10.0, devs_per_team=2, max_attempts=3)
+    m_team.developer_output("dev0", "t6", ok=False)     # 真实状态 0/2 未通过
+    m_d = m_team.decide()                               # 坏 decide 谎报 DONE
+    m_viol, m_ap, m_tot = _delivery_guard(m_team, m_d["verdict"])
+    if m_d["verdict"] == "DONE" and m_viol and m_ap == 0 and m_tot == 2:
+        ok("负向②(变异): 真实 DevTeamEngine.decide 被改坏谎报 DONE、实际 %d/%d 未通过 → 护栏判红"
+           % (m_ap, m_tot))
+    else:
+        bad("负向②(变异): 真实引擎坏成谎报 DONE 而护栏未抓红（verdict=%s, violation=%s）→ 假护栏"
+            % (m_d["verdict"], m_viol))
+        FAIL += 1
+finally:
+    DevTeamEngine.decide = _orig_decide                 # 恢复真实 decide，避免污染后续
 
 print("")
 if FAIL > 0:
