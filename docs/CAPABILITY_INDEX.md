@@ -26,6 +26,7 @@
 | **协作** | 同岗协作（PeerCollab）| 会诊/编队/补位/同岗 | `local-agent/collab/` | docs/PEER_COLLAB.md | Issue #47 |
 | **协作** | 同岗收尾闭环 | 会诊未收敛/收尾 | `local-agent/collab/closure.py` | docs/PEER_COLLAB_CLOSURE.md | Issue #47 |
 | **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 |
+| **质量** | 有效性度量模型 | 度量/有效性/解决度/小八哥/稳定性/通用性/一致性 | `local-agent/review_metrics/` | docs/REVIEW_METRICS.md | Issue #100 决策⑤ |
 | **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
 | **质量** | 审核前置助手（决策补全）| 二选一/拿不准/解决不掉/换方案 | `roles/manager.py`(审核前置) | docs/REVIEWER_PRECURSOR.md | Issue #47 |
 | **防无效** | 监控哨兵 | 监控/哨兵/停滞/横跳/无效努力 | `local-agent/sentinel/` | docs/SENTINEL.md | Issue #33 |
@@ -89,6 +90,7 @@
 | 我感觉一个 agent 在无效空转/停滞 | 监控哨兵（停滞/横跳/重复错误）|
 | 我面对"二选一都不够好" | 架构·审核前置助手（决策补全）|
 | 我不知道某个机制的最新规则 | 回本表找「唯一事实源」，改正文再刷本表 |
+| 我想知道"某次评审/交付到底有没有效解决" | 有效性度量模型（review-metrics：维度化+分档+留痕）|
 | 我想了解统一术语别叫混 | CONTEXT.md（共享语言）|
 | 我想知道某个架构取舍为什么这么做 | docs/adr/（决策记录）|
 | 我想推进度/打标/调优先级 | LabelAbility / 进度推手 |
