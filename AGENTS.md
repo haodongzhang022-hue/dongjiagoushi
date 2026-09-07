@@ -86,6 +86,14 @@
   不骗人），dashboard health 反映真实通道可达性（红灯即通道不可达不假装成功），run.py 加
   `--live probe/probe-send/transport` + `--serve <port>`（把聚合页挂可常驻 HTTP 服务浏览器直开）。
   详见 `docs/PLATFORM_ADAPTERS.md` 三.8 + ADR-0009。
+  **三宿主真实传输注册表（最常用闭环本地/网页两端也真实 · entries.host_transport · v0.6.0）**：
+  v0.5 只把 cnb 云端端做真实，闭环本地 harness / 网页 gemini 桥两端仍 mock——本轮补齐为**三宿主
+  真实机制**（每宿主同 `{send,poll,ack}` 契约可注入 bridge）：`cnb-live`(云端 CLI) /
+  `local-harness`(真实 relay 接力卡落盘可续跑可回放) / `web-bridge`(真实 HTTP：run.py `--serve`
+  `/api`+`/api/control` 即网页桥端点)；`resolve_host` 别名归一（网页/gemini/web→web-bridge、
+  deepseek/harness→local-harness、cnb/云端→cnb-live）；`overview` 三宿主真实可达矩阵；未知宿主
+  如实报错不静默 mock。run.py `--bridge via-overview` / `--bridge request --bridge-via <host>`；
+  dashboard snapshot 纳 `hosts` 三宿主矩阵。详见 `docs/PLATFORM_ADAPTERS.md` 三.9 + ADR-0010。
 
 ### 秘书层动态扩展机制（Secretary Scale · 固定规则 · Issue #100 决策①）
 

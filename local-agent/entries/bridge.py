@@ -348,16 +348,25 @@ def handle_summary(handle_id):
 # 七、CLI 便捷：本地⇄云端桥接闭环 一步触发
 # ---------------------------------------------------------------------------
 def cli_bridge(req, entry="local", action="request", handle_id=None, collect_state=None,
-               pr_ids=None, live=False):
+               pr_ids=None, live=False, via=None):
     """run.py --bridge 的语义入口：request → collect → align → local-test 全链。
 
     action:
-      request  发起云端异步开发请求（返回句柄；live=True → 真实通道）
+      request  发起云端异步开发请求（返回句柄；live=True → 真实通道；via=<host> 走指定真实宿主）
       collect  按句柄收集云端产出（--collect-state merged/...  + --pr-ids）
       align    按句柄做本地数据对齐
       localtest 按句柄下发本地测试先行计划
       overview 闭环俯瞰
+    via: 指定真实宿主（cnb-live / local-harness / web-bridge，或别名），
+         request 经该宿主真实传输发起（v0.6.0 host_transport 三宿主注册表）。
     """
+    if via:
+        from entries import host_transport
+        if action in ("via-overview", "via-list"):
+            return host_transport.overview()
+        if action == "request":
+            return host_transport.bridge_via(req or "云开发请求", via=via)
+        return {"ok": False, "error": f"--bridge via=<host> 当前支持 action=request / via-overview"}
     if action == "overview":
         return loop_overview()
     if action == "request":

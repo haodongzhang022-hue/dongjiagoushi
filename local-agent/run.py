@@ -157,6 +157,8 @@ def main():
     parser.add_argument("--bridge-pr-ids", default=None, help="--bridge collect 云端PR列表(逗号分隔)")
     parser.add_argument("--bridge-live", action="store_true",
                         help="--bridge request 走真实 cnb.cool 传输通道（默认真实，用户：模拟数据不可信）")
+    parser.add_argument("--bridge-via", default=None,
+                        help="--bridge request 指定真实宿主传输: cnb-live/local-harness/web-bridge(或别名)，v0.6.0 三宿主注册表；--bridge via-overview 看三宿主可达矩阵")
     # ---- 真实 cnb.cool 传输通道（Issue #105 · entries.cnb_live · v0.5.0）----
     parser.add_argument("--live", default=None,
                         help="真实 cnb.cool 通道 action: probe/transport (发送信号探测真实配合)")
@@ -213,17 +215,26 @@ def main():
         pr_ids = None
         if args.bridge_pr_ids:
             pr_ids = [x.strip() for x in args.bridge_pr_ids.split(",") if x.strip()]
+        # 三宿主真实传输（v0.6.0）：--bridge via-overview 看矩阵；--bridge request --bridge-via <host>
+        if args.bridge == "via-overview":
+            from entries import host_transport as _ht
+            print(json.dumps(_ht.overview(), ensure_ascii=False, indent=2))
+            return 0
+        via = args.bridge_via
         # 真实 CLI：--bridge request 默认走真实 cnb.cool 通道（用户：模拟数据不可信）
         out = bridge.cli_bridge(
             args.req or "", entry=args.entry or "local", action=args.bridge,
             handle_id=args.handle, collect_state=args.collect_state, pr_ids=pr_ids,
-            live=args.bridge_live or args.bridge == "request")
+            live=args.bridge_live or args.bridge == "request", via=via)
         if args.bridge == "overview":
             print(json.dumps(out, ensure_ascii=False, indent=2))
         elif args.bridge == "request":
-            print("[bridge 发起云端开发] handle=%s | status=%s | entry=%s"
-                  % (out.get("handle_id"), out.get("status"), out.get("entry")))
-            print("  云开发请求已投递，句柄可跨对话/跨 PR 定位收集结果")
+            # 三宿主真实传输（v0.6.0 via）返回值裹在 {via, transport, handle} 下
+            h = out.get("handle", out) if "handle" in out else out
+            via_txt = (" | via=%s/%s" % (out.get("via"), out.get("transport"))) if "via" in out else ""
+            print("[bridge 发起云端开发] handle=%s | status=%s | entry=%s%s"
+                  % (h.get("handle_id"), h.get("status"), h.get("entry"), via_txt))
+            print("  云开发请求已投递，句柄可跨对话/跨 PR 定位收集结果（真实宿主传输）")
         elif args.bridge == "collect":
             print("[bridge 收集云端产出] ok=%s | state=%s | pr_ids=%s"
                   % (out.get("ok"), out.get("handle", {}).get("cloud_result", {}).get("state"),

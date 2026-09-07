@@ -158,6 +158,33 @@ channel 受限则 probe 如实降级暴露，不假装成功。
 
 测试 `local-agent/tests/test_cnb_live.sh`（6 项信号灯）+ 注册进 hybrid BUILTIN_CPU_SCRIPTS。
 
+### 三.9 三宿主真实传输注册表（v0.6.0 · entries.host_transport — 最常用闭环真实宿主两端补齐）
+
+> 背景：用户最常用闭环 = **本地 deepseek harness ⇄ 网页/gemini 工具桥 ⇄ cnb.cool 云端异步开发**。
+> v0.3~v0.5 把 cnb.cool 云端端做成真实通道（cnb_live），但闭环另两端仍只有 mock 假"投递到云端"。
+> 本轮补齐——形成**三宿主传输注册表**，全程**真实机制不 mock 假装**，每宿主实现同一
+> `{send, poll, ack}` 传输契约，可注入 `bridge.request_cloud_dev` / dashboard：
+
+**落地**：新增 `local-agent/entries/host_transport.py`：
+- `hosts()`：三宿主清单（cnb-live/local-harness/web-bridge）；
+- `resolve_host(alias)`：别名归一到三端之一——网页/gemini/web→`web-bridge`；本地/deepseek/harness/
+  dsh→`local-harness`；cnb/云端→`cnb-live`（不写死、别名收敛）；
+- `host_transport(name)`：返回对应宿主真实 transport——**cnb-live**（真实 cnb CLI，复用 cnb_live）/
+  **local-harness**（真实 relay 接力卡落盘+可续跑可回放）/ **web-bridge**（真实 HTTP 通道：本仓
+  `run.py --serve` 的 `/api`+`/api/control` 即网页桥可达端点）；未知宿主如实报错不静默 mock；
+- `overview()`：三宿主真实可达性矩阵（cnb CLI 在→cnb-live🟢；relay 可读写→local-harness🟢；
+  --serve /api 可探测→web-bridge🟢）；
+- `bridge_via(req, via)`：经指定真实宿主发起云开发请求，得真实桥接句柄。
+
+**接入**：
+- `run.py --bridge via-overview`：看三宿主可达矩阵；`--bridge request --bridge-via <host>`：经指定
+  真实宿主发起云开发；
+- dashboard `snapshot()` 增 `hosts` 三宿主真实矩阵，与既有三端适配器/桥接句柄同盘聚合；
+- 测试 `local-agent/tests/test_host_transport.sh`（10 项信号灯）+ 注册进 hybrid BUILTIN_CPU_SCRIPTS。
+
+**真实不 mock**：local-harness `send` 真实写 relay 接力卡（含 relay.save 落盘）、`poll` 真实读卡状态、
+`ack` 真实落回执历史——本地 deepseek harness 发的云开发请求可续跑、可回放，不再是假"投到云端"。
+
 ---
 
 ## 四、各宿主适配详解
@@ -225,3 +252,4 @@ scale_swarm(tasks, n)    # 分形扩展到 n 个小组
 | 三入口适配层（web/cnb/local） | `local-agent/entries/` |
 | 真实 cnb.cool 传输通道（live） | `local-agent/entries/cnb_live.py` |
 | 跨端聚合控制页（含 --serve） | `local-agent/entries/dashboard.py` |
+| 三宿主真实传输注册表（v0.6.0） | `local-agent/entries/host_transport.py` |
