@@ -84,6 +84,33 @@ support 系模板强制经秘书；harness 内嵌因调用方已定角色允许�
 
 **成本模型**：云端建环境贵 → CPU 密集测试下放本地（对齐 `CLOUD_LOCAL_COOP.md`），云端只保留
 LLM 强相关 + 评审；本地测试先行让长时云端开发（跨对话/跨 PR/跨仓库）的验收不等云端重复建环境。
+### 三.7 跨端聚合控制页（最常用链路深化 · module platform-adapter v0.4.0）
+
+> 背景：用户（Issue #105）点名「做一个方便控制的聚合，类似于 fastapi 聚合页包括状态显示，
+> 然后每个端我都尝试建立一个，这样跨端交互的就会更加顺畅」。v0.3.0 桥接闭环已跑通；
+> 本轮给**跨端交互加一块聚合控制面**——像 FastAPI /docs 那样一个地址看到各端状态 +
+> 一键控制，不用逐个入口翻状态、不用记每条 CLI。
+
+**落地**：新增 `local-agent/entries/dashboard.py`（跨端聚合控制页能力），宿主无关、统一
+从三端适配器（web/cnb/local）+ 本地⇄云端桥接句柄 + 接力卡 + 成本模型聚合出一张控制台：
+
+- `snapshot()`：全端聚合大盘（三端适配器矩阵 + 句柄按状态归集 + 接力卡 + 成本模型），
+  FastAPI 风格路由键 + 健康状态灯（🟢/🔴），`health/overview/handles/relay/entry/{e}/
+  control/{action}` 可读；
+- `panel(entry)`：**每端一个面板**（web/cnb/local）——同一聚合器按端过滤出「本端视角」：
+  本端适配器 + 本端发起的桥接句柄 + 本端可用控制动作（local 端含 localtest/align，
+  cnb 端含 request/collect…），跨端则看 total 大盘；
+- `all_panels()`：三端面板并列（跨端顺畅交互总览，每端都建一个）；
+- `control(action,...)`：**一键控制动作**（request / collect / align / localtest / handles /
+  overview…）——复用 bridge 真实状态机流转，非假状态（control 不只是一块看板，能真操作）；
+- `html_page(entry=None)`：**人可读 HTML 聚合控制页**（状态灯 + 适配器矩阵表 + 句柄状态表 +
+  一键控制表单），供人类浏览器俯瞰 / 网页桥嵌入；
+- `run.py` 新增 `--dashboard action` + `--dashboard-html` + `--dashboard-pr-ids`，全链 CLI 可调。
+
+**与「一套核心 + 每端适配层」同构**：聚合不另起数据，三端都从同一份 snapshot 过滤，跨端
+交互顺畅、不散点状态；「每个端一个面板」延续三入口每端适配器思路，每端只维护本端视角。
+测试 `local-agent/tests/test_dashboard.sh`（12 项信号灯）。
+
 ---
 
 ## 四、各宿主适配详解

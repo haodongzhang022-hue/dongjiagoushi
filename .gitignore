@@ -31,3 +31,6 @@ local-agent/hybrid/__pycache__/
 
 # Hybrid 资源路由本地测试结果（不进版本库，由 sync 同步）
 .cnb-results/
+
+# 本地⇄云端桥接闭环运行时状态（桥接句柄本地持久化，不进版本库）
+local-agent/entries/_bridge_state/
