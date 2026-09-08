@@ -219,13 +219,26 @@ def awake(task_key, target_agent, from_agent, issue_ref="", context="", timeout=
     """
     admin = _admin()
     task_id = _gid_for("task", task_key) or task_key
-    # ① 投递带 [触发] 标记的接力卡（确保传递足够内容）
+    # ① 投递带 [触发] 标记 + 完整 @org/repo 路径的接力卡（#142 全路径出发）
+    #    context 已由 BaseRole.awake/fullpath_relay 前置完整 @ 路径；
+    #    此处兜底：若 context 仍缺完整 @，自动补（防底层直调漏路径）。
+    ctx = context or ""
+    if ctx and not ctx.lstrip().startswith("@"):
+        try:
+            from handle import resolver as _hr
+            _handle = _hr.resolve(target_repo="dongjiagoushi",
+                                  role=target_agent)["handle"]
+            ctx = "%s [触发:%s]。\n%s" % (_handle, target_agent, ctx)
+        except Exception:
+            pass
     relay_card = {
+        "handle": (ctx.split(" ")[0] if ctx.startswith("@") else ""),
         "trigger": f"[触发:{target_agent}]",
+        "relay_text": ctx,
         "depth": 3, "level": "L3_开工",
         "task_key": task_key, "task_id": task_id,
         "issue": f"#{issue_ref}" if issue_ref else "",
-        "context": context or "",
+        "context": ctx,
         "action": "回执 [接单] 确认真实唤醒",
         "expect": "[接单]/awake_ack 回执，无回执 = 路由未真实唤醒",
     }

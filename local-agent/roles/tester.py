@@ -59,8 +59,15 @@ class TesterRole(BaseRole):
             task_key, agent_id, target="验收通过并交付", goal_total=goal_total,
             current=current, note=note, role=self.name)
 
-        relay = ("@dongdongxiaozu/dongjiagoushi(架构·测试) "
-                 "[触发:架构·测试] 已接单")
+        # #142 全路径出发：回执落款用完整 @org/repo(角色)，不写死
+        handle = "@dongdongxiaozu/dongjiagoushi(架构·测试)"
+        try:
+            info = self.resolve(target_repo="dongjiagoushi", role="架构·测试")
+            if isinstance(info, dict) and (info.get("handle") or info.get("at")):
+                handle = info.get("handle") or info.get("at")
+        except Exception:
+            pass
+        relay = ("%s [触发:架构·测试] 已接单" % handle)
         return {
             "accepted": True,
             "ack": ack,
@@ -69,7 +76,8 @@ class TesterRole(BaseRole):
             "task_key": task_key,
             "issue_ref": issue_ref,
             "test_scope": test_scope,
+            "handle": handle,
             "relay_receipt": relay,
             "next_step": ("继续执行测试矩阵 → 给信号灯(🟢/🟡/🔴) → "
-                          "🟢放行合并/🔴[回转]退回开发，推进到结果"),
+                          "🟢放行合并/🔴[回转]退回:架构·开发（带完整 @ 唤醒），推进到结果"),
         }

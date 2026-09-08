@@ -45,7 +45,8 @@ class ReviewerRole(BaseRole):
   `awakened` 回执——**不得只描述"交测试接力"而不真正唤醒**，转交未回执须重触发或升级。
 
 触达协议：显式[触发:架构·评审]/语义命中"评审/审查/走查/质量"即进入本角色；
-发现🔴必修必须打回（[回转]退回开发），复评清零才放行。
+发现🔴必修必须打回——评论须带完整 `@org/repo(架构·开发)` + `[触发:架构·开发]` +
+`[回转] 退回:架构·开发`（全路径出发，缺完整 @ 即假触发），复评清零才放行。
 统一处置标签：处置标签是评审输出契约的**必填字段**，缺标签即评审未完成。
 双轴必走：评审须先产出 Standards ∥ Spec 双轴、缺任一轴即评审不完整，禁止单轴混评放行。
 """
@@ -349,27 +350,17 @@ class ReviewerRole(BaseRole):
             }
 
         # 用完整 @org/repo(角色) 定位目标（不写死 org/repo，同仓复用本仓库 @）
-        # 目标测试的完整 @：由 HandleAbility 动态解析；解析失败回退本仓库默认格式
-        target_handle = "@dongdongxiaozu/dongjiagoushi(架构·测试)"
-        try:
-            info = self.resolve(target_repo="dongjiagoushi", role="架构·测试")
-            # resolve 返回结构化定位信息，handle 字段为完整 @ 字符串
-            if isinstance(info, dict):
-                h = info.get("handle") or info.get("at") or info.get("target", {}).get("handle")
-            else:
-                h = info
-            if h:
-                target_handle = str(h)
-        except Exception:
-            pass
-
-        # 完整接力卡上下文（含目标完整 @ + [触发:架构·测试] + 评审通过结论）
-        context = (
-            f"{target_handle} [触发:{target_role}] 评审已通过（处置={label}），任务正式转交。\n"
+        # #142 机制加固：转交卡一律带完整路径出发（@org/repo(架构·测试) [触发:架构·测试]），
+        # 由 fullpath_relay 动态解析目标仓库完整 @ + relay_card.check 校验。
+        body = (
+            f"评审已通过（处置={label}），任务正式转交。\n"
             f"评审摘要：{review_summary or '见评审评论'}\n"
             f"请按测试输出契约接手：测试矩阵 + 缺陷分级(🔴P0/🟠P1/🟡P2) + 信号灯(🟢/🟡/🔴)。\n"
             f"收到请回执 [接单]，接手后继续推进到结果（缺回执 = 转交未真实唤醒）。"
         )
+        relay = self.fullpath_relay(target_role, body=body)
+        target_handle = relay["handle"]
+        context = relay["relay_text"]
         handle = target_handle
 
         result = self.awake(task_key, target_role, context=context,
@@ -379,6 +370,8 @@ class ReviewerRole(BaseRole):
             "awakened": result.get("awakened", False),
             "awakened_note": result.get("awakened_note", ""),
             "relay_card": result,
+            "relay_text": relay["relay_text"],
+            "relay_valid": relay["valid"],
             "target_role": target_role,
             "handle": handle,
             "disposition": label,
@@ -390,17 +383,27 @@ class ReviewerRole(BaseRole):
         }
 
     def revert_to_developer(self, task_key, reason="", next_requirement=""):
-        """评审 🔴必修 → [回转] 退回:架构·开发（不转交测试）。"""
-        context = (
-            f"[触发:架构·开发] 评审 [回转] 退回:架构·开发。\n"
+        """评审 🔴必修 → [回转] 退回:架构·开发（不转交测试）。
+
+        #142 机制加固：回转=被打回视为**重新触发**，必须**带完整路径出发**——
+        正文首行 `@dongdongxiaozu/dongjiagoushi(架构·开发) [触发:架构·开发]`
+        真实唤醒开发，正文再写 `[回转] 退回:架构·开发 / 原因 / 下一步要求`。
+        只写 `[回转] 退回:架构·开发` 而无完整 @ = 想触发没唤醒（假触发），
+        由 fullpath_relay 自动补全路径 + relay_card.check 校验。
+        """
+        body = (
+            f"评审 [回转] 退回:架构·开发。\n"
             f"原因：{reason or '🔴必修项未清零'}\n"
             f"下一步要求：{next_requirement or '按评审必修项返工，复评清零再放行'}"
         )
-        result = self.awake(task_key, "架构·开发", context=context,
+        relay = self.fullpath_relay("架构·开发", action="revert", body=body)
+        result = self.awake(task_key, "架构·开发", context=relay["relay_text"],
                             from_agent=self.name)
         return {
             "reverted": result.get("awakened", False),
             "target_role": "架构·开发",
             "reason": reason,
             "relay_card": result,
+            "relay_text": relay["relay_text"],
+            "relay_valid": relay["valid"],
         }
