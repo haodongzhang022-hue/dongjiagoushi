@@ -59,8 +59,19 @@ class TesterRole(BaseRole):
             task_key, agent_id, target="验收通过并交付", goal_total=goal_total,
             current=current, note=note, role=self.name)
 
-        relay = ("@dongdongxiaozu/dongjiagoushi(架构·测试) "
-                 "[触发:架构·测试] 已接单")
+        # #142 全路径出发：回执落款用完整 @org/repo(角色)，不写死
+        # 统一 best_handle：解析失败显式 warning（不静默写死）
+        try:
+            from handle import resolver as _hr
+            _bh = _hr.best_handle(
+                at_str=getattr(self, "_at_str", None),
+                target_repo="dongjiagoushi", role="架构·测试")
+        except Exception:
+            _bh = {"handle": "@dongdongxiaozu/dongjiagoushi(架构·测试)",
+                   "warning": "handle 包不可用，回退写死 @ 路径（可能无法真实唤醒对端）"}
+        handle = _bh["handle"]
+        handle_warning = _bh.get("warning") or ""
+        relay = ("%s [触发:架构·测试] 已接单" % handle)
         return {
             "accepted": True,
             "ack": ack,
@@ -69,7 +80,10 @@ class TesterRole(BaseRole):
             "task_key": task_key,
             "issue_ref": issue_ref,
             "test_scope": test_scope,
+            "handle": handle,
+            "handle_resolved": not handle_warning,
+            "handle_warning": handle_warning,
             "relay_receipt": relay,
             "next_step": ("继续执行测试矩阵 → 给信号灯(🟢/🟡/🔴) → "
-                          "🟢放行合并/🔴[回转]退回开发，推进到结果"),
+                          "🟢放行合并/🔴[回转]退回:架构·开发（带完整 @ 唤醒），推进到结果"),
         }

@@ -130,11 +130,20 @@ class BaseRole:
         """L3 路由真实唤醒：投递接力卡并校验目标 agent 是否真回执 [接单]。
 
         解决"路由其实并没有真实现唤醒"——未回执 = 未唤醒，须重触发或升级。
+
+        #142 机制加固：所有接力动作**带着路径出发**——context 不以完整
+        `@org/repo(角色) [触发:角色]` 开头时，自动前置完整 @ 路径
+        （fullpath_relay），杜绝"写了 [回转] 退回:X 却没 @ X、唤醒不了对端"
+        的假触发。
         """
         if self.depth_ability is None:
             raise RuntimeError(f"角色 {self.name} 未加载七层协作深度能力")
+        # 全路径前置：context 缺完整 @ 召唤时自动补（保证能真实唤醒对端角色）
+        ctx = context or ""
+        if not ctx.lstrip().startswith("@"):
+            ctx = self.fullpath_relay(target_agent, body=ctx)["relay_text"]
         return self.depth_ability.awake(task_key, target_agent,
-                                        context=context, issue_ref=issue_ref,
+                                        context=ctx, issue_ref=issue_ref,
                                         from_agent=from_agent)
 
     def ack_wake(self, task_key, role="", note="", agent_id=None):
@@ -216,6 +225,88 @@ class BaseRole:
         self._at_str = at_str
         if self.handle_ability is not None:
             self.handle_ability.at_str = at_str
+
+    # ------------------------------------------------------------
+    # 全路径出发（回转/触发/转交 带完整 @org/repo(角色) 路径 · Issue #142 机制加固）
+    # ------------------------------------------------------------
+    def fullpath_relay(self, target_agent, action="", body="", target_org=None,
+                       target_repo=None):
+        """生成**带完整 @ 路径出发**的合规接力卡正文。
+
+        背景（用户 #142 拍板）：『回转』只在评论写 `[回转] 退回:架构·开发`
+        或 `[触发:架构·开发]` 而不带完整 `@org/repo(架构·开发)`，等于想触发
+        却没真实唤醒——评论里没有被 @ 的角色不会收到平台推送。故本体系所有
+        接力动作（回转/触发/转交）一律**带着路径出发**：正文首行必须是
+        `@org/repo(角色) [触发:角色]` 完整召唤，缺全路径即视为无效接力。
+
+        实现：复用 HandleAbility 动态解析目标仓库有权限的完整 @（不写死
+        org/repo/角色名）；action 缺省自动按动作类型标 `[触发:角色]` 或
+        `[回转] 退回:角色`；生成后经 relay_card.check 校验，缺标记显式暴露。
+
+        返回：{ handle, mark, relay_text, valid, reasons }
+        """
+        # ① 动态解析目标完整 @（失败回退不静默：best_handle 统一尽力解析
+        #    + 显式 warning + 数据留痕；不再各自 try/except 回退写死）
+        try:
+            from handle import resolver as _hr
+            _res = _hr.best_handle(
+                at_str=getattr(self, "_at_str", None),
+                target_org=target_org,
+                target_repo=target_repo,
+                role=target_agent,
+                current_org=getattr(self, "_current_org", None),
+                current_repo=getattr(self, "_current_repo", None))
+        except Exception:
+            # 环境缺 handle 包时兜底（保留原行为但显式标注）
+            _res = {
+                "handle": "@dongdongxiaozu/dongjiagoushi(%s)" % target_agent,
+                "resolved": False,
+                "warning": "handle 包不可用，回退写死 @ 路径（可能无法真实唤醒对端）",
+            }
+        handle = _res["handle"]
+        handle_warning = _res.get("warning") or ""
+
+        # ② 动作类型 → 触发标记
+        #    约定（AGENTS.md 触发强制化 + #142 全路径出发）：
+        #      - 回转卡 = 被打回视为**重新触发**，首行必须同时含
+        #        `[触发:<角色>]`（唤醒）+ 正文 [回转] 退回:<角色>（打回语义）；
+        #      - 触发/转交卡 = 首行 `[触发:<角色>]`。
+        action = (action or "").strip()
+        body = (body or "").strip()
+        if not action:
+            # 缺省动作按正文语义判定：正文已含回转打回语义 → revert；其余 trigger
+            action = ("revert" if ("[回转]" in body or "退回:" in body
+                                   or body.startswith("评审 [回转]"))
+                      else "trigger")
+        is_revert = ("退回" in action or action.startswith("revert")
+                     or "[回转]" in body or "退回:" in body)
+        mark = "[触发:%s]" % target_agent
+
+        # ③ 组装正文：首行 = 完整 @ 路径 + [触发] 标记，保证"带着路径出发"
+        if body.startswith("@"):
+            relay_text = body  # 已自带路径，保持原样
+        else:
+            first_line = "%s %s。" % (handle, mark)
+            if is_revert and "[回转]" not in body and "退回:" not in body:
+                body = "[回转] 退回:%s。\n%s" % (target_agent, body)
+            relay_text = "%s\n%s" % (first_line, body) if body else first_line
+
+        # ④ relay_card.check 校验（缺完整 @ / [触发] 即 INVALID）
+        valid, reasons = False, ["relay_card 不可用"]
+        try:
+            from relay_card import check
+            valid, reasons = check(relay_text, role=target_agent)
+        except Exception:
+            pass
+        return {
+            "handle": handle,
+            "mark": mark,
+            "relay_text": relay_text,
+            "valid": valid,
+            "reasons": reasons,
+            "resolved": _res.get("resolved", True),
+            "warning": handle_warning,
+        }
 
     def self_handle(self):
         """返回本 agent 自身的完整 @ 格式（身份声明/汇报落款用，不写死）。"""

@@ -12,7 +12,7 @@
 
 | 角色 | 能力 | 作用 |
 |------|------|------|
-| 架构·评审 | `handoff_to_tester()` | 评审通过（disposition=merge/proceed）后，用完整 `@org/repo(架构·测试)` + `[触发:架构·测试]` 投接力卡**真实唤醒**测试，并校验 `awakened` 回执；未通过（fix_bug）则不转交、走 `[回转] 退回:架构·开发` |
+| 架构·评审 | `handoff_to_tester()` | 评审通过（disposition=merge/proceed）后，用完整 `@org/repo(架构·测试)` + `[触发:架构·测试]` 投接力卡**真实唤醒**测试，并校验 `awakened` 回执；未通过（fix_bug）则不转交、走 `[回转] 退回:架构·开发`——**须带完整 `@org/repo(架构·开发)` + `[触发:架构·开发]` 全路径出发**（#142 机制加固，缺完整 @ = 假触发） |
 | 架构·评审 | `passes_to_tester()` | 判定处置标签是否放行转交（merge/proceed 才放行） |
 | 架构·评审 | `revert_to_developer()` | 🔴必修 → 回转开发（不转交测试） |
 | 架构·测试 | `take_over_and_develop()` | 收到转交后 **`[接单]` + `ack_wake` 回执 + `start_work` 开工 + `track_progress` 进度尺推进**，真正接手继续开发（不只描述） |
