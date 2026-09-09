@@ -50,14 +50,14 @@ graph TD
     PEER[同岗会诊/收尾闭环]
     DAT[数据管理员+进度推手 标签/进度/底座]
     HOST[编排引擎 DAG/分形/多宿主]
-    RELAY[接力卡校验 relay_card 全路径出发]
+    RELAY[接力卡校验 relay_card 全路径出发：拦截缺全路径的接力卡]
     SN -.停滞/横跳 打断上报.-> MGR
     PRE -.会诊未收敛 交人.-> HUM
     PEER -.疑难 会诊.-> REV
     DAT -.进度/标签统计.-> HUM
     HOST -.DAG 驱动.-> MGR
-    RELAY -.回转/触发缺全路径即拦截.-> D1
-    RELAY -.回转/触发缺全路径即拦截.-> D2
+    RELAY -.回转/触发卡缺完整 @ 与触发标记即拦(不投递).-> D1
+    RELAY -.回转/触发卡缺完整 @ 与触发标记即拦(不投递).-> D2
 
     style SEC fill:#cfe8ff
     style DEL fill:#d7f0d0
@@ -79,7 +79,6 @@ graph TD
 |------|------|------|------|------|------|-----------|
 | **角色模块** | `.cnb/settings.yml` + `local-agent/roles/` | 定义架构师人设 + 秘书/产品/总师/经理/小组长/开发/评审/测试/交付等协作角色 | 需求 | 角色定义 | 无 | ✅ |
 | **全路径触发/接力模块** | `local-agent/relay_card/` + `local-agent/roles/base.py` | 接力卡必须带完整 `@org/repo(角色)` + `[触发:角色]`，回转/转交**带路径出发**；缺全路径即 INVALID_RELAY 拦截 | 接力动作 | 合规接力卡 + 校验结果 | 角色模块 | ✅ |
-| **偏好注入模块** | `.codebuddy/skills/architect/SKILL.md` | 架构师方法论，@CodeBuddy 自动加载 | 召唤语 | 架构八步执行 | 角色模块 | ✅ |
 | **偏好注入模块** | `.codebuddy/skills/architect/SKILL.md` | 架构师方法论，@CodeBuddy 自动加载 | 召唤语 | 架构八步执行 | 角色模块 | ✅ |
 | **流程编排模块** | `.cnb.yml` | 知识库入库 + npc:go 兜底 + codewiki | push/tag/评论事件 | CI 执行 | 无 | ✅ |
 | **观测/决策模块** | docs + Issue/PR 留痕 | 二级信息、看板、风险矩阵、索引 | 各步产物 | 决策摘要 | 各模块 | ✅ |

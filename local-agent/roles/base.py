@@ -245,24 +245,26 @@ class BaseRole:
 
         返回：{ handle, mark, relay_text, valid, reasons }
         """
-        # ① 动态解析目标完整 @（失败回退探测仓库默认格式）
-        handle = None
+        # ① 动态解析目标完整 @（失败回退不静默：best_handle 统一尽力解析
+        #    + 显式 warning + 数据留痕；不再各自 try/except 回退写死）
         try:
-            if self.handle_ability is not None:
-                info = self.handle_ability.resolve(
-                    target_org=target_org, target_repo=target_repo,
-                    role=target_agent)
-                if isinstance(info, dict) and info.get("handle"):
-                    handle = info["handle"]
+            from handle import resolver as _hr
+            _res = _hr.best_handle(
+                at_str=getattr(self, "_at_str", None),
+                target_org=target_org,
+                target_repo=target_repo,
+                role=target_agent,
+                current_org=getattr(self, "_current_org", None),
+                current_repo=getattr(self, "_current_repo", None))
         except Exception:
-            handle = None
-        if not handle:
-            try:
-                from handle import resolver as _hr
-                handle = _hr.resolve(target_repo=target_repo or "dongjiagoushi",
-                                     role=target_agent)["handle"]
-            except Exception:
-                handle = "@dongdongxiaozu/dongjiagoushi(%s)" % target_agent
+            # 环境缺 handle 包时兜底（保留原行为但显式标注）
+            _res = {
+                "handle": "@dongdongxiaozu/dongjiagoushi(%s)" % target_agent,
+                "resolved": False,
+                "warning": "handle 包不可用，回退写死 @ 路径（可能无法真实唤醒对端）",
+            }
+        handle = _res["handle"]
+        handle_warning = _res.get("warning") or ""
 
         # ② 动作类型 → 触发标记
         #    约定（AGENTS.md 触发强制化 + #142 全路径出发）：
@@ -302,6 +304,8 @@ class BaseRole:
             "relay_text": relay_text,
             "valid": valid,
             "reasons": reasons,
+            "resolved": _res.get("resolved", True),
+            "warning": handle_warning,
         }
 
     def self_handle(self):

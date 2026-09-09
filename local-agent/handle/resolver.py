@@ -307,8 +307,78 @@ def resolve(at_str=None, target_org=None, target_repo=None, role=None,
 resolve_handle = resolve
 
 
+def best_handle(at_str=None, target_org=None, target_repo=None, role=None,
+                   current_org=None, current_repo=None, default_org=None,
+                   default_repo=None):
+    """尽力解析目标角色完整 @，**解析失败不静默** —— 统一便捷 helper。
+
+    评审 S1/S2 收口（Issue #142 遗留优化）：
+      - 此前 fullpath_relay / dispatch_engine / depth.engine.awake / tester
+        四处各自 `try: from handle import resolver ... except: 回退写死`，
+        代码近重复，且解析失败**静默**回退写死
+        `@dongdongxiaozu/dongjiagoushi(角色)` ——在非本 org/repo 环境会静默
+        生成错误 @ 路径，违背"不静默、显式暴露"原则（#142 修假触发初衷）。
+      - 本函数统一四处逻辑：能解析则用动态解析结果；确需回退写死时
+        **显式暴露 warning**（返回 dict 带 warning 字段）+ 数据留痕
+        （record_event，供监控哨兵发现"用了回退写死 @"，防假触发再犯）。
+
+    at_str: 调用方已给出的 @ 触发串（识别自身承载仓库，可选）
+
+    返回 dict：{ handle, org, repo, role, resolved, warning }
+      - resolved=True  → 动态解析成功（含显式 target 仓库）；
+      - resolved=False → 无法解析/异常，回退写死默认仓库，warning 说明原因。
+    不抛异常：调用方无需 try/except 即可拿 handle + warning。
+    """
+    reason = "未说明"
+    try:
+        info = resolve(at_str=at_str, target_org=target_org,
+                       target_repo=target_repo, role=role,
+                       current_org=current_org, current_repo=current_repo)
+        if isinstance(info, dict) and info.get("handle"):
+            return {
+                "handle": info["handle"],
+                "org": (info.get("target") or {}).get("org"),
+                "repo": (info.get("target") or {}).get("repo"),
+                "role": role or (info.get("target") or {}).get("role"),
+                "resolved": True,
+                "warning": "",
+            }
+        reason = "resolve 未返回 handle: %r" % (info,)
+    except Exception as exc:  # noqa: BLE001 —— 尽力解析失败走显式回退
+        reason = "解析异常: %s" % exc
+
+    # 回退写死（显式给定仓库时基于显式值；否则基于默认约定）——不静默
+    c_org, c_repo = detect_current_org_repo()
+    d_org = target_org or default_org or c_org
+    d_repo = target_repo or default_repo or c_repo
+    handle = format_at(d_org, d_repo, role)
+    warning = (
+        "handle 解析失败，回退写死 @ 路径 `%s`（%s）——请检查 handle.resolver "
+        "可用性/当前仓库探测；回退 @ 仅作兜底，可能无法真实唤醒对端。" % (handle, reason)
+    )
+    # 数据留痕（供哨兵/俯瞰发现回退写死，防静默假触发）；留痕失败不再抛
+    try:
+        from data import admin
+        admin.record_event(
+            "data_admin", "handle_fallback",
+            {"role": role or "", "target_org": target_org or "",
+             "target_repo": target_repo or "", "fallback_handle": handle,
+             "reason": warning},
+        )
+    except Exception:
+        pass
+    return {
+        "handle": handle,
+        "org": d_org,
+        "repo": d_repo,
+        "role": role,
+        "resolved": False,
+        "warning": warning,
+    }
+
+
 __all__ = [
     "DEFAULT_ORG", "DEFAULT_REPO", "DEFAULT_CODEBUDDY_ROLE",
     "detect_current_org_repo", "parse_at", "format_at",
-    "is_cross_repo", "resolve", "resolve_handle",
+    "is_cross_repo", "resolve", "resolve_handle", "best_handle",
 ]

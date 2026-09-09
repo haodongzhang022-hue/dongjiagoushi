@@ -203,15 +203,19 @@ def dispatch_trigger(assignments, from_agent="架构·经理"):
         issue_number = a.get("issue_number", "")
 
         # 构建接力卡消息（#142 全路径出发：完整 @org/repo(角色) + [触发] 标记）
-        # 不复用写死的 @dongdongxiaozu/dongjiagoushi，动态探测当前仓库
+        # 统一走 best_handle：动态探测当前仓库 + 失败显式 warning（不静默写死）
         try:
             from handle import resolver as _hr
-            _handle = _hr.resolve(target_repo="dongjiagoushi", role=role)["handle"]
+            _bh = _hr.best_handle(at_str=None, target_repo="dongjiagoushi", role=role)
         except Exception:
-            _handle = "@dongdongxiaozu/dongjiagoushi(%s)" % role
+            _bh = {"handle": "@dongdongxiaozu/dongjiagoushi(%s)" % role,
+                   "warning": "handle 包不可用，回退写死 @ 路径（可能无法真实唤醒对端）"}
+        _handle = _bh["handle"]
+        _handle_warn = _bh.get("warning") or ""
         relay_card = {
             "handle": _handle,
             "trigger": "[触发:%s]" % role,
+            "note": _handle_warn,
             "relay_text": "%s [触发:%s]。\n任务已分配：%s（%s）\n请回执 [接单] 并开工（缺回执=未真实唤醒）" % (
                 _handle, role, a.get("title", ""), a.get("task_key", "")),
             "depth_level": "L3·触发接单",
@@ -242,6 +246,7 @@ def dispatch_trigger(assignments, from_agent="架构·经理"):
             "issue": f"#{issue_number}" if issue_number else "",
             "status": "triggered",
             "expect_receipt": "[接单] 回执待确认",
+            "handle_warning": _handle_warn,
         })
     return results
 

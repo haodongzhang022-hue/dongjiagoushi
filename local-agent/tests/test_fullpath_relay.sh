@@ -121,4 +121,38 @@ print("  ✅ 测试回执含完整 @org/repo(架构·测试) + [触发:架构·�
 print("      " + t["relay_receipt"])
 EOF
 
+echo "===== [fullpath] 6. 失败不静默：best_handle 统一 + resolved/warning 显式暴露 ====="
+$PY - <<'EOF'
+from data import admin
+admin.init()
+from roles import get_role
+from handle import resolver as hr
+
+# ① S2：fullpath_relay 返回值已含 resolved/warning 字段（统一走 best_handle）
+reviewer = get_role("架构·评审")
+rel = reviewer.fullpath_relay("架构·开发", action="revert", body="复评项")
+assert "resolved" in rel and "warning" in rel, sorted(rel.keys())
+assert rel["resolved"] is True, rel
+assert rel["warning"] == "", rel["warning"]
+
+# ② S1：解析失败不静默 —— monkeypatch resolve 抛异常，best_handle 应返回 resolved=False
+#    + 非空 warning + 数据留痕（handle_fallback 事件）
+orig = hr.resolve
+def _boom(*a, **k):
+    raise RuntimeError("simulated probe failure")
+hr.resolve = _boom
+try:
+    r = hr.best_handle(role="架构·测试")
+finally:
+    hr.resolve = orig
+assert r["resolved"] is False, r
+assert r["warning"], "解析失败必须有显式 warning（不许静默回退写死）"
+from data import repository as repo
+evs = [p for p in repo.recent_progress(limit=200)
+       if p.get("event") == "handle_fallback"]
+assert evs, "回退写死必须留痕（供哨兵发现）"
+print("  ✅ best_handle 统一复用：fullpath_relay 透出 resolved/warning")
+print("      " + r["warning"][:120])
+EOF
+
 echo "===== [fullpath] ALL PASS ====="

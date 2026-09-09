@@ -223,14 +223,18 @@ def awake(task_key, target_agent, from_agent, issue_ref="", context="", timeout=
     #    context 已由 BaseRole.awake/fullpath_relay 前置完整 @ 路径；
     #    此处兜底：若 context 仍缺完整 @，自动补（防底层直调漏路径）。
     ctx = context or ""
+    ctx_note = ""
     if ctx and not ctx.lstrip().startswith("@"):
+        # 兜底补完整 @ 路径（防底层直调漏路径）；解析失败不静默（best_handle）
         try:
             from handle import resolver as _hr
-            _handle = _hr.resolve(target_repo="dongjiagoushi",
-                                  role=target_agent)["handle"]
+            _res = _hr.best_handle(
+                at_str=None, target_repo="dongjiagoushi", role=target_agent)
+            _handle = _res["handle"]
             ctx = "%s [触发:%s]。\n%s" % (_handle, target_agent, ctx)
+            ctx_note = _res.get("warning") or ""
         except Exception:
-            pass
+            ctx_note = ("handle 包不可用，awake 未能自动补全 @ 路径（可能无法真实唤醒对端）")
     relay_card = {
         "handle": (ctx.split(" ")[0] if ctx.startswith("@") else ""),
         "trigger": f"[触发:{target_agent}]",
@@ -239,6 +243,7 @@ def awake(task_key, target_agent, from_agent, issue_ref="", context="", timeout=
         "task_key": task_key, "task_id": task_id,
         "issue": f"#{issue_ref}" if issue_ref else "",
         "context": ctx,
+        "note": ctx_note,
         "action": "回执 [接单] 确认真实唤醒",
         "expect": "[接单]/awake_ack 回执，无回执 = 路由未真实唤醒",
     }
@@ -252,7 +257,8 @@ def awake(task_key, target_agent, from_agent, issue_ref="", context="", timeout=
     admin.record_event(
         from_agent, "wake_intent",
         {"task_key": task_key, "task_id": task_id,
-         "target_agent": target_agent, "issue": issue_ref or ""},
+         "target_agent": target_agent, "issue": issue_ref or "",
+         "ctx_note": ctx_note or ""},
         task_id or "",
     )
     # ③ 校验目标 agent 是否回执（[接单] / awake_ack）
