@@ -1,0 +1,26 @@
+# 架构师体系 dsh 适配插件 · 组合包 patch（dsh >= 0.1.5 的 bundle 契约）
+# =======================================================================
+# 本文件由 package.json 的 `dsh.bundle.patch` 指向，由 `dsh plugin --profile <p> add
+# @dongjiagoushi/dsh-adapter` 装配进 profile。patch 为**有序覆盖层**：
+# 一条 patch 按 id 定位条目并替换其整个 config，或 insert 新条目。
+#
+# 新版（0.1.6-alpha.2）与旧版的装配差异：
+#   - 旧版：插件以 profile 内联树 / Python SDK 挂载为主，无 bundle patch 契约；
+#   - 新版：统一走 `dsh.bundle.patch` + profile bundles 列表（本文件）。
+#
+# 本 patch 只 insert 一行适配插件；它通过 ctx.tools.register(defineTool(...))
+# 在运行时注册全部工具（工具 schema 由 dsh-tools 自动送入系统提示词组装），
+# 因此 patch 不需要逐个列出工具行——升级 dsh 时本文件无需改动。
+
+- insert:
+    - id: dongjiagoushi-dsh-adapter
+      name: '@dongjiagoushi/dsh-adapter'
+      # 若未显式设置 DSH_VERSION，插件用 dshCompat.targetVersion 兜底做兼容自检。
+      # 需要严格阻断时可设 DSH_VERSION 为实际版本（见 docs/DSH_ADAPTER.md）。
+      config:
+        failFastOnIncompatible: true
+        # 覆盖仓库根（含 local-agent/）；缺省自动向上探测，无需配置。
+        # root: /workspace
+        timeoutMs: 60000
+        # 无 Python 环境做冒烟时置 true：工具照常注册，桥调用只回显命令。
+        dryRun: false

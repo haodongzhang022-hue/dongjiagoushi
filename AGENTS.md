@@ -77,6 +77,17 @@
   **每端一个面板** web/cnb/local / `control` 一键动作回写真实桥状态机非假状态 / `html_page` 人可读
   HTML 聚合页），run.py 加 `--dashboard action` + `--dashboard-html`，全链可调。详见
   `docs/PLATFORM_ADAPTERS.md` 三.7 + ADR-0008。
+  **dsh 新版适配（DeepSeek Harness · dsh-adapter · v0.1.0 · Issue #145）**：
+  DSH 已转向 **all-plugin Cordis**（profile + 组合包 + patch + `defineTool`），npm
+  最新 `0.1.6-alpha.2`（`latest` 仍 `0.1.5-rc.2`）；旧适配插件（Python SDK 主推期形态）
+  **装不上新版**。本轮重做为**独立模块 `dsh-adapter/`**：`package.json` 声明
+  `dsh.bundle.patch`（新版组合包契约）+ `cordis.patch.yml` bundle patch +
+  `src/index.ts`（Cordis `apply(ctx)` + `defineTool` 注册 7 工具，桥转发 dev-standard/
+  label/relay）+ **版本闸门**（`src/compat.ts` 与 `local-agent/dsh_adapter/compat.py`
+  双端同源矩阵；加载即 `checkVersion()`，缺 API 面显式失败不静默）。**只 import 构建
+  产物 `lib/index.js`**（loader 硬约束，附零依赖 `scripts/build.mjs`）。适配目标
+  `0.1.6-alpha.2`、兼容 `>= 0.1.5-rc.1`；在 **CNB DSH 生态**（`cnpc/dsh` 等）上做真实
+  装载验证。详见 `docs/DSH_ADAPTER.md` + ADR-0009。
 
 ### 秘书层动态扩展机制（Secretary Scale · 固定规则 · Issue #100 决策①）
 
@@ -602,5 +613,18 @@ local-agent/handle/                   # 自适应 @ 定位能力包（HandleAbil
   ├── resolver.py                     # 核心解析器：触发串/探测/跨同仓判定/权限建议
   ├── ability.py                      # HandleAbility 能力类（self_handle/resolve/is_cross）
   └── __init__.py                     # 导出 HandleAbility
+dsh-adapter/                          # ⭐ dsh 新版适配模块（Issue #145 · v0.1.0）
+  ├── package.json                    # 声明 dsh.bundle.patch（新版组合包契约）+ dshCompat 矩阵
+  ├── cordis.patch.yml                # 组合包 patch：insert 适配插件行
+  ├── dsh-collaboration-rules.yaml    # Agent Directory：注册 6 个架构角色（@ 触发）
+  ├── src/compat.ts                   # 版本矩阵/API 面表（TS 侧唯一事实源）
+  ├── src/bridge.ts                   # 薄桥：DSH 工具 → local-agent Python 引擎
+  ├── src/index.ts                    # Cordis 插件：apply(ctx) + defineTool 注册 7 工具
+  ├── scripts/build.mjs               # 构建：src/*.ts → lib/*.js（Node 内置，零依赖）
+  └── tests/                          # 兼容层/组合包/插件/桥接/真实装载 测试
+local-agent/dsh_adapter/compat.py     # dsh 版本矩阵（Python 侧，与 TS 侧同源）
+local-agent/tests/test_dsh_adapter.sh # dsh 适配 18 组信号灯（统一入口）
+docs/DSH_ADAPTER.md                   # dsh 适配模块说明（Issue #145）
+docs/adr/0009-dsh-adapter-new-version.md  # 决策：独立模块随新版演进 + 版本闸门前置
 README.md                             # 使用说明
 ```

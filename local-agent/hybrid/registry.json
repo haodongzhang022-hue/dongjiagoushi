@@ -669,6 +669,22 @@
       "cpu_cost_est": 2.0,
       "time_est": 5.0,
       "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dsh_adapter.sh": {
+      "name": "test_dsh_adapter",
+      "covers": [
+        "dsh-adapter/package.json",
+        "dsh-adapter/cordis.patch.yml",
+        "dsh-adapter/dsh-collaboration-rules.yaml",
+        "dsh-adapter/src/index.ts",
+        "dsh-adapter/src/compat.ts",
+        "dsh-adapter/src/bridge.ts",
+        "local-agent/dsh_adapter/compat.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 6.0,
+      "kind": "light"
     }
   }
 }

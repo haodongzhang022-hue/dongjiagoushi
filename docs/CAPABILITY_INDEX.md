@@ -15,6 +15,7 @@
 | **入口** | 三入口归一化（platform-adapter）| 三入口/入口归一化/网页对话/cnb/local/多宿主/谁当入口 | `local-agent/entries/` | docs/PLATFORM_ADAPTERS.md | Issue #105 · module platform-adapter v0.2.0 |
 | **桥接闭环** | 本地⇄云端桥接闭环（entries.bridge）| 最常用链路/本地deepseek harness/网页gemini工具桥/云开发请求/异步句柄/跨对话/跨PR/跨仓库/本地数据对齐/本地测试先行/云端建环境贵 | `local-agent/entries/bridge.py` | docs/PLATFORM_ADAPTERS.md 三.6 | Issue #105 · module platform-adapter v0.3.0 |
 | **聚合控制页** | 跨端聚合控制页（entries.dashboard）| 聚合控制/fastapi聚合页/状态显示/每端面板/跨端交互/控制台/健康灯/一键控制/overview/panel | `local-agent/entries/dashboard.py` | docs/PLATFORM_ADAPTERS.md 三.7 | Issue #105 · module platform-adapter v0.4.0 |
+| **dsh 适配** | dsh 新版适配（dsh-adapter · 0.1.6-alpha.2）| dsh/deepseek harness/适配新版/新版本/cordis/bundle/defineTool/版本闸门/兼容 | `dsh-adapter/` | docs/DSH_ADAPTER.md | Issue #145 · module dsh-adapter v0.1.0 |
 | **需求** | 架构·产品（需求澄清）| 需求/澄清/用户故事/边界 | `.cnb/settings.yml` + roles/product.py | docs/ISSUE_MANAGEMENT.md | agent_version |
 | **架构** | 架构·总师（架构八步）| 架构/设计/技术方案/架构八步 | `.codebuddy/skills/architect/SKILL.md` | docs/ARCHITECTURE.md | framework 版本线 |
 | **架构** | 架构·总师助理（改错改框架专项）| 改错/改框架/框架修正 | `roles/chief_assistant.py` | docs/CHIEF_ASSISTANT.md | agent_version |
