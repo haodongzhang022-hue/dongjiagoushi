@@ -46,9 +46,14 @@ def is_unavailable(error):
     return any(sig in text for sig in _spec.UNAVAILABLE_SIGNALS)
 
 
-def resolve_models(policy=None):
-    """解析某个角色/策略的目标渠道顺序（主 → 备）。"""
-    policy = policy or _spec.DEFAULT_POLICY
+def resolve_models(policy=None, role=None):
+    """解析目标渠道顺序（主 → 备）。
+
+    优先级：显式 policy > role 覆盖（roles[role]→default）> 通用默认。
+    未指定角色（role=None）→ 走 default（「不指定就默认通用」）。
+    """
+    if policy is None:
+        policy = _spec.role_policy(role)
     order = []
     if policy.get("primary"):
         order.append(policy["primary"])
@@ -56,17 +61,18 @@ def resolve_models(policy=None):
         order.append(policy["fallback"])
     # 兜底：策略缺字段时退回 spec 规范顺序
     if not order:
-        order = _spec.channel_order()
+        order = _spec.channel_order(role)
     return order
 
 
-def route_call(caller, system_prompt="", user_input="", policy=None, **kw):
+def route_call(caller, system_prompt="", user_input="", policy=None, role=None, **kw):
     """按「主 → 备」调用模型，主渠道不通自动降级。
 
     caller: 可调用对象 (model, system_prompt, user_input, **kw) -> text
             测试/真实后端均可注入，核心降级逻辑不受传输影响。
+    role:   角色名；未指定走通用默认（不指定就默认通用）。
     """
-    models = resolve_models(policy)
+    models = resolve_models(policy, role=role)
     attempts = []
     for idx, model in enumerate(models):
         role = "primary" if idx == 0 else "fallback"
