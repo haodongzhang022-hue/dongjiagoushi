@@ -14,3 +14,6 @@ secretary_sense/
 
 # review-metrics 留痕（运行时产物，不纳入版本库）
 review_metrics_trace.json
+
+# review-context 留痕（运行时产物，不纳入版本库 · Issue #150）
+review_context_trace.json

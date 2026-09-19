@@ -31,7 +31,7 @@
 `build(stable, volatile, prev)` 产出的 `context` 就是评审每轮真正要吃的最小上下文：
 
 ```
-【稳定骨架（冻结，已复用，勿复述）】
+【稳定骨架（整块未变，已复用，勿复述）】
 [goal] 项目北极星目标…（摘要）
 [boundary] 做 · 不做边界…（摘要）
 …
@@ -40,8 +40,15 @@
 ```
 
 **失效判据是内容指纹**（`fingerprint()`，sha256 短摘要），不是主观判断：
-- 骨架来源指纹一致 → `reuse.reusable=True`，零重算、零复述；
-- 指纹变了 → 指出**具体哪几段变了**（`changed_segments`），只增量重建该段，不重讲全项目。
+- 骨架来源指纹一致 → `reuse.reusable=True`，零重算、零复述（`frozen=True`、`rebuilt=False`）；
+- 指纹变了 → 指出**具体哪几段变了**（`changed_segments`），
+  **变更段必须用新值重建、仅未变更段复用旧引用**（增量重建，不重讲全项目）；
+  此时 `frozen=False`、`rebuilt=True`——**冻结语义专指"整块骨架未变、直接复用"**，
+  不复用即为重算，避免"看起来冻结却吃了旧摘要"（评审会因此吃到过期骨架）。
+
+> 铁律：`prev_refs.get(seg)` **绝不能无条件命中**——变更段旧引用一旦命中就掩盖了新值，
+> 评审看到的是过期骨架。`tests/test_review_efficiency.sh` 组 1 已加信号灯：断言
+> 变更段引用 ≠ 上轮旧引用、且 `context` 随骨架变更更新。
 
 量化：`saved_ratio` = 相对"照旧复述整个项目"省下的比例；`estimate_saved_tokens()` 折算 token。
 
@@ -72,6 +79,22 @@ collect(提交增量，不立即唤醒)
   `fingerprint_new`（指纹未被处理过才做评审处置）；
 - **同指纹轮次复用**：`reused=True` → 本轮**零构建**，只引用上轮测试信号与结论；
 - **以测试为准**：整批信号灯（🟢/🔴）决定处置标签（走 `collab.disposition`，不各自取名）。
+
+**三条工程约束（缺一即"永不发车"，信号灯红灯拦）**：
+
+1. `root_dir` 必须解析到**仓库根**（`os.path.dirname(_HERE)`，`_HERE=<repo>/local-agent`）——
+   多 `dirname` 一次会解析到 `/`，`git diff` 与选测全部落空；
+2. 选测器用 `IncrementalSelector(root_dir=…)` **显式实例化**——`default_selector` 是**实例**
+   不是工厂函数，当函数调用会 `TypeError`（`hasattr(default_selector,"root_dir")` 恒 True 是
+   **误导性判据**，实例本就带该属性）；
+3. 选测失败**不静默吞**（对齐 dev-standard C01）：异常上抛/显式留痕到本轮 `select_error`，
+   由调用方降级为"不拉构建"，避免"看起来没变更"掩盖真实故障。
+
+`run()` 支持 `changed_files=[...]` 显式注入变更清单（替代工作区 `git diff`，供测试/调用方用）。
+无注入时 `_changed_files()` 走**确定性回退链**，兼容本地开发与 CI/PR 两种场景：
+工作区 diff → 暂存区 diff → `origin/main...HEAD` → `main...HEAD` → `HEAD~1..HEAD`（取首个非空）。
+`tests/test_review_efficiency.sh` 组 4 断言**真实变更下 `dispatched=True` 且 `batched_runs>0`**，
+组 5 断言 `dispatched_builds>0`——防"取 0 也算过"的过宽断言掩盖"永不发车"。
 
 ## 三、接线（不是"就绪可调"，是主流程内必走）
 
@@ -148,10 +171,13 @@ python local-agent/run.py --dashboard review_cycle
 
 `local-agent/tests/test_review_efficiency.sh`（7 组信号灯，红灯即阻塞）：
 
-1. 稳定骨架构建 → 复用 → 变更即失效（指纹判据）；
+1. 稳定骨架构建 → 复用 → 变更即失效（指纹判据）+ **变更段重建/未变更段复用/context 随骨架更新**；
 2. 攒批去重门：整批一次构建 + 同指纹再入列被拦截；
 3. 评审角色 `do_review` 内接线（context_pack + batch）；
-4. 评审段调度：同任务同指纹轮次复用，零重复构建；
-5. 批量节省口径：10 轮 × 5 测试的构建次数显著下降；
+4. 评审段调度：`root_dir` 指向仓库根 + **真实变更下真发车**（`dispatched=True`）+ 同指纹轮次复用；
+5. 批量节省口径：10 轮 × 5 测试的构建次数显著下降，且**确认真发过车**（`dispatched_builds>0`）；
 6. 增量上下文 token 量化 + 留痕可回溯；
 7. 评审段大盘 + 控制页 `/review-cycle` 路由可读。
+
+**测试隔离（可重复跑）**：测试通过 `BUS_QUEUE_FILE` / `QUOTA_LEDGER_FILE` 环境变量把攒批队列与
+配额账本落到临时目录，不污染工作区共享状态（否则第二次跑会因去重门残留而假失败）。

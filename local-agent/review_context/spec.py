@@ -9,7 +9,7 @@
 
 # 模块版本线（独立升版，不与整体版本联动）
 MODULE = "review-context"
-MODULE_VERSION = "v0.1.0"
+MODULE_VERSION = "v0.2.0"
 
 # 稳定骨架分段（构建一次 → 冻结 → 评审每轮只引用摘要，不再复述）
 STABLE_SEGMENTS = (

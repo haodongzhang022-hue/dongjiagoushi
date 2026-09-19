@@ -8,7 +8,7 @@
 """
 
 MODULE = "review-cycle"
-MODULE_VERSION = "v0.1.0"
+MODULE_VERSION = "v0.2.0"
 
 # 评审段状态机（确定性；不让 LLM 决定"下一步/是否结束"）
 STATES = (

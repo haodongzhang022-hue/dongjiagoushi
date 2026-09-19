@@ -211,8 +211,8 @@ def cmd_bus_dispatch(args):
     b = BusRunner(dry_run=args.dry, timeout=args.timeout,
                   interval=args.interval, parallel=args.parallel)
     if getattr(args, "diff_fp", None):
-        b.enqueue([], diff_fp=None)      # no-op 保序（不发无乘客车）
-        d = b._load(); d["pending_fp"] = args.diff_fp; b._save(d)
+        # 走公开接口登记指纹（替代直连私有 _load/_save），发车时落入去重门
+        b.set_pending_fp(args.diff_fp)
     plan = b.dispatch(extra_tests=args.tests or None, note=args.note or "bus dispatch")
     print(json.dumps(plan, ensure_ascii=False, indent=2))
 

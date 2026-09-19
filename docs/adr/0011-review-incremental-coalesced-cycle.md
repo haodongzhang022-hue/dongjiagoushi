@@ -1,8 +1,8 @@
-# ADR-0009：评审循环走「增量上下文 + 攒批异步」，不做同步乒乓式逐轮复述/构建
+# ADR-0011：评审循环走「增量上下文 + 攒批异步」，不做同步乒乓式逐轮复述/构建
 
 - 状态：Accepted
 - 决策日期：2026-09
-- 相关：Issue #150（review-context v0.1.0 / review-cycle v0.1.0）、`docs/REVIEW_EFFICIENCY.md`
+- 相关：Issue #150（review-context v0.2.0 / review-cycle v0.2.0）、`docs/REVIEW_EFFICIENCY.md`
 
 ## 背景
 用户在 Issue #150 指认三个乘性放大的损耗：**每次评审复述整个大项目非常困难**、

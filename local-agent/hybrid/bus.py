@@ -43,7 +43,10 @@ import os
 import time
 
 # 攒批队列文件（与 quota/batch/station 同目录）
-QUEUE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bus_queue.json")
+# 允许环境变量覆盖（`BUS_QUEUE_FILE`）：测试隔离用，避免测试污染工作区共享队列状态。
+QUEUE_FILE = os.environ.get(
+    "BUS_QUEUE_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bus_queue.json"))
 
 # 默认发车间隔：15 分钟（900s）——"有需要就每隔15分钟发车"
 DEFAULT_INTERVAL_SECONDS = 900
@@ -66,10 +69,12 @@ def _now_epoch():
 class BusRunner(object):
     """公交车式批量测试计划执行器。"""
 
-    def __init__(self, queue_file=QUEUE_FILE,
+    def __init__(self, queue_file=None,
                  interval=DEFAULT_INTERVAL_SECONDS, timeout=DEFAULT_TIMEOUT,
                  parallel=DEFAULT_PARALLEL, dry_run=False):
-        self.queue_file = queue_file
+        # 运行时解析：显式传入 > 环境变量 BUS_QUEUE_FILE > 默认共享队列文件
+        # （测试可用环境变量隔离，避免污染工作区共享队列 / 使重跑非幂等）
+        self.queue_file = queue_file or os.environ.get("BUS_QUEUE_FILE") or QUEUE_FILE
         self.interval = interval
         self.timeout = timeout
         self.parallel = parallel
@@ -136,6 +141,23 @@ class BusRunner(object):
 
     def _queued_set(self):
         return {t["test"] for t in self._load().get("tests", [])}
+
+    # ---------- 攒批去重门（公开接口 · 替代外部直连私有 _load/_save） ----------
+    def set_pending_fp(self, diff_fp):
+        """登记"本班车对应的变更指纹"（公开接口，勿直连 `_load/_save`）。
+
+        发车（`dispatch`）时会把 `pending_fp` 落入 `processed_fps` 去重门，
+        之后同一指纹再入列/发车即被拦截，不重复触发构建。
+        调用方（如评审段调度器 / CLI）应走本方法而非操作私有状态。
+        """
+        d = self._load()
+        d["pending_fp"] = diff_fp
+        self._save(d)
+        return {"pending_fp": diff_fp}
+
+    def processed_fps(self):
+        """已发过车的变更指纹集合（去重门记忆，供调用方查询）。"""
+        return set(self._load().get("processed_fps", []) or [])
 
     # ---------- 判定（该不该发车） ----------
     def should_dispatch(self, now=None):

@@ -56,7 +56,7 @@ class Round(object):
 
     def __init__(self, task_key, index, diff_fp, pack_fp,
                  dispatched=False, reused=False, tests=None, disposition_label="",
-                 cost=None, state="idle"):
+                 cost=None, state="idle", select_error=""):
         self.task_key = task_key
         self.index = index
         self.diff_fp = diff_fp
@@ -67,6 +67,8 @@ class Round(object):
         self.disposition = disposition_label
         self.cost = cost or {}
         self.state = state
+        # 选测失败显式留痕（不静默吞：空串=无错，非空=真实故障信息）
+        self.select_error = select_error
 
     def to_dict(self):
         return {
@@ -75,6 +77,7 @@ class Round(object):
             "dispatched": self.dispatched, "reused": self.reused,
             "tests": self.tests, "disposition": self.disposition,
             "cost": self.cost, "state": self.state,
+            "select_error": self.select_error,
         }
 
 
@@ -90,7 +93,8 @@ class Scheduler(object):
 
     def __init__(self, dry_run=True, root_dir=None, interval=None, bus=None):
         self.dry_run = dry_run
-        self.root_dir = root_dir or os.path.dirname(os.path.dirname(_HERE))
+        # _HERE = <repo>/local-agent → 仓库根 = dirname(_HERE)（修复：原先多 dirname 一次解析到 "/"）
+        self.root_dir = root_dir or os.path.dirname(_HERE)
         self.interval = interval or spec.DEFAULT_INTERVAL_SECONDS
         self._bus = bus
 
@@ -103,35 +107,55 @@ class Scheduler(object):
         return self._bus
 
     # ---------- 变更感知选测（同 diff 指纹不重复选、不重复跑） ----------
-    def _select_tests(self, diff_fp):
-        """按变更文件做增量选测；无增量信息 → 返回空（由评测段跳过构建）。"""
-        changed = self._changed_files()
+    def _select_tests(self, diff_fp, changed_files=None):
+        """按变更文件做增量选测；无增量信息 → 返回空（由评测段跳过构建）。
+
+        changed_files: 显式传入变更文件清单（供测试/调用方注入，替代 git diff）。
+
+        选测失败**不静默吞**（对齐 dev-standard C01「错误处理不吞异常」）：
+        异常上抛，由调用方显式降级并留痕，避免"看起来没变更"掩盖真实故障。
+        """
+        changed = (list(changed_files) if changed_files is not None
+                   else self._changed_files())
         if not changed:
             return []
-        try:
-            from hybrid.selector import IncrementalSelector, default_selector
-            sel = default_selector(root_dir=self.root_dir) \
-                if hasattr(default_selector, "root_dir") \
-                else IncrementalSelector(root_dir=self.root_dir)
-            return list(sel.select(changed) or [])
-        except Exception:  # noqa: BLE001
-            return []
+        from hybrid.selector import IncrementalSelector
+        # 注意：`default_selector` 是**实例**不是工厂函数，不可当函数调用；
+        # 这里显式实例化，避免 TypeError 被吞后恒返回 []（评审段永不发车）。
+        sel = IncrementalSelector(root_dir=self.root_dir)
+        return list(sel.select(changed) or [])
 
     def _changed_files(self):
+        """变更文件清单（确定性回退链，兼容本地开发与 CI/PR 两种场景）。
+
+        - 本地开发：工作区未提交变更（`git diff` + `--cached`）；
+        - CI/PR：工作区干净，回退到与**基线分支**的 diff（origin/main → main → HEAD~1）。
+        无任何可用基线/变更 → 返回空（调用方可显式传 `changed_files` 注入）。
+        """
         import subprocess
-        try:
-            proc = subprocess.run(["git", "diff", "--name-only"],
-                                  capture_output=True, text=True,
-                                  cwd=self.root_dir, timeout=30)
-            if proc.returncode == 0:
-                return [x for x in proc.stdout.splitlines() if x.strip()]
-        except Exception:  # noqa: BLE001
-            pass
+        candidates = (
+            ["git", "diff", "--name-only"],
+            ["git", "diff", "--cached", "--name-only"],
+            ["git", "diff", "--name-only", "origin/main...HEAD"],
+            ["git", "diff", "--name-only", "main...HEAD"],
+            ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+        )
+        for cmd in candidates:
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True,
+                                      cwd=self.root_dir, timeout=30)
+            except Exception:  # noqa: BLE001
+                continue
+            if proc.returncode != 0:
+                continue
+            files = [x for x in proc.stdout.splitlines() if x.strip()]
+            if files:
+                return files
         return []
 
     # ---------- 主入口：跑一轮（或增量多轮）评审段 ----------
     def run(self, task_key, stable=None, volatile=None, prev_pack=None,
-            max_rounds=1, round_volatiles=None, force=False):
+            max_rounds=1, round_volatiles=None, force=False, changed_files=None):
         """跑一轮（或多轮）评审段。
 
         参数：
@@ -142,6 +166,7 @@ class Scheduler(object):
           max_rounds:      连续跑几轮（模拟"评审→开发增量→再评审"的可控迭代）
           round_volatiles: 每轮的 volatile 列表（覆盖 volatile）
           force:           强制发车（忽略复用判定，供首次/验证用）
+          changed_files:   显式变更文件清单（替代 git diff；供测试/调用方注入）
 
         返回 {task_key, rounds[], stats, context, bus, state}
         """
@@ -152,6 +177,7 @@ class Scheduler(object):
         rounds = []
         pack = prev_pack
         volatiles = round_volatiles or [volatile or {}]
+        bus_state = None   # 最后一班车的站台状态（供返回/俯瞰；无发车则 None）
 
         for i in range(min(max_rounds, len(volatiles))):
             vol = dict(volatiles[i] or {})
@@ -160,22 +186,27 @@ class Scheduler(object):
             # ② 触发门控：diff 指纹已处理过且非强制 → 不重复触发开发/构建
             diff_fp = ctx_engine.fingerprint(vol.get("diff_summary", ""))
             already = (diff_fp in processed) and not force
-            tests = [] if already else self._select_tests(diff_fp)
+            select_error = ""
+            if already:
+                tests = []
+            else:
+                # 选测失败**不静默吞**（C01）：显式捕获并留痕到本轮，降级为"不拉构建"
+                try:
+                    tests = self._select_tests(diff_fp, changed_files=changed_files)
+                except Exception as e:  # noqa: BLE001
+                    tests = []
+                    select_error = "%s: %s" % (type(e).__name__, e)
 
-            # ③ 攒批：把本轮要跑的测试**入列**（0 成本），不发车
-            bus_state = None
-            if tests and not already:
-                bus = self._bus_runner()
-                bus.enqueue(tests, source="review_cycle",
-                            note="评审段 %s 第 %d 轮" % (task_key, i + 1))
-
-            # ④ 发车判定：入列后即在本轮调度点整批发车（一次构建跑完一批）
+            # ③④ 攒批入列（0 成本）→ 本轮调度点整批发车（一次构建跑完一批）
             plan = None
             dispatched = False
             if tests and not already:
                 bus = self._bus_runner()
+                bus.enqueue(tests, source="review_cycle",
+                            note="评审段 %s 第 %d 轮" % (task_key, i + 1))
                 plan = bus.dispatch(note="review_cycle %s r%d" % (task_key, i + 1))
                 dispatched = True
+                bus_state = bus.status()
 
             # ⑤ 以测试为准：整批信号决定处置（无测试/复用时引用上轮信号）
             test_signals = self._test_signals(plan, vol, already)
@@ -185,7 +216,7 @@ class Scheduler(object):
             rnd = Round(task_key, i + 1, diff_fp, pack["stable_fp"],
                         dispatched=dispatched, reused=already, tests=tests,
                         disposition_label=disp, cost=self._cost(plan, pack),
-                        state="reviewed")
+                        state="reviewed", select_error=select_error)
             rounds.append(rnd)
             processed.add(diff_fp)
             rec["rounds"].append(rnd.to_dict())

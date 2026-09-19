@@ -102,19 +102,24 @@ def build(stable_parts=None, volatile_parts=None, prev=None, task_key=""):
     # 冻结骨架：可复用则直接引用上轮引用行（不重算、不重讲）；否则重建引用行
     if decision["reusable"] and prev:
         stable_refs = list(prev.get("stable_refs", []))
+        # frozen=True 语义：本轮骨架**整块未变**、直接冻结复用（未重算、未重讲）
         frozen = True
         rebuilt = False
     else:
         stable_refs = [_ref(seg, stable_parts.get(seg, ""))
                        for seg in spec.STABLE_SEGMENTS]
-        frozen = True
+        # frozen=False：本轮骨架已重算（首次构建 / 有段变更），不是"整块复用"
+        frozen = False
         rebuilt = True
-        # 指纹变了但只是部分段变：可保留未变段的旧引用（增量重建）
+        # 指纹变了但只是部分段变：**只保留未变更段的旧引用**，变更段必须用新值重建
+        # （否则评审会吃到过期骨架 —— 变更段旧引用一旦命中即掩盖新值）
         if prev and decision["changed_segments"]:
+            changed = set(decision["changed_segments"])
             prev_refs = {r.split("]")[0].lstrip("["): r
                          for r in prev.get("stable_refs", [])}
             stable_refs = [
-                prev_refs.get(seg) or _ref(seg, stable_parts.get(seg, ""))
+                (prev_refs.get(seg) if seg not in changed else None)
+                or _ref(seg, stable_parts.get(seg, ""))
                 for seg in spec.STABLE_SEGMENTS
             ]
 
@@ -123,8 +128,16 @@ def build(stable_parts=None, volatile_parts=None, prev=None, task_key=""):
         "[{k}] {v}".format(k=seg, v=str(volatile_parts.get(seg, "")).strip())
         for seg in spec.VOLATILE_SEGMENTS if volatile_parts.get(seg)
     )
+    # 表头如实反映本轮骨架状态（复用 vs 重算），不让"已复用"掩盖"刚重建"
+    if decision["reusable"] and prev:
+        head = "【稳定骨架（整块未变，已复用，勿复述）】"
+    elif prev and decision["changed_segments"]:
+        head = "【稳定骨架（变更段已重建：%s，未变段复用）】" % "、".join(
+            decision["changed_segments"])
+    else:
+        head = "【稳定骨架（首轮构建，后续轮将复用）】"
     context = (
-        "【稳定骨架（冻结，已复用，勿复述）】\n" + stable_digest +
+        head + "\n" + stable_digest +
         ("\n\n【本轮变化（增量，仅此即可评审）】\n" + volatile_note
          if volatile_note else "\n\n【本轮无变化片段】")
     )

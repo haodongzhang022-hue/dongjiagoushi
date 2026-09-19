@@ -30,7 +30,7 @@ def cmd_demo(args):
         "boundary": "只优化评审/测试循环的上下文与构建复用，不改需求边界",
         "acceptance": "第二轮起评审不再复述全项目；同 diff 不重复触发构建",
         "contract": "build(stable_parts, volatile_parts, prev) -> pack",
-        "decisions": "ADR-0009：评审增量上下文 + 评审段调度",
+        "decisions": "ADR-0011：评审增量上下文 + 评审段调度",
     }
     p1 = engine.build(stable, {"diff_summary": "首轮全量 diff ...",
                                "test_signals": "🟢"}, task_key="demo")

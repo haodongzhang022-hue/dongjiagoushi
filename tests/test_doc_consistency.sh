@@ -29,6 +29,11 @@ declare -a FAILED_ITEMS=()
 
 PY="python3"
 export PYTHONPATH="$REPO_ROOT/src"
+# 测试隔离：评审效率运行时核验会真发一班车 → 队列/账本落临时目录，不污染工作区共享状态
+TMPDIR_DC="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_DC"' EXIT
+export BUS_QUEUE_FILE="$TMPDIR_DC/bus_queue.json"
+export QUOTA_LEDGER_FILE="$TMPDIR_DC/quota_ledger.json"
 
 echo "======================================================"
 echo "文档-实现一致性测试 (T10 / doc-consistency)"
@@ -229,7 +234,7 @@ file_exists "REVIEW_EFFICIENCY.md 存在" "docs/REVIEW_EFFICIENCY.md"
 contains "AGENTS.md 登记评审效率固定规则" "$(cat AGENTS.md 2>/dev/null)" "评审效率·减 CPU 损耗"
 contains "CAPABILITY_INDEX 登记评审增量上下文" "$(cat docs/CAPABILITY_INDEX.md)" "review-context"
 contains "CAPABILITY_INDEX 登记评审段调度器" "$(cat docs/CAPABILITY_INDEX.md)" "review-cycle"
-file_exists "ADR-0009 存在（评审效率决策）" "docs/adr/0009-review-incremental-coalesced-cycle.md"
+file_exists "ADR-0011 存在（评审效率决策）" "docs/adr/0011-review-incremental-coalesced-cycle.md"
 file_exists "review_context 引擎存在" "local-agent/review_context/engine.py"
 file_exists "review_cycle 引擎存在" "local-agent/review_cycle/cycle.py"
 file_exists "评审效率测试存在" "local-agent/tests/test_review_efficiency.sh"

@@ -36,8 +36,8 @@
 | **质量** | 有效性度量模型 | 度量/有效性/解决度/缺陷/稳定性/通用性/一致性 | `local-agent/review_metrics/` | docs/REVIEW_METRICS.md | Issue #100 决策⑤ |
 | **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
 | **质量** | 功能级校验（feature-verify）| 功能校验/功能做完/feature-verify/feature-regress/坏功能定位 | `scripts/feature-verify/` + `scripts/feature-verify.sh` | docs/FEATURE_VERIFY.md | Issue #109 |
-| **效率** | 评审增量上下文（review-context）| 评审复述/增量上下文/冻结骨架/免复述/上下文复用 | `local-agent/review_context/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-context v0.1.0 |
-| **效率** | 评审段调度器（review-cycle）| 评审段/攒批/异步收集/同指纹不重复构建/减CPU损耗 | `local-agent/review_cycle/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-cycle v0.1.0 |
+| **效率** | 评审增量上下文（review-context）| 评审复述/增量上下文/冻结骨架/免复述/上下文复用 | `local-agent/review_context/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-context v0.2.0 |
+| **效率** | 评审段调度器（review-cycle）| 评审段/攒批/异步收集/同指纹不重复构建/减CPU损耗 | `local-agent/review_cycle/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-cycle v0.2.0 |
 | **效率** | 攒批去重门（bus diff_fp）| 攒批去重/同指纹不重复发车/一次构建摊全批 | `local-agent/hybrid/bus.py` | docs/REVIEW_EFFICIENCY.md | Issue #150（hybrid bus 增强）|
 | **质量** | 审核前置助手（决策补全）| 二选一/拿不准/解决不掉/换方案 | `roles/manager.py`(审核前置) | docs/REVIEWER_PRECURSOR.md | Issue #47 |
 | **防无效** | 监控哨兵 | 监控/哨兵/停滞/横跳/无效努力 | `local-agent/sentinel/` | docs/SENTINEL.md | Issue #33 |

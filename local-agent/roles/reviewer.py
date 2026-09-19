@@ -130,15 +130,16 @@ class ReviewerRole(BaseRole):
 
         bus = BusRunner(dry_run=dry_run, timeout=300)
         # ---- 指纹去重门：同一变更指纹已跑过 → 不重复触发构建 ----
-        if diff_fp and not force and diff_fp in set(
-                bus._load().get("processed_fps", []) or []):
+        # 走 bus 公开接口 `processed_fps()`，不直连私有 `_load/_save`
+        if diff_fp and not force and diff_fp in bus.processed_fps():
             return {"ok": True, "skipped": True, "diff_fp": diff_fp,
                     "selected": [], "bus": None, "plan": None,
                     "reason": "同变更指纹已发过车（指纹去重门）→ 不重复触发构建",
                     "cost_note": "省下一次构建冷启动"}
 
-        # ---- 变更感知选测 ----
+        # ---- 变更感知选测（失败不静默吞：留痕 select_error 并降级为"不拉构建"）----
         selected = []
+        select_error = ""
         if changed_files:
             try:
                 from hybrid.selector import IncrementalSelector
@@ -146,15 +147,18 @@ class ReviewerRole(BaseRole):
                     root_dir=os.path.dirname(os.path.dirname(
                         os.path.abspath(__file__))))
                 selected = list(sel.select(changed_files) or [])
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 selected = []
+                select_error = "%s: %s" % (type(e).__name__, e)
         if extra_tests:
             selected.extend(extra_tests if isinstance(extra_tests, list)
                             else [extra_tests])
         if not selected:
             return {"ok": True, "skipped": True, "diff_fp": diff_fp,
                     "selected": [], "bus": None, "plan": None,
-                    "reason": "变更未命中任何测试 → 不拉构建",
+                    "select_error": select_error,
+                    "reason": ("变更选测失败（%s）→ 不拉构建" % select_error)
+                    if select_error else "变更未命中任何测试 → 不拉构建",
                     "cost_note": "省下一次构建冷启动"}
 
         # ---- 攒批入列（0 成本）然后再发车（一次构建摊全批）----
@@ -166,6 +170,7 @@ class ReviewerRole(BaseRole):
         summary = (plan or {}).get("summary", {}) or {}
         return {
             "ok": True, "skipped": False, "diff_fp": diff_fp,
+            "select_error": select_error,
             "selected": selected, "bus": bus.status(), "plan": plan,
             "reason": "攒批：%d 个受影响测试作为一批，一次构建跑完" % len(selected),
             "cost_note": "一次冷启动摊全批，省 %d 次构建冷启动" % max(

@@ -24,7 +24,10 @@ WARN_RATIO = 0.8          # 消耗达 80% 预警
 OVER_RATIO = 1.0          # 达 100% 护栏拦截 + 哨兵告警
 
 # 账本文件（与 batch 队列同目录）
-LEDGER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".quota_ledger.json")
+# 允许环境变量覆盖（`QUOTA_LEDGER_FILE`）：测试隔离用，避免测试污染共享账本。
+LEDGER_FILE = os.environ.get(
+    "QUOTA_LEDGER_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".quota_ledger.json"))
 
 
 class QuotaGuard(object):
@@ -32,11 +35,13 @@ class QuotaGuard(object):
 
     def __init__(self, free_minutes=FREE_MONTHLY_CORE_MINUTES,
                  warn_ratio=WARN_RATIO, over_ratio=OVER_RATIO,
-                 ledger_file=LEDGER_FILE):
+                 ledger_file=None):
         self.free_minutes = free_minutes
         self.warn_ratio = warn_ratio
         self.over_ratio = over_ratio
-        self.ledger_file = ledger_file
+        # 运行时解析：显式传入 > 环境变量 QUOTA_LEDGER_FILE > 默认共享账本
+        self.ledger_file = (ledger_file or os.environ.get("QUOTA_LEDGER_FILE")
+                            or LEDGER_FILE)
 
     # ---------- 账本 ----------
     def _load(self):
