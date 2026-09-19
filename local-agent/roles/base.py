@@ -682,6 +682,15 @@ class BaseRole:
         """返回该角色的输出契约（结构化描述），供占位/测试/LLM 统一使用。"""
         return {"role": self.name, "contract": "未定义"}
 
+    @staticmethod
+    def _supports_role_kwarg(llm):
+        """探测后端 call() 是否声明 role 关键字参数（Issue #147 接线用）。"""
+        try:
+            import inspect
+            return "role" in inspect.signature(llm.call).parameters
+        except (ValueError, TypeError):
+            return False
+
     def run(self, llm, user_input, use_cache=True):
 
         """执行角色：调用 llm 后端，返回输出。
@@ -692,7 +701,10 @@ class BaseRole:
         不改变返回语义（仍是 llm.call 的输出）。
         """
         sp = self.system_prompt()
-        out = llm.call(sp, user_input)
+        # ★ Issue #147 v0.3.0：把角色名接进调用链——后端按 role 从唯一配置
+        #   （models.yml）解析渠道链，实现「不指定→默认、指定→覆盖」在**真实执行时**生效。
+        #   用签名探测决定是否传 role（不用 try/except，避免吞掉调用内部的 TypeError）。
+        out = llm.call(sp, user_input, role=self.name) if self._supports_role_kwarg(llm) else llm.call(sp, user_input)
         if use_cache:
             try:
                 from llm import cache as _cache

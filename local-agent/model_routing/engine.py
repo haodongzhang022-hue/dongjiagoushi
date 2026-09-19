@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""模型路由引擎 · 主通道 → 备用通道降级（Issue #147）
+"""模型路由引擎 · 多级降级链（Issue #147 · v0.3.0-update）
 
 确定性逻辑（非 LLM 判断）：
-  - 按 spec 的渠道优先级取「主模型」调用；
-  - 主渠道不通（不可用/超时/限流/5xx）→ 自动降级到备用模型；
+  - 按 spec 的渠道链顺序取「主模型」调用；
+  - 主渠道不通（不可用/超时/限流/5xx）→ 自动降级到下一档；
+  - 逐档降级直到成功或链耗尽；
   - 全程留痕（每次路由决策写 model_routing_trace）。
 """
 import os
@@ -46,8 +47,17 @@ def is_unavailable(error):
     return any(sig in text for sig in _spec.UNAVAILABLE_SIGNALS)
 
 
+def _tier_role(idx):
+    """第 idx 档的语义名（0=primary，1=fallback，2+=fallback2…）。"""
+    if idx == 0:
+        return "primary"
+    if idx == 1:
+        return "fallback"
+    return f"fallback{idx}"
+
+
 def resolve_models(policy=None, role=None):
-    """解析目标渠道顺序（主 → 备）。
+    """解析目标渠道顺序（主 → 二选 → 三选 …）。
 
     优先级：显式 policy > role 覆盖（roles[role]→default）> 通用默认。
     未指定角色（role=None）→ 走 default（「不指定就默认通用」）。
@@ -55,10 +65,13 @@ def resolve_models(policy=None, role=None):
     if policy is None:
         policy = _spec.role_policy(role)
     order = []
-    if policy.get("primary"):
-        order.append(policy["primary"])
-    if policy.get("fallback") and policy["fallback"] not in order:
-        order.append(policy["fallback"])
+    if isinstance(policy, dict) and policy.get("chain"):
+        order = [m for m in policy["chain"] if m]
+    if not order and isinstance(policy, dict):
+        # 兼容旧 policy 写法（primary/fallback）
+        for k in ("primary", "fallback"):
+            if policy.get(k) and policy[k] not in order:
+                order.append(policy[k])
     # 兜底：策略缺字段时退回 spec 规范顺序
     if not order:
         order = _spec.channel_order(role)
@@ -66,7 +79,7 @@ def resolve_models(policy=None, role=None):
 
 
 def route_call(caller, system_prompt="", user_input="", policy=None, role=None, **kw):
-    """按「主 → 备」调用模型，主渠道不通自动降级。
+    """按「主 → 备 → 三备 …」调用模型，主渠道不通自动逐档降级。
 
     caller: 可调用对象 (model, system_prompt, user_input, **kw) -> text
             测试/真实后端均可注入，核心降级逻辑不受传输影响。
@@ -75,34 +88,37 @@ def route_call(caller, system_prompt="", user_input="", policy=None, role=None, 
     models = resolve_models(policy, role=role)
     attempts = []
     for idx, model in enumerate(models):
-        role = "primary" if idx == 0 else "fallback"
+        tier = _tier_role(idx)
         try:
             out = caller(model, system_prompt, user_input, **kw)
             rec = record_trace({
                 "event": "model.call.ok",
                 "model": model,
-                "role": role,
+                "role": tier,
                 "attempt": idx + 1,
+                "chain": models,
             })
-            return {"ok": True, "model": model, "role": role,
-                    "output": out, "attempts": attempts, "trace": rec}
+            return {"ok": True, "model": model, "role": tier,
+                    "output": out, "attempts": attempts, "trace": rec,
+                    "chain": models}
         except Exception as e:  # noqa: BLE001
             unavailable = is_unavailable(e)
-            attempts.append({"model": model, "role": role, "error": str(e),
+            attempts.append({"model": model, "role": tier, "error": str(e),
                              "unavailable": unavailable})
             record_trace({
                 "event": "model.call.fail",
                 "model": model,
-                "role": role,
+                "role": tier,
                 "unavailable": unavailable,
                 "error": str(e),
             })
-            # 主渠道不通 → 继续降级；非「不通」型错误也继续尝试备用（保可用）
+            # 当前档不通 → 继续降级到下一档；非「不通」型错误也继续尝试下一档（保可用）
             continue
     record_trace({"event": "model.call.exhausted",
                   "models": models, "attempts": attempts})
     return {"ok": False, "model": None, "role": None, "output": None,
-            "attempts": attempts, "reason": "all_channels_unavailable"}
+            "attempts": attempts, "reason": "all_channels_unavailable",
+            "chain": models}
 
 
 def trace_overview():
@@ -129,3 +145,20 @@ def trace_overview():
     except Exception:  # noqa: BLE001
         pass
     return stats
+
+
+def call_with_chain(caller_by_model, system_prompt="", user_input="",
+                    policy=None, role=None):
+    """按渠道链分派到「每档各自的 caller」——真实降级接线点。
+
+    caller_by_model: dict{model_name: callable}，缺该档 caller 时视为不可用并降级。
+    这是把「文件配置的模型链」接进「真实多后端」的最小闭环：
+      链上第一档用它的后端调用；不通则换下一档的后端。
+    """
+    def _dispatch(model, sp, ui, **kw):
+        fn = caller_by_model.get(model)
+        if fn is None:
+            raise RuntimeError(f"channel unavailable: no caller bound for {model}")
+        return fn(sp, ui, **kw)
+    return route_call(_dispatch, system_prompt=system_prompt,
+                      user_input=user_input, policy=policy, role=role)

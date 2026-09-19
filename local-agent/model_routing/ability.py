@@ -17,7 +17,8 @@ class ModelRoutingAbility:
             "config_file": _spec.config_path(),
             "default": _spec.default_policy(),
             "role_overrides": _spec.role_overrides(),
-            "rule": "配置文件统一管理：不指定走 default；roles 可按角色单独覆盖；主通道不通自动降级备用",
+            "default_chain": list(_spec.default_chain()),
+            "rule": "配置文件统一管理：不指定走 default；roles 可按角色单独覆盖；按链自动逐档降级（每次调用时实时读配置，改配置即长期生效）",
         }
 
     def config_file(self):
@@ -31,6 +32,14 @@ class ModelRoutingAbility:
     def role_policy(self, role=None):
         """解析某角色的完整策略（含 default 继承）。"""
         return _spec.role_policy(role)
+
+    def default_chain(self):
+        """通用默认渠道链（主 → 二选 → 三选 …）。"""
+        return list(_spec.default_chain())
+
+    def chain_for(self, role=None):
+        """某角色的渠道链（不指定 → 通用默认）。"""
+        return list(_spec.role_chain(role))
 
     def call(self, caller, system_prompt="", user_input="", policy=None, role=None, **kw):
         return route_call(caller, system_prompt, user_input, policy=policy, role=role, **kw)
