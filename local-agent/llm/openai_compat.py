@@ -22,7 +22,12 @@ class OpenAICompatBackend(LLMBackend):
         self.base_url = os.environ.get(
             "OPENAI_BASE_URL", "https://api.openai.com/v1"
         )
-        self.model = os.environ.get("LOCAL_AGENT_MODEL", "gpt-4o-mini")
+        # 默认模型走唯一事实源（Issue #147：一选 deepseek-v4.1-flash）
+        try:
+            from model_routing.spec import PRIMARY as _DEFAULT_MODEL
+        except Exception:  # noqa: BLE001
+            _DEFAULT_MODEL = "deepseek-v4.1-flash"
+        self.model = os.environ.get("LOCAL_AGENT_MODEL", _DEFAULT_MODEL)
 
     def available(self):
         return bool(self.api_key)
