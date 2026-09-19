@@ -11,7 +11,14 @@
 修复 Issue #98 遗留（评审机制不全）：双轴评审不再只是"就绪可调能力方法"，
 而是**评审必走闸门**——`do_review()` 强制先产出双轴、缺任一轴即评审不完整，
 机器可核验（`dual_axis_review` 返回 `axes_complete`），杜绝"评审走单轴混评漏双轴"。
+
+Issue #150（减 CPU 损耗）：评审不再"每次复述整个大项目 / 每轮拉起一次构建"——
+`build_review_context` 用**评审上下文增量复用**（冻结骨架摘要 + 本轮变化，免逐轮复述），
+`prepare_review_batch` 用**攒批触发门控**（入列 0 成本 + 一次发车整批跑完 + 同变更指纹
+不重复触发构建），两者都在 `do_review` 主流程内自动接线（可关）。
 """
+import os
+
 from .base import BaseRole
 
 try:
@@ -38,6 +45,12 @@ class ReviewerRole(BaseRole):
   research(适合调研)/human(适合移交人类判断)/consult(适合专家会诊)/vote(适合投票)
 - 仅评改动新增/改动行
 
+效率纪律（Issue #150 · 减 CPU 损耗）：
+- **不复述整个项目**：评审前先 `build_review_context(stable, volatile, prev)` 拿增量上下文
+  （冻结骨架摘要 + 本轮变化），评审只吃 `context` 字段；骨架来源没变则零成本复用；
+- **不逐轮拉构建**：测试一律先 `prepare_review_batch` 攒批入列（0 成本），一次发车整批跑完；
+  **同一变更指纹已跑过 → 不重复触发开发/构建**（指纹去重门），只引用上轮结论。
+
 协作纪律：
 - 🔴必修项必须指出并推动修复，复评至清零才放行；结论发回接力卡供下游接力。
 - **评审通过（处置标签=merge/proceed）后必须真实转交「架构·测试」**：用完整
@@ -62,6 +75,102 @@ class ReviewerRole(BaseRole):
                 "复评结论(recheck)",
                 "**评审通过后转交测试(handoff_to_tester: 完整@ + [触发:架构·测试] + 校验回执)**",
             ],
+        }
+
+    # ------------------------------------------------------------
+    # 评审增量上下文（Issue #150 · 免逐轮复述整个大项目）
+    # ------------------------------------------------------------
+    def build_review_context(self, stable_parts=None, volatile_parts=None,
+                             prev=None, task_key=""):
+        """构建**评审增量上下文**：冻结骨架摘要 + 本轮变化（不必复述整个项目）。
+
+        用户痛点（Issue #150）：项目一大，评审"每次复述项目非常困难"。
+        解法：稳定骨架（目标/边界/验收/契约/决策）构建一次即**冻结**，评审每轮只引用
+        其摘要；本轮变化（diff/测试信号/发现）才逐轮传。骨架来源指纹未变 → 零成本复用。
+
+        返回 review_context.engine.build() 的 pack（含 `context` = 喂给评审的最小上下文）。
+        """
+        try:
+            from review_context import engine as _ctx
+        except Exception:  # noqa: BLE001
+            return {"available": False, "context": "", "reuse": {"reusable": False}}
+        pack = _ctx.build(stable_parts or {}, volatile_parts or {},
+                          prev=prev, task_key=task_key)
+        pack["available"] = True
+        return pack
+
+    # ------------------------------------------------------------
+    # 攒批触发门控（Issue #150 · 免逐轮拉构建 / 同指纹不重复触发）
+    # ------------------------------------------------------------
+    def prepare_review_batch(self, task_key="", changed_files=None,
+                             extra_tests=None, diff_summary="", dry_run=True,
+                             force=False, flush=True):
+        """评审跑测试前先**攒批**：入列 0 成本 → 一次发车整批跑完；同指纹不重复构建。
+
+        用户痛点（Issue #150）："每次触发评审之后跑开发，然后评审……触发大量的 CPU
+        构建和 CPU 开发的损耗"。解法三条：
+
+          ① **攒批**：受影响测试先入列（0 成本），再在本调度点一次发车整批跑完
+             —— 一次冷启动摊全批（N 个测试从 N 次构建收敛为 1 次）；
+          ② **指纹去重门**：同一变更指纹已发过车 → **不重复触发构建**，只引用上轮结论；
+          ③ **变更感知选测**：只跑受变更影响的测试（复用 hybrid.selector，不各自取名）。
+
+        返回 {ok, diffusion, selected, bus, plan, skipped, reason, cost_note}
+        """
+        try:
+            from hybrid.bus import BusRunner
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "reason": "hybrid.bus 不可用: %s" % e,
+                    "selected": [], "skipped": True}
+        try:
+            from review_context import engine as _ctx
+            diff_fp = _ctx.fingerprint(diff_summary or "")
+        except Exception:  # noqa: BLE001
+            diff_fp = None
+
+        bus = BusRunner(dry_run=dry_run, timeout=300)
+        # ---- 指纹去重门：同一变更指纹已跑过 → 不重复触发构建 ----
+        if diff_fp and not force and diff_fp in set(
+                bus._load().get("processed_fps", []) or []):
+            return {"ok": True, "skipped": True, "diff_fp": diff_fp,
+                    "selected": [], "bus": None, "plan": None,
+                    "reason": "同变更指纹已发过车（指纹去重门）→ 不重复触发构建",
+                    "cost_note": "省下一次构建冷启动"}
+
+        # ---- 变更感知选测 ----
+        selected = []
+        if changed_files:
+            try:
+                from hybrid.selector import IncrementalSelector
+                sel = IncrementalSelector(
+                    root_dir=os.path.dirname(os.path.dirname(
+                        os.path.abspath(__file__))))
+                selected = list(sel.select(changed_files) or [])
+            except Exception:  # noqa: BLE001
+                selected = []
+        if extra_tests:
+            selected.extend(extra_tests if isinstance(extra_tests, list)
+                            else [extra_tests])
+        if not selected:
+            return {"ok": True, "skipped": True, "diff_fp": diff_fp,
+                    "selected": [], "bus": None, "plan": None,
+                    "reason": "变更未命中任何测试 → 不拉构建",
+                    "cost_note": "省下一次构建冷启动"}
+
+        # ---- 攒批入列（0 成本）然后再发车（一次构建摊全批）----
+        bus.enqueue(selected, source="review", note="评审测试攒批(%s)" % task_key,
+                    diff_fp=diff_fp)
+        plan = None
+        if flush:
+            plan = bus.dispatch(note="评审整批发车(%s)" % task_key)
+        summary = (plan or {}).get("summary", {}) or {}
+        return {
+            "ok": True, "skipped": False, "diff_fp": diff_fp,
+            "selected": selected, "bus": bus.status(), "plan": plan,
+            "reason": "攒批：%d 个受影响测试作为一批，一次构建跑完" % len(selected),
+            "cost_note": "一次冷启动摊全批，省 %d 次构建冷启动" % max(
+                0, len(selected) - 1),
+            "summary": summary,
         }
 
     # ------------------------------------------------------------
@@ -217,8 +326,17 @@ class ReviewerRole(BaseRole):
     # ------------------------------------------------------------
     def do_review(self, task_key, source="", diff_scope="", spec_ref="",
                   standards_axis=None, spec_axis=None,
-                  severity_hint="", issue_ref="", auto_route=True):
+                  severity_hint="", issue_ref="", auto_route=True,
+                  stable_parts=None, volatile_parts=None, prev_pack=None,
+                  changed_files=None, extra_tests=None, dry_run_batch=True):
         """评审主流程统一入口（**双轴强制 → 处置 → 路由** 一站式闭环）。
+
+        Issue #150 效率接线（不与契约冲突，均可在主流程内关闭/降级）：
+          · 传了 `stable_parts/volatile_parts` → 先 `build_review_context` 拿**增量上下文**
+            （冻结骨架摘要 + 本轮变化），本轮不再复述整个项目；
+          · 传了 `changed_files/extra_tests` → 先 `prepare_review_batch` **攒批**跑测试
+            （入列 0 成本 + 一次发车整批 + 同变更指纹不重复触发构建）。
+          两者结果写入返回值的 `context_pack` / `batch` 字段，可核验。
 
         评审不再"散调各方法"，而是**必走本入口**：先强制产出双轴（缺任一轴即
         评审不完整、不进入放行判定），再落规范处置标签，最后按处置路由。
@@ -230,6 +348,20 @@ class ReviewerRole(BaseRole):
         返回结构化评审主流程报告，供留痕核验；`axes_complete` 与 `disposition`
         双闸门，缺一即评审不完整（不视为有效评审）。
         """
+        # ⓪ Issue #150：评审增量上下文 + 攒批触发门控（先攒批、再评审，省构建省复述）
+        context_pack = None
+        batch = None
+        if stable_parts is not None or volatile_parts is not None:
+            context_pack = self.build_review_context(
+                stable_parts=stable_parts, volatile_parts=volatile_parts,
+                prev=prev_pack, task_key=task_key)
+        if changed_files or extra_tests:
+            batch = self.prepare_review_batch(
+                task_key=task_key, changed_files=changed_files,
+                extra_tests=extra_tests,
+                diff_summary=(volatile_parts or {}).get("diff_summary", ""),
+                dry_run=dry_run_batch)
+
         # ① 强制双轴评审（必走闸门，机器核验完整性）
         axis_report = self.dual_axis_review(
             source=source, diff_scope=diff_scope, spec_ref=spec_ref,
@@ -253,6 +385,8 @@ class ReviewerRole(BaseRole):
             return {
                 "task_key": task_key,
                 "source": source,
+                "context_pack": context_pack,
+                "batch": batch,
                 "axis_report": axis_report,
                 "axes_complete": False,
                 "review_complete": False,
@@ -307,6 +441,8 @@ class ReviewerRole(BaseRole):
             "source": source,
             "diff_scope": diff_scope,
             "spec_ref": spec_ref,
+            "context_pack": context_pack,
+            "batch": batch,
             "axis_report": axis_report,
             "axes_complete": True,
             "review_complete": True,

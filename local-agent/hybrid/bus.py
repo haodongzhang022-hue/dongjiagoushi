@@ -2,6 +2,10 @@
 """
 BusRunner · 公交车式批量测试计划执行器（Issue #90 · 攒批防核时浪费）
 =====================================================================
+Issue #150 追加：同一变更指纹的**重复入列**不得造成重复构建——用 diff 指纹做
+"攒批去重门"（同指纹测试已进过队列/已发过车 → 只引用，不再重复处）；
+并允许 `--diff-fp` 显式带上调用方（评审段调度器）算好的指纹。
+
 对应 Issue #90 收尾诉求："这些测试非常消耗核时……打包一批跑，应该不会那么慢。
 和公交车一样，无论多少，有需要就每隔15分钟发车，没有就不跑。然后这一批以
 计划形式跑完，不是拉起了跑1个关闭再唤醒构建很久再跑。"
@@ -47,6 +51,8 @@ DEFAULT_INTERVAL_SECONDS = 900
 DEFAULT_TIMEOUT = 600
 # 默认并行度（整批并行跑，加速"这一批以计划形式跑完"）
 DEFAULT_PARALLEL = 4
+# 变更指纹历史保留上限（攒批去重门用，防无限增长）
+DEFAULT_FP_HISTORY = 200
 
 
 def _now_ts():
@@ -80,35 +86,53 @@ class BusRunner(object):
         except Exception:  # noqa
             pass
         return {"tests": [], "last_dispatch": 0.0,
-                "history": [], "interval": self.interval}
+                "history": [], "interval": self.interval,
+                "processed_fps": []}
 
     def _save(self, d):
         with open(self.queue_file, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
 
     # ---------- 入列（乘客上车 · 0 成本） ----------
-    def enqueue(self, tests, source="manual", note=""):
+    def enqueue(self, tests, source="manual", note="", diff_fp=None):
         """把一个或多个测试投进待跑队列（0 成本，绝不立即拉起构建）。
 
-        tests: 单个脚本路径 or 脚本路径 list。
-        返回 {queued, batch_size, due_in, next_due}。
+        tests:   单个脚本路径 or 脚本路径 list。
+        diff_fp: 变更指纹（Issue #150 攒批去重门）——同一指纹**已发过车**的测试
+                 再入列时不再重复处（避免同 diff 反复触发构建）；
+                 仍在队列中的同指纹测试也不重复加。
+
+        返回 {queued, batch_size, due_in, next_due, skipped_fp}。
         """
         if isinstance(tests, str):
             tests = [tests]
+        d = self._load()
+        processed = set(d.get("processed_fps", []) or [])
+        # ---- 指纹去重门：同一变更指纹的测试已经跑过 → 不再重复入列（省一次构建）----
+        if diff_fp and diff_fp in processed:
+            return {"queued": 0, "batch_size": 0, "skipped_fp": diff_fp,
+                    "reason": "该变更指纹已发过车（攒批去重门）→ 不重复构建",
+                    "next_due_in": 0}
+
         tests = [t for t in tests if t and t not in self._queued_set()]
         if not tests:
-            return self.status()
-        d = self._load()
+            st = self.status()
+            st["skipped_fp"] = None
+            return st
         for t in tests:
             d["tests"].append({
                 "test": t,
                 "source": source,
                 "note": note,
+                "diff_fp": diff_fp,
                 "ts": _now_ts(),
             })
         d["interval"] = self.interval
+        d["pending_fp"] = diff_fp or d.get("pending_fp")
         self._save(d)
-        return self.status()
+        st = self.status()
+        st["skipped_fp"] = None
+        return st
 
     def _queued_set(self):
         return {t["test"] for t in self._load().get("tests", [])}
@@ -151,6 +175,9 @@ class BusRunner(object):
             "last_dispatch": _now_ts() if last else "",
             "last_dispatch_ts": last,
             "dispatch_count": len(d.get("history", [])),
+            # Issue #150 攒批去重门：已处理的变更指纹数（同指纹不再触发构建）
+            "processed_fps": len(d.get("processed_fps", []) or []),
+            "pending_fp": d.get("pending_fp"),
         }
 
     # ---------- 发车（整批跑完 · 一次构建） ----------
@@ -194,6 +221,14 @@ class BusRunner(object):
         d["tests"] = []
         d["last_dispatch"] = now
         d["interval"] = self.interval
+        # ---- 攒批去重门（Issue #150）：记录本班车跑过的变更指纹，同指纹不再触发构建 ----
+        fp = d.get("pending_fp")
+        if fp:
+            fps = list(d.get("processed_fps", []) or [])
+            if fp not in fps:
+                fps.append(fp)
+            d["processed_fps"] = fps[-DEFAULT_FP_HISTORY:]
+            d["pending_fp"] = None
         self._save(d)
 
         plan["dispatched"] = len(tests)
@@ -214,7 +249,12 @@ class BusRunner(object):
                        for t in tests]
             summary = {"total": len(results), "pass": len(results),
                        "fail": 0, "total_duration": 0.0, "wall_seconds": 0.0,
-                       "parallel": self.parallel}
+                       "parallel": self.parallel,
+                       # Issue #150：冷启动摊薄的确定性测算——N 个测试若各自单发
+                       # 要 N 次冷启动；整批只需 1 次（省 N-1 次固定开销）
+                       "cold_starts_naive": len(results),
+                       "cold_starts_batched": 1 if results else 0,
+                       "cold_start_saved": max(0, len(results) - 1)}
             return {"results": results, "summary": summary}
         return ex.run_parallel(tests, parallel=self.parallel)
 
@@ -275,12 +315,19 @@ class BusRunner(object):
         return 20.0
 
     # ---------- 定时哨兵发车（tick） ----------
-    def tick(self, now=None, extra_tests=None, note="bus tick"):
+    def tick(self, now=None, extra_tests=None, note="bus tick", diff_fp=None):
         """定时哨兵一次：到点且队列非空 → 发车；否则返回 '等下一班'。
 
         这是云端 cron / CI 定时器每 interval 调一次的统一入口：
         无需求（队列空）不发车（无空转构建）；有需求到点整批发车。
         """
+        if diff_fp:
+            d = self._load()
+            if diff_fp in set(d.get("processed_fps", []) or []):
+                return {"action": "skip", "reason": "该变更指纹已发过车（攒批去重门）",
+                        "diff_fp": diff_fp}
+            d["pending_fp"] = diff_fp
+            self._save(d)
         verdict = self.should_dispatch(now)
         if not verdict["dispatch"]:
             return {"action": "wait", **verdict}

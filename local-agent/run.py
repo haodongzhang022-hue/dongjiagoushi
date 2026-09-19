@@ -171,6 +171,14 @@ def main():
                         help="输出人可读 HTML 聚合控制页（全端大盘）")
     parser.add_argument("--dashboard-pr-ids", default=None,
                         help="--dashboard collect 云端PR列表(逗号分隔)")
+    # ---- 评审段调度（Issue #150：减 CPU 损耗 · 攒批/复用/增量上下文）----
+    parser.add_argument("--review-cycle", default=None,
+                        help="评审段调度 action: run/overview/stats/demo")
+    parser.add_argument("--rc-task", default=None, help="评审段任务标识 task_key")
+    parser.add_argument("--rc-stable", default=None, help="稳定骨架 JSON（构建一次→冻结）")
+    parser.add_argument("--rc-volatile", default=None, help="本轮变化 JSON（只传增量）")
+    parser.add_argument("--rc-rounds", type=int, default=1, help="连续跑几轮评审段")
+    parser.add_argument("--rc-real", action="store_true", help="真实执行（默认演练 dry-run）")
     args = parser.parse_args()
 
     if args.prescale_records:
@@ -295,6 +303,42 @@ def main():
                 print("  [控制台 %s] ok=%s" % (action, d.get("ok", out.get("ok"))))
         elif action == "handles":
             print("  句柄总数: %s" % out.get("data", {}).get("total", 0))
+        return 0
+
+    # ---- 评审段调度（Issue #150）----
+    if args.review_cycle:
+        from review_cycle import Scheduler
+        import json as _json
+        act = args.review_cycle
+        sch = Scheduler(dry_run=not args.rc_real)
+        if act == "overview":
+            print(_json.dumps(sch.overview(), ensure_ascii=False, indent=2))
+            return 0
+        if act == "stats":
+            print(_json.dumps(sch.stats(), ensure_ascii=False, indent=2))
+            return 0
+        if act == "demo":
+            out = sch.run("demo", {"goal": "评审不再逐轮复述整个项目",
+                                   "boundary": "只优化上下文/构建复用，不改需求边界",
+                                   "acceptance": "同 diff 指纹不重复触发构建"},
+                          {"diff_summary": "首轮变更 ..."},
+                          round_volatiles=[{"diff_summary": "首轮变更 ..."},
+                                           {"diff_summary": "首轮变更 ..."}],
+                          max_rounds=2)
+            print(_json.dumps(out, ensure_ascii=False, indent=2))
+            return 0
+        # act == run
+        if not args.rc_task:
+            parser.error("--review-cycle run 需要 --rc-task")
+        stable = _json.loads(args.rc_stable) if args.rc_stable else {}
+        volatile = _json.loads(args.rc_volatile) if args.rc_volatile else {}
+        out = sch.run(args.rc_task, stable, volatile, max_rounds=args.rc_rounds)
+        print("[评审段调度] task=%s | state=%s | 轮次=%d | 真发车=%d | 复用省构建=%d"
+              % (out["task_key"], out["state"], len(out["rounds"]),
+                 sum(1 for r in out["rounds"] if r["dispatched"]),
+                 sum(1 for r in out["rounds"] if r["reused"])))
+        print("  省下的复述 token ~%d | 说明：%s"
+              % (out["stats"]["context_saved_tokens"], out["stats"]["note"]))
         return 0
 
     if args.entry:

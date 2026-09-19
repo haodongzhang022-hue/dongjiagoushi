@@ -58,6 +58,7 @@ ENDPOINTS = {
     "POST /control/align":     {"desc": "按句柄做本地数据对齐", "action": "align"},
     "POST /control/localtest": {"desc": "云端CPU密集测试下放本地（降建环境成本）", "action": "localtest"},
     "POST /control/request":   {"desc": "发起云端异步开发请求（新句柄）", "action": "request"},
+    "GET /review-cycle":       {"desc": "评审段大盘（攒批/复用/省下的构建与复述·Issue #150）", "action": "review_cycle"},
 }
 
 
@@ -154,6 +155,17 @@ def _cost_view():
 # ---------------------------------------------------------------------------
 # 二、FastAPI 风格控制台快照（路由键 + 状态灯 + 每端面板）
 # ---------------------------------------------------------------------------
+def _review_cycle_view():
+    """评审段大盘（Issue #150）：攒批把 N 次构建收敛为每轮 1 批、同指纹轮次零构建。"""
+    try:
+        from review_cycle import Scheduler
+        sch = Scheduler(dry_run=True)
+        ov = sch.overview()
+        return {"ok": True, "stats": ov.get("stats", {}), "cycles": ov.get("cycles", {})}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e), "stats": {}, "cycles": {}}
+
+
 def _status_light(ok):
     return "🟢" if ok else "🔴"
 
@@ -164,6 +176,7 @@ def snapshot():
     handles = _handles_view()
     relay = _relay_view()
     cost = _cost_view()
+    review_cycle = _review_cycle_view()
     now = datetime.utcnow().isoformat()
     # 真实传输通道探测（cnb_live）：用户「模拟数据不可信」→ health 反映真实通道可达性
     live = _live_probe()
@@ -194,6 +207,7 @@ def snapshot():
         "handles": handles,
         "relay": relay,
         "cost": cost,
+        "review_cycle": review_cycle,
         "endpoints": ENDPOINTS,
     }
 
@@ -283,6 +297,8 @@ def control(action, handle_id=None, collect_state=None, pr_ids=None, req=None,
         return {"action": action, "ok": True, "data": panel(entry)}
     if action == "handles":
         return {"action": action, "ok": True, "data": _handles_view()}
+    if action == "review_cycle":
+        return {"action": action, "ok": True, "data": _review_cycle_view()}
     if action == "relay":
         return {"action": action, "ok": True, "data": _relay_view()}
     if action == "request":

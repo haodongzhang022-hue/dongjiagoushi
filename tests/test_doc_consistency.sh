@@ -220,6 +220,50 @@ else
   echo "  ❌ 运行时核验：do_review 缺轴未正确判不完整/禁止放行"
 fi
 # ============================================================
+# 七、Issue #150 评审效率（减 CPU 损耗）文档-实现一致性
+# ============================================================
+echo ""
+echo "▶ 七、评审效率·减 CPU 损耗（Issue #150）一致性"
+
+file_exists "REVIEW_EFFICIENCY.md 存在" "docs/REVIEW_EFFICIENCY.md"
+contains "AGENTS.md 登记评审效率固定规则" "$(cat AGENTS.md 2>/dev/null)" "评审效率·减 CPU 损耗"
+contains "CAPABILITY_INDEX 登记评审增量上下文" "$(cat docs/CAPABILITY_INDEX.md)" "review-context"
+contains "CAPABILITY_INDEX 登记评审段调度器" "$(cat docs/CAPABILITY_INDEX.md)" "review-cycle"
+file_exists "ADR-0009 存在（评审效率决策）" "docs/adr/0009-review-incremental-coalesced-cycle.md"
+file_exists "review_context 引擎存在" "local-agent/review_context/engine.py"
+file_exists "review_cycle 引擎存在" "local-agent/review_cycle/cycle.py"
+file_exists "评审效率测试存在" "local-agent/tests/test_review_efficiency.sh"
+
+# 运行时核验：评审角色主流程内接线（增量上下文 + 攒批）真实生效
+$PY - >/dev/null 2>&1 <<'PYINNER2'
+import sys
+sys.path.insert(0, "local-agent")
+try:
+    from data import admin
+    admin.init()
+    from roles import get_role
+    r = get_role("架构·评审")
+    assert hasattr(r, "build_review_context"), "评审应具备 build_review_context"
+    assert hasattr(r, "prepare_review_batch"), "评审应具备 prepare_review_batch"
+    rep = r.do_review("效率核验", source="PR #150", spec_ref="Issue #150",
+                      standards_axis={"🔴": [], "note": "ok"},
+                      spec_axis={"faithful": True},
+                      stable_parts={"goal": "G" * 300},
+                      volatile_parts={"diff_summary": "d"},
+                      extra_tests=["local-agent/tests/test_a.sh"], auto_route=False)
+    assert rep["context_pack"] is not None, "do_review 应产出增量上下文包"
+    assert rep["batch"] is not None, "do_review 应产出攒批结果"
+except Exception as e:
+    print("ERR", e); sys.exit(1)
+PYINNER2
+if [ $? -eq 0 ]; then
+  PASS=$((PASS+1)); echo "  ✅ 运行时核验：do_review 内接线 增量上下文 + 攒批"
+else
+  FAIL=$((FAIL+1)); FAILED_ITEMS+=("[评审效率接线] do_review 未接增量上下文/攒批")
+  echo "  ❌ 运行时核验：do_review 未接增量上下文/攒批"
+fi
+
+# ============================================================
 # 汇总（信号灯）
 # ============================================================
 echo ""

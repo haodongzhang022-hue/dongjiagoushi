@@ -195,7 +195,8 @@ def _bus():
 def cmd_bus_enqueue(args):
     b = _bus()
     r = b.enqueue(args.tests, source=args.source or "cli",
-                  note=args.note or "bus enqueue")
+                  note=args.note or "bus enqueue",
+                  diff_fp=getattr(args, "diff_fp", None))
     print(json.dumps(r, ensure_ascii=False, indent=2))
 
 
@@ -209,6 +210,9 @@ def cmd_bus_dispatch(args):
     from hybrid.bus import BusRunner
     b = BusRunner(dry_run=args.dry, timeout=args.timeout,
                   interval=args.interval, parallel=args.parallel)
+    if getattr(args, "diff_fp", None):
+        b.enqueue([], diff_fp=None)      # no-op 保序（不发无乘客车）
+        d = b._load(); d["pending_fp"] = args.diff_fp; b._save(d)
     plan = b.dispatch(extra_tests=args.tests or None, note=args.note or "bus dispatch")
     print(json.dumps(plan, ensure_ascii=False, indent=2))
 
@@ -218,7 +222,8 @@ def cmd_bus_tick(args):
     from hybrid.bus import BusRunner
     b = BusRunner(dry_run=args.dry, timeout=args.timeout,
                   interval=args.interval, parallel=args.parallel)
-    plan = b.tick(extra_tests=args.tests or None, note=args.note or "bus tick")
+    plan = b.tick(extra_tests=args.tests or None, note=args.note or "bus tick",
+                  diff_fp=getattr(args, "diff_fp", None))
     print(json.dumps(plan, ensure_ascii=False, indent=2))
 
 
@@ -460,6 +465,8 @@ def main(argv=None):
     be.add_argument("tests", nargs="+", help="待跑测试脚本")
     be.add_argument("--source", default=None, help="入列来源")
     be.add_argument("--note", default=None, help="备注")
+    be.add_argument("--diff-fp", default=None,
+                    help="变更指纹（攒批去重门·Issue #150）：同指纹已发过车则不重复入列")
     be.set_defaults(fn=cmd_bus_enqueue)
     bs2.add_parser("status", help="站台信息（队列/下一班车）").set_defaults(fn=cmd_bus_status)
     bd = bs2.add_parser("dispatch", help="立即整批发车（跑完队列全部，一次构建）")
@@ -469,6 +476,7 @@ def main(argv=None):
     bd.add_argument("--interval", type=int, default=900)
     bd.add_argument("--parallel", type=int, default=4)
     bd.add_argument("--note", default=None)
+    bd.add_argument("--diff-fp", default=None, help="变更指纹（写入攒批去重门）")
     bd.set_defaults(fn=cmd_bus_dispatch)
     bt = bs2.add_parser("tick", help="定时哨兵：到点且非空才发车")
     bt.add_argument("tests", nargs="*", help="可选临时追加测试")
@@ -477,6 +485,7 @@ def main(argv=None):
     bt.add_argument("--interval", type=int, default=900)
     bt.add_argument("--parallel", type=int, default=4)
     bt.add_argument("--note", default=None)
+    bt.add_argument("--diff-fp", default=None, help="变更指纹（同指纹已发过车则 skip）")
     bt.set_defaults(fn=cmd_bus_tick)
 
     p = sub.add_parser("smart", help="智能优化一键（增量+缓存+并行+成本）")
