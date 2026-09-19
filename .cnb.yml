@@ -193,8 +193,15 @@ main:
       type: npc:go
       options:
         role: "架构·秘书"            # 对应 .cnb/settings.yml 中的角色（兜底人设）
-        model: deepseek-v4-flash     # 项目默认基座模型（用户指定：deepseek v4 flash）
+        # 模型策略（Issue #147 · 唯一事实源 local-agent/model_routing/spec.py）：
+        #   一选主通道 = deepseek-v4.1-flash
+        #   二选备用通道 = glm-5.3-flash（主渠道不通时降级启用）
+        # 说明：npc:go 只接受单个 model 字段；主/备降级由 llm 后端
+        #   （local-agent/model_routing/engine.py）在运行时接管——
+        #   主渠道返回不可用/超时/限流/5xx 时自动切备用并留痕。
+        model: deepseek-v4.1-flash   # 主通道（用户指定：deepseek v4.1 flash）
           # 其他可选模型（按需切换）：
+          # model: glm-5.3-flash      # 备用通道（主渠道不通时启用，用户指定）
           # model: hy3                # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
           # model: glm-5              # GLM 模型
           # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
