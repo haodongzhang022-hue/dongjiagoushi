@@ -22,7 +22,7 @@ class CliFallbackBackend(LLMBackend):
         # 始终可用（占位/兜底）
         return True
 
-    def call(self, system_prompt, user_input):
+    def call(self, system_prompt, user_input, role=None, **kw):
         cli = os.environ.get("LLM_CLI")
         if cli:
             try:
@@ -39,6 +39,7 @@ class CliFallbackBackend(LLMBackend):
         return (
             "[占位执行·未接入真实模型] 已按角色输出契约生成模板。\n"
             "请配置 OPENAI_API_KEY 或 LLM_CLI 后启用真实推理。\n"
+            f"role: {role or '(默认)'}\n"
             f"system_prompt 摘要: {system_prompt[:120]}...\n"
             f"user_input: {user_input[:200]}"
         )

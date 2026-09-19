@@ -15,7 +15,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model_routing import spec
-from model_routing.engine import route_call, resolve_models, trace_overview
+from model_routing.engine import route_call, resolve_models, trace_overview  # noqa: E402
 
 
 def main(argv=None):
@@ -31,6 +31,9 @@ def main(argv=None):
     elif cmd == "models":
         print(json.dumps({"role": arg, "order": resolve_models(role=arg)},
                          ensure_ascii=False))
+    elif cmd == "chain":
+        print(json.dumps({"role": arg, "chain": list(spec.role_chain(arg))},
+                         ensure_ascii=False, indent=2))
     elif cmd == "overview":
         print(json.dumps(trace_overview(), ensure_ascii=False, indent=2))
     elif cmd == "dryrun":

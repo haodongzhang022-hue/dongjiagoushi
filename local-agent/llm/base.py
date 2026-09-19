@@ -18,7 +18,8 @@ class LLMBackend:
 
     name = "base"
 
-    def call(self, system_prompt, user_input, **kw):
+    def call(self, system_prompt, user_input, role=None, **kw):
+        """调用模型。role 为角色名（Issue #147：后端可按角色从唯一配置解析模型链）。"""
         raise NotImplementedError
 
     def available(self):
