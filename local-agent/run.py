@@ -173,7 +173,7 @@ def main():
                         help="--dashboard collect 云端PR列表(逗号分隔)")
     # ---- 评审段调度（Issue #150：减 CPU 损耗 · 攒批/复用/增量上下文）----
     parser.add_argument("--review-cycle", default=None,
-                        help="评审段调度 action: run/overview/stats/demo")
+                        help="评审段调度 action: run/overview/stats/demo/gate（gate=阶段链门控大盘）")
     parser.add_argument("--rc-task", default=None, help="评审段任务标识 task_key")
     parser.add_argument("--rc-stable", default=None, help="稳定骨架 JSON（构建一次→冻结）")
     parser.add_argument("--rc-volatile", default=None, help="本轮变化 JSON（只传增量）")
@@ -317,14 +317,28 @@ def main():
         if act == "stats":
             print(_json.dumps(sch.stats(), ensure_ascii=False, indent=2))
             return 0
+        if act == "gate":
+            # 阶段链门控大盘（Issue #150 打断补齐）：拦下多少"乱触发"
+            from review_cycle.gate import StageGate, gate_stats
+            print(_json.dumps({"chain": StageGate().overview(),
+                               "gates": gate_stats()},
+                              ensure_ascii=False, indent=2))
+            return 0
         if act == "demo":
+            # 演示"链条按序推进"：先让上游（开发→测试）收口，评审段才允许触发
+            from review_cycle.gate import StageGate
+            g = StageGate()
+            g.mark_done("demo", "development")
+            g.mark_done("demo", "testing")
+            sch._gate = g
             out = sch.run("demo", {"goal": "评审不再逐轮复述整个项目",
                                    "boundary": "只优化上下文/构建复用，不改需求边界",
                                    "acceptance": "同 diff 指纹不重复触发构建"},
                           {"diff_summary": "首轮变更 ..."},
                           round_volatiles=[{"diff_summary": "首轮变更 ..."},
                                            {"diff_summary": "首轮变更 ..."}],
-                          max_rounds=2)
+                          max_rounds=2,
+                          changed_files=["local-agent/hybrid/bus.py"])
             print(_json.dumps(out, ensure_ascii=False, indent=2))
             return 0
         # act == run

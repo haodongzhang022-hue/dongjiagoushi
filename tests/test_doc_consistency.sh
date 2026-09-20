@@ -235,6 +235,11 @@ contains "AGENTS.md 登记评审效率固定规则" "$(cat AGENTS.md 2>/dev/null
 contains "CAPABILITY_INDEX 登记评审增量上下文" "$(cat docs/CAPABILITY_INDEX.md)" "review-context"
 contains "CAPABILITY_INDEX 登记评审段调度器" "$(cat docs/CAPABILITY_INDEX.md)" "review-cycle"
 file_exists "ADR-0011 存在（评审效率决策）" "docs/adr/0011-review-incremental-coalesced-cycle.md"
+file_exists "ADR-0012 存在（阶段链门控决策）" "docs/adr/0012-stage-chain-gate.md"
+contains "CAPABILITY_INDEX 登记阶段链门控" "$(cat docs/CAPABILITY_INDEX.md)" "stage-gate"
+contains "AGENTS.md 登记阶段链门控规则" "$(cat AGENTS.md)" "阶段链门控"
+file_exists "阶段链门控引擎存在" "local-agent/review_cycle/gate.py"
+file_exists "阶段链唯一事实源存在" "local-agent/review_cycle/stage_spec.py"
 file_exists "review_context 引擎存在" "local-agent/review_context/engine.py"
 file_exists "review_cycle 引擎存在" "local-agent/review_cycle/cycle.py"
 file_exists "评审效率测试存在" "local-agent/tests/test_review_efficiency.sh"
@@ -247,15 +252,21 @@ try:
     from data import admin
     admin.init()
     from roles import get_role
+    from review_cycle.gate import StageGate
+    import tempfile
     r = get_role("架构·评审")
     assert hasattr(r, "build_review_context"), "评审应具备 build_review_context"
     assert hasattr(r, "prepare_review_batch"), "评审应具备 prepare_review_batch"
+    # 阶段链门控（Issue #150 打断补齐）：先让上游收口，评审才允许触发
+    g = StageGate(state_file=tempfile.mktemp(suffix=".json"))
+    g.mark_done("效率核验", "development"); g.mark_done("效率核验", "testing")
     rep = r.do_review("效率核验", source="PR #150", spec_ref="Issue #150",
                       standards_axis={"🔴": [], "note": "ok"},
                       spec_axis={"faithful": True},
                       stable_parts={"goal": "G" * 300},
                       volatile_parts={"diff_summary": "d"},
-                      extra_tests=["local-agent/tests/test_a.sh"], auto_route=False)
+                      extra_tests=["local-agent/tests/test_a.sh"],
+                      gate=g, auto_route=False)
     assert rep["context_pack"] is not None, "do_review 应产出增量上下文包"
     assert rep["batch"] is not None, "do_review 应产出攒批结果"
 except Exception as e:
@@ -266,6 +277,30 @@ if [ $? -eq 0 ]; then
 else
   FAIL=$((FAIL+1)); FAILED_ITEMS+=("[评审效率接线] do_review 未接增量上下文/攒批")
   echo "  ❌ 运行时核验：do_review 未接增量上下文/攒批"
+fi
+
+# 运行时核验：阶段链门控真的拦抢跑（缺轴/阶段门任一不完整即不允许放行）
+$PY - >/dev/null 2>&1 <<'PYINNER3'
+import sys, tempfile
+sys.path.insert(0, "local-agent")
+try:
+    from review_cycle.gate import StageGate
+    from review_cycle import stage_spec
+    assert stage_spec.STAGE_ORDER == ("development", "testing", "review")
+    g = StageGate(state_file=tempfile.mktemp(suffix=".json"))
+    g.mark_active("T", "development")
+    v = g.should_trigger("T", "review")
+    assert v["allow"] is False and v["decision"] == "blocked_upstream", v
+    v2 = g.should_trigger("T", "development")
+    assert v2["decision"] == "blocked_active", v2
+except Exception as e:
+    print("ERR", e); sys.exit(1)
+PYINNER3
+if [ $? -eq 0 ]; then
+  PASS=$((PASS+1)); echo "  ✅ 运行时核验：阶段链门控拦抢跑/重复触发（allow=False）"
+else
+  FAIL=$((FAIL+1)); FAILED_ITEMS+=("[阶段链门控] 抢跑/重复触发未被拦下")
+  echo "  ❌ 运行时核验：阶段链门控未拦下抢跑/重复触发"
 fi
 
 # ============================================================

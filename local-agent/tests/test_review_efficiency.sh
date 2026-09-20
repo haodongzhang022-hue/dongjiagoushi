@@ -18,6 +18,8 @@ export HYBRID_CACHE=off
 # 测试隔离：攒批队列 / 配额账本落到临时目录，不污染工作区共享状态（保证可重复跑）
 export BUS_QUEUE_FILE="$TMPDIR_RC/bus_queue.json"
 export QUOTA_LEDGER_FILE="$TMPDIR_RC/quota_ledger.json"
+# 阶段链门控状态隔离（Issue #150 打断补齐）：不污染工作区共享链状态，保证可重复跑
+export REVIEW_STAGE_FILE="$TMPDIR_RC/review_stages.json"
 trap 'rm -rf "$TMPDIR_RC"' EXIT
 
 echo "===== [review-eff] 1. 评审增量上下文：稳定骨架冻结后复用，免逐轮复述 ====="
@@ -77,9 +79,14 @@ $PY - <<'PYEOF'
 from data import admin
 admin.init()
 from roles import get_role
+from review_cycle.gate import StageGate
 r = get_role("架构·评审")
 assert hasattr(r, "build_review_context")
 assert hasattr(r, "prepare_review_batch")
+# 阶段链门控（本 Issue 补齐）：先让上游（开发→测试）收口，评审才允许触发
+g = StageGate()
+g.mark_done("接线任务", "development")
+g.mark_done("接线任务", "testing")
 rep = r.do_review(
     "接线任务", source="PR #150", spec_ref="Issue #150",
     standards_axis={"🔴": [], "note": "ok"}, spec_axis={"faithful": True},
@@ -88,7 +95,7 @@ rep = r.do_review(
     extra_tests=["local-agent/tests/test_a.sh",
                  "local-agent/tests/test_b.sh",
                  "local-agent/tests/test_c.sh"],
-    auto_route=False)
+    gate=g, auto_route=False)
 assert rep["context_pack"] is not None, "do_review 应产出增量上下文包"
 assert rep["batch"] is not None, "do_review 应产出攒批结果"
 assert rep["batch"]["skipped"] is False
@@ -99,11 +106,15 @@ PYEOF
 
 echo "===== [review-eff] 4. 评审段调度器：真实变更下真发车 + 同指纹轮次复用 ====="
 $PY - <<'PYEOF'
-import os
+import os, tempfile
 from review_cycle import Scheduler, spec
+from review_cycle.gate import StageGate
 assert spec.MODULE == "review-cycle"
-sch = Scheduler(dry_run=True)
+# 阶段链门控：本组验证的是"发车/复用"，故先让上游（开发→测试）收口
+sch = Scheduler(dry_run=True, gate=StageGate(state_file=tempfile.mktemp(suffix=".json")))
 sch.reset()
+_g = sch._gate_runner()
+_g.mark_done("任务A", "development"); _g.mark_done("任务A", "testing")
 # S2 回归：root_dir 必须解析到仓库根（原先解析为 "/" → 选测恒空 → 永不发车）
 assert sch.root_dir not in ("/", "", None), f"root_dir 解析错误: {sch.root_dir!r}"
 assert os.path.exists(os.path.join(sch.root_dir, "local-agent")), \
@@ -135,9 +146,13 @@ PYEOF
 
 echo "===== [review-eff] 5. 批量节省口径：N 轮 N 个测试的构建次数大幅下降 ====="
 $PY - <<'PYEOF'
+import tempfile
 from review_cycle import Scheduler
-sch = Scheduler(dry_run=True)
+from review_cycle.gate import StageGate
+sch = Scheduler(dry_run=True, gate=StageGate(state_file=tempfile.mktemp(suffix=".json")))
 sch.reset()
+_g = sch._gate_runner()
+_g.mark_done("大项目", "development"); _g.mark_done("大项目", "testing")
 stable = {"goal": "G"}
 # 10 轮评审，每轮 5 个受影响测试，其中一半轮次是同一份变更（复现场景）
 vols = [{"diff_summary": "diff-%d" % (i // 2)} for i in range(10)]
@@ -186,5 +201,75 @@ ctl = dash.control("review_cycle")
 assert ctl["ok"] is True
 print("  ✅ 评审段大盘 + 控制页 /review-cycle 路由可读")
 PYEOF
+
+echo "===== [review-eff] 8. 阶段链门控：本该串行不得并行/重复触发（打断补齐）====="
+$PY - <<'PYEOF8'
+import tempfile
+from review_cycle.gate import StageGate, gate_stats
+from review_cycle import stage_spec
+
+# 顺序 / 上游 唯一事实源
+assert stage_spec.STAGE_ORDER == ("development", "testing", "review")
+assert stage_spec.UPSTREAM == {"testing": "development", "review": "testing"}
+
+g = StageGate(state_file=tempfile.mktemp(suffix=".json"))
+# 1 开发在跑 -> 测试/评审抢跑必须被驳回（这正是"乱触发"要拦下的）
+assert g.admit("T1", "development")["decision"] == "allow"
+assert g.admit("T1", "testing")["decision"] == "blocked_upstream", "开发未完就测试=抢跑"
+assert g.admit("T1", "review")["decision"] == "blocked_upstream", "开发未完就评审=抢跑"
+# 2 重复触发同一阶段 -> 复用（不新起任务、不冲进度 = 防进度失衡）
+assert g.admit("T1", "development")["decision"] == "blocked_active"
+v = g.admit("T1", "development")
+assert v["reused"] is True and v["admitted"] is False, "重复触发应复用而非新起"
+# 3 链式推进：开发收口 -> 测试放行 -> 测试收口 -> 评审放行
+assert g.mark_done("T1", "development")["cleared"] is True
+assert g.admit("T1", "testing")["decision"] == "allow"
+assert g.admit("T1", "review")["decision"] == "blocked_upstream", "测试未完就评审=抢跑"
+assert g.mark_done("T1", "testing")["cleared"] is True
+assert g.admit("T1", "review")["decision"] == "allow"
+# 4 乱序：从下游那头起头 -> 驳回（防一条链被拆两条并行）
+assert g.admit("T2", "review")["decision"] == "blocked_upstream"
+# 5 force 是显式逃生门（不静默绕过：留痕 forced=True）
+f = g.should_trigger("T1", "development", force=True)
+assert f["allow"] is True and f["forced"] is True
+print("  OK 顺序门控：抢跑/重复/乱序全拦，链式推进放行，force 逃生门留痕")
+PYEOF8
+
+echo "===== [review-eff] 9. 拦截可核验：抢跑不起构建 + 大盘计数 ====="
+$PY - <<'PYEOF9'
+import tempfile
+from review_cycle import Scheduler
+from review_cycle.gate import StageGate
+from data import admin
+admin.init()
+
+sch = Scheduler(dry_run=True, gate=StageGate(state_file=tempfile.mktemp(suffix=".json")))
+sch.reset()
+changed = ["local-agent/hybrid/bus.py"]
+
+# 上游未收口 -> 评审段触发被阶段门驳回：零构建（dispatched=False）
+out = sch.run("链任务", {"goal": "G" * 200}, {"diff_summary": "d1"},
+              changed_files=changed)
+r0 = out["rounds"][0]
+assert r0["state"] == "blocked", r0
+assert r0["stage_gate"]["decision"] == "blocked_upstream"
+assert r0["dispatched"] is False, "被驳回不得起任何构建"
+assert r0["disposition"] == "proceed", "驳回不得假绿放行标签"
+
+# 上游收口后 -> 放行且真发车
+g = sch._gate_runner()
+g.mark_done("链任务", "development"); g.mark_done("链任务", "testing")
+out2 = sch.run("链任务", {"goal": "G" * 200}, {"diff_summary": "d2"},
+               changed_files=changed)
+assert out2["rounds"][0]["state"] == "reviewed"
+assert out2["rounds"][0]["dispatched"] is True
+
+st = sch.stats()
+assert st["stage_gates"]["blocked_upstream"] >= 1
+assert st["blocked_rounds"] >= 1
+assert st["blocked_retriggers"] >= 1
+print("  OK 抢跑零构建 + 放行才发车；blocked_rounds=%d / blocked_retriggers=%d"
+      % (st["blocked_rounds"], st["blocked_retriggers"]))
+PYEOF9
 
 echo "===== [review-eff] ALL PASS ====="

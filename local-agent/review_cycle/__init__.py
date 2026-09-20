@@ -30,6 +30,9 @@ CLI：
   python -m review_cycle run --task-key T --stable '{...}' --volatile '{...}'
 """
 from .cycle import Scheduler, default_scheduler
+from .gate import StageGate, gate_stats, record_gate
 from . import spec
+from . import stage_spec
 
-__all__ = ["Scheduler", "default_scheduler", "spec"]
+__all__ = ["Scheduler", "default_scheduler", "spec", "stage_spec",
+           "StageGate", "gate_stats", "record_gate"]

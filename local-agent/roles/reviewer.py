@@ -104,24 +104,43 @@ class ReviewerRole(BaseRole):
     # ------------------------------------------------------------
     def prepare_review_batch(self, task_key="", changed_files=None,
                              extra_tests=None, diff_summary="", dry_run=True,
-                             force=False, flush=True):
+                             force=False, flush=True, stage="review",
+                             gate=None):
         """评审跑测试前先**攒批**：入列 0 成本 → 一次发车整批跑完；同指纹不重复构建。
 
         用户痛点（Issue #150）："每次触发评审之后跑开发，然后评审……触发大量的 CPU
-        构建和 CPU 开发的损耗"。解法三条：
+        构建和 CPU 开发的损耗"。解法四条：
 
           ① **攒批**：受影响测试先入列（0 成本），再在本调度点一次发车整批跑完
              —— 一次冷启动摊全批（N 个测试从 N 次构建收敛为 1 次）；
           ② **指纹去重门**：同一变更指纹已发过车 → **不重复触发构建**，只引用上轮结论；
-          ③ **变更感知选测**：只跑受变更影响的测试（复用 hybrid.selector，不各自取名）。
+          ③ **变更感知选测**：只跑受变更影响的测试（复用 hybrid.selector，不各自取名）；
+          ④ **阶段链门控（本 Issue 打断补齐）**：本该串行的链条不得并行触发——
+             上游（开发）未收口就抢跑测试/评审 → **直接驳回、不起任何构建**；
+             本阶段已在跑（重复触发）→ 复用进行中的任务，**不新起、不冲进度**。
+             `force=True` 是显式逃生门（"我知道在抢跑/复用"）。
 
-        返回 {ok, diffusion, selected, bus, plan, skipped, reason, cost_note}
+        返回 {ok, diffusion, selected, bus, plan, skipped, reason, cost_note, gate}
         """
+        # ---- 阶段链门控（先判链、再谈攒批；驳回即零构建，正是"乱触发"要拦下的）----
+        from review_cycle.gate import StageGate, record_gate
+        g = gate or StageGate()
+        gv = g.should_trigger(task_key, stage, force=force)
+        record_gate(gv)
+        if not gv["allow"]:
+            return {"ok": True, "skipped": True, "diff_fp": None,
+                    "selected": [], "bus": None, "plan": None,
+                    "gate": gv, "reused": gv.get("decision") == "blocked_active",
+                    "reason": "[阶段门:%s] %s" % (gv["decision"], gv["reason"]),
+                    "cost_note": "阶段门驳回 → 零构建（拦下一次乱触发）"}
+        if not gv.get("forced"):
+            g.mark_active(task_key, stage, note="评审攒批触发")
+
         try:
             from hybrid.bus import BusRunner
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "reason": "hybrid.bus 不可用: %s" % e,
-                    "selected": [], "skipped": True}
+                    "selected": [], "skipped": True, "gate": gv}
         try:
             from review_context import engine as _ctx
             diff_fp = _ctx.fingerprint(diff_summary or "")
@@ -133,7 +152,7 @@ class ReviewerRole(BaseRole):
         # 走 bus 公开接口 `processed_fps()`，不直连私有 `_load/_save`
         if diff_fp and not force and diff_fp in bus.processed_fps():
             return {"ok": True, "skipped": True, "diff_fp": diff_fp,
-                    "selected": [], "bus": None, "plan": None,
+                    "selected": [], "bus": None, "plan": None, "gate": gv,
                     "reason": "同变更指纹已发过车（指纹去重门）→ 不重复触发构建",
                     "cost_note": "省下一次构建冷启动"}
 
@@ -155,7 +174,7 @@ class ReviewerRole(BaseRole):
                             else [extra_tests])
         if not selected:
             return {"ok": True, "skipped": True, "diff_fp": diff_fp,
-                    "selected": [], "bus": None, "plan": None,
+                    "selected": [], "bus": None, "plan": None, "gate": gv,
                     "select_error": select_error,
                     "reason": ("变更选测失败（%s）→ 不拉构建" % select_error)
                     if select_error else "变更未命中任何测试 → 不拉构建",
@@ -169,7 +188,7 @@ class ReviewerRole(BaseRole):
             plan = bus.dispatch(note="评审整批发车(%s)" % task_key)
         summary = (plan or {}).get("summary", {}) or {}
         return {
-            "ok": True, "skipped": False, "diff_fp": diff_fp,
+            "ok": True, "skipped": False, "diff_fp": diff_fp, "gate": gv,
             "select_error": select_error,
             "selected": selected, "bus": bus.status(), "plan": plan,
             "reason": "攒批：%d 个受影响测试作为一批，一次构建跑完" % len(selected),
@@ -333,7 +352,8 @@ class ReviewerRole(BaseRole):
                   standards_axis=None, spec_axis=None,
                   severity_hint="", issue_ref="", auto_route=True,
                   stable_parts=None, volatile_parts=None, prev_pack=None,
-                  changed_files=None, extra_tests=None, dry_run_batch=True):
+                  changed_files=None, extra_tests=None, dry_run_batch=True,
+                  stage="review", gate=None):
         """评审主流程统一入口（**双轴强制 → 处置 → 路由** 一站式闭环）。
 
         Issue #150 效率接线（不与契约冲突，均可在主流程内关闭/降级）：
@@ -365,7 +385,7 @@ class ReviewerRole(BaseRole):
                 task_key=task_key, changed_files=changed_files,
                 extra_tests=extra_tests,
                 diff_summary=(volatile_parts or {}).get("diff_summary", ""),
-                dry_run=dry_run_batch)
+                dry_run=dry_run_batch, stage=stage, gate=gate)
 
         # ① 强制双轴评审（必走闸门，机器核验完整性）
         axis_report = self.dual_axis_review(

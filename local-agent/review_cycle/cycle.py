@@ -10,6 +10,8 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from review_cycle import spec
+from review_cycle import stage_spec
+from review_cycle import gate as _gate_mod
 from review_context import engine as ctx_engine
 
 # 可选依赖（缺失即降级，不崩）：评审角色 / 回写桥 / 哨兵
@@ -56,7 +58,8 @@ class Round(object):
 
     def __init__(self, task_key, index, diff_fp, pack_fp,
                  dispatched=False, reused=False, tests=None, disposition_label="",
-                 cost=None, state="idle", select_error=""):
+                 cost=None, state="idle", select_error="",
+                 stage_gate=None):
         self.task_key = task_key
         self.index = index
         self.diff_fp = diff_fp
@@ -69,6 +72,8 @@ class Round(object):
         self.state = state
         # 选测失败显式留痕（不静默吞：空串=无错，非空=真实故障信息）
         self.select_error = select_error
+        # 阶段链门控判决（Issue #150 打断补齐）：非 None 表示本轮触发前过了门控
+        self.stage_gate = stage_gate or {}
 
     def to_dict(self):
         return {
@@ -78,6 +83,7 @@ class Round(object):
             "tests": self.tests, "disposition": self.disposition,
             "cost": self.cost, "state": self.state,
             "select_error": self.select_error,
+            "stage_gate": self.stage_gate,
         }
 
 
@@ -91,12 +97,25 @@ class Scheduler(object):
                           （供本地/CI 确定性单测；真实执行由宿主显式打开）。
     """
 
-    def __init__(self, dry_run=True, root_dir=None, interval=None, bus=None):
+    def __init__(self, dry_run=True, root_dir=None, interval=None, bus=None,
+                 gate=None, stage="review"):
         self.dry_run = dry_run
+        # 本调度器驱动的是**阶段链上的哪一环**（默认评审环；测试环传 stage="testing"）
+        self.stage = stage
+        # 阶段链门控器（Issue #150 打断补齐）：开发未收口即不许抢跑测试/评审
+        self._gate = gate
+        self.gate = gate
         # _HERE = <repo>/local-agent → 仓库根 = dirname(_HERE)（修复：原先多 dirname 一次解析到 "/"）
         self.root_dir = root_dir or os.path.dirname(_HERE)
         self.interval = interval or spec.DEFAULT_INTERVAL_SECONDS
         self._bus = bus
+
+    # ---------- 阶段链门控器（懒加载；允许外部注入做隔离） ----------
+    def _gate_runner(self):
+        if self._gate is not None:
+            return self._gate
+        self._gate = _gate_mod.StageGate()
+        return self._gate
 
     # ---------- 攒批通道：入列 0 成本，到点/显式 flush 才发车 ----------
     def _bus_runner(self):
@@ -197,10 +216,20 @@ class Scheduler(object):
                     tests = []
                     select_error = "%s: %s" % (type(e).__name__, e)
 
-            # ③④ 攒批入列（0 成本）→ 本轮调度点整批发车（一次构建跑完一批）
+            # ③ 阶段链门控（Issue #150 打断补齐）：本该串行，不得并行抢跑/重复触发
+            #    上游（开发）未收口 → 驳回；本阶段已在跑 → 复用（不新起任务/不冲进度）
+            gate = self._gate_runner()
+            gv = gate.should_trigger(task_key, self.stage, force=force)
+            _gate_mod.record_gate(gv)
+            if gv["allow"] and not gv.get("forced"):
+                gate.mark_active(task_key, self.stage,
+                                 note="评审段 %s 第 %d 轮" % (task_key, i + 1))
+
+            # ④④ 攒批入列（0 成本）→ 本轮调度点整批发车（一次构建跑完一批）
+            #    门控驳回 → **不触发任何构建**（这正是"乱触发"要拦下的那部分）
             plan = None
             dispatched = False
-            if tests and not already:
+            if tests and not already and gv["allow"]:
                 bus = self._bus_runner()
                 bus.enqueue(tests, source="review_cycle",
                             note="评审段 %s 第 %d 轮" % (task_key, i + 1))
@@ -209,14 +238,28 @@ class Scheduler(object):
                 bus_state = bus.status()
 
             # ⑤ 以测试为准：整批信号决定处置（无测试/复用时引用上轮信号）
+            #    门控驳回 → 阶段未真正推进，不给 merge/proceed（不假装放行）
             test_signals = self._test_signals(plan, vol, already)
+            if not gv["allow"]:
+                disp = self._dispose_blocked(gv)
+                rnd = Round(task_key, i + 1, diff_fp, pack["stable_fp"],
+                            dispatched=False, reused=True, tests=tests,
+                            disposition_label=disp, cost=self._cost(None, pack),
+                            state="blocked", select_error=select_error,
+                            stage_gate=gv)
+                rounds.append(rnd)
+                processed.add(diff_fp)
+                rec["rounds"].append(rnd.to_dict())
+                rec["stage_gate"] = gv
+                continue
             disp = self._dispose(test_signals, vol, reused=already)
 
             # ⑥ 回评审（增量上下文）：评审只吃 pack["context"]
             rnd = Round(task_key, i + 1, diff_fp, pack["stable_fp"],
                         dispatched=dispatched, reused=already, tests=tests,
                         disposition_label=disp, cost=self._cost(plan, pack),
-                        state="reviewed", select_error=select_error)
+                        state="reviewed", select_error=select_error,
+                        stage_gate=gv)
             rounds.append(rnd)
             processed.add(diff_fp)
             rec["rounds"].append(rnd.to_dict())
@@ -252,6 +295,22 @@ class Scheduler(object):
                 "pass": s.get("pass"),
                 "note": "整批一次构建跑完：%s 项，fail=%s" % (s.get("total"), fail)}
 
+    # ---------- 内部：被阶段门驳回了该给什么处置标签 ----------
+    def _dispose_blocked(self, verdict):
+        """门控驳回 ≠ 质量结论：不得给 merge/proceed（那是"放行"语义，会假绿）。
+
+        驳回说明链条要按序推进 → 统一映射到规范处置标签：
+          · blocked_upstream / blocked_switched（抢跑/乱序）→ `proceed`
+            （含义：先继续推进上游/按序推进，不是终局，别卡死链条）；
+          · blocked_active（重复触发）→ `proceed`（复用进行中的任务，不再起新任务）。
+        复用同一 `collab.disposition` 分类器，不自取名。
+        """
+        if disposition is None:
+            return "proceed"
+        problem = "阶段链门控驳回(%s)" % verdict.get("decision", "")
+        return disposition.dispose(problem=problem, severity="🟡").get(
+            "disposition", "proceed")
+
     # ---------- 内部：处置（复用统一审查处置标签，不各自取名） ----------
     def _dispose(self, signals, vol, reused):
         if disposition is None:
@@ -285,6 +344,8 @@ class Scheduler(object):
         total_rounds = dispatched = reused = 0
         saved_tokens = 0
         batches = 0
+        blocked = 0
+        gates = {k: 0 for k in stage_spec.GATE_DECISIONS}
         for rec in cycles.values():
             for r in rec.get("rounds", []):
                 total_rounds += 1
@@ -293,6 +354,12 @@ class Scheduler(object):
                     batches += r.get("cost", {}).get("batches", 0)
                 if r.get("reused"):
                     reused += 1
+                if r.get("state") == "blocked":
+                    blocked += 1
+                g = r.get("stage_gate") or {}
+                d = g.get("decision")
+                if d in gates:
+                    gates[d] += 1
                 saved_tokens += r.get("cost", {}).get("context_saved_tokens", 0)
         avoided = reused  # 被复用拦下的构建次数 = 省下的构建
         return {
@@ -305,7 +372,14 @@ class Scheduler(object):
             "reused_rounds": reused,
             "avoided_builds": avoided,
             "context_saved_tokens": saved_tokens,
-            "note": "攒批把 N 次构建收敛为每轮 1 批；复用把同指纹轮次构建收敛为 0",
+            # ---- 阶段链门控（Issue #150 打断补齐）：拦下多少"乱触发"（重复/抢跑/乱序）----
+            "stage_gates": gates,
+            "blocked_rounds": blocked,
+            "blocked_retriggers": (gates.get("blocked_active", 0)
+                                  + gates.get("blocked_upstream", 0)
+                                  + gates.get("blocked_switched", 0)),
+            "note": ("攒批把 N 次构建收敛为每轮 1 批；复用把同指纹轮次构建收敛为 0；"
+                     "阶段门把「本该串行却并行/重复触发」拦下（blocked_retriggers）"),
         }
 
     def overview(self):
@@ -321,6 +395,9 @@ class Scheduler(object):
                                       if r.get("dispatched")),
                     "reused": sum(1 for r in v.get("rounds", [])
                                   if r.get("reused")),
+                    "blocked": sum(1 for r in v.get("rounds", [])
+                                   if r.get("state") == "blocked"),
+                    "active_stage": (v.get("stage_gate") or {}).get("stage", ""),
                     "updated_at": v.get("updated_at")}
                 for k, v in cycles.items()
             },

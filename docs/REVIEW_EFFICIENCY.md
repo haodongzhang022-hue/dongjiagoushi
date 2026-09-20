@@ -15,8 +15,10 @@
 | **复述损耗** | 每轮评审把整个大项目的 spec/上下文重讲一遍 | 稳定骨架每轮重算，无冻结复用 |
 | **构建损耗** | 每轮评审 → 跑开发 → 评审，各自拉起一次冷启动构建 | 同步乒乓，N 轮 = N 次构建冷启动；N 个测试各自单发 = N 次冷启动 |
 | **重复损耗** | 同一份变更被多轮/多次重跑同样的测试与评审 | 无内容指纹判据，靠"人记得" |
+| **乱序损耗**（打断补齐） | 开发还在跑，测试/评审就并发触发；同一阶段被重复触发 | **跨角色阶段链无门控**，触发不校验上游是否收口 |
 
-三种损耗都是**乘性放大**：项目越大、轮次越多、测试越多，浪费越大。
+四种损耗都是**乘性放大**：项目越大、轮次越多、测试越多，浪费越大。
+「乱序损耗」还会**稀释进度基准**（同一件事多点并行 = 进度失衡），故单列一条规则处理（见 §二.④）。
 
 ## 二、三条优化（一一对应）
 
@@ -61,6 +63,36 @@
   N 个测试从 N 次冷启动收敛为 1 次（`summary.cold_start_saved = N-1`）；
 - **攒批去重门（新增·本 Issue）**：`enqueue(tests, diff_fp=...)` 带变更指纹，
   **同一指纹已发过车 → 直接拦截**（`skipped_fp`），不再重复处 → 同 diff 永不重复触发构建。
+
+### ④ 阶段链门控 · 本该串行不得并行/重复触发（`review_cycle.gate` · 打断补齐）
+
+> **用户痛点（Issue #150 追加）**：
+> 「我们还在处理开发的时候，他就又在跑测试了，然后之后又触发了评审，但是这场开发还没完成，
+> 也就是说中间本该以链条进行，往后运行的他一次触发了。开发和测试就乱了。
+> 导致重复触发也会导致进度失衡。」
+
+把「开发 → 测试 → 评审」从"一次触发就多点并发"改回**链式有序推进**。唯一事实源
+`review_cycle/stage_spec.py`（`STAGE_ORDER` / `UPSTREAM` / `GATE_DECISIONS`），
+引擎 `review_cycle/gate.py` 做**确定性判定**（不让 LLM 决定"现在该谁跑"）：
+
+| 判决 | 含义 | 动作 |
+|---|---|---|
+| `allow` | 上游已收口 + 本阶段未在跑 | 链式往后推进（才允许起构建） |
+| `blocked_active` | **本阶段已在跑**（重复触发） | **复用进行中的任务**，不新起、不冲进度 |
+| `blocked_upstream` | **上游未收口**就发起本阶段（抢跑） | 拒绝，**零构建**，先让上游按链收口 |
+| `blocked_switched` | 下游已跑过再回头补上游（乱序） | 拒绝，防止一条链被并行拆成两条 |
+
+**为什么能"拦下且不假绿"**：
+- 驳回 = **零构建**（`dispatched=False`），这正是"乱触发"里最贵的那部分；
+- 驳回**不得给 `merge`/`proceed`** 之外假绿放行语义的标签——`_dispose_blocked` 统一映射到
+  规范处置 `proceed`（含义："按序继续推进"，不是终局，不卡死链条）；
+- `force=True` 是**显式逃生门**（"我知道在抢跑/复用"），判决留痕 `forced=True`，不静默绕过；
+- 阶段活动登记表带**静默接管**（`DEFAULT_QUIET_SECONDS=1800`，可用 `REVIEW_STAGE_QUIET_SECONDS`
+  覆盖）——某阶段打标残留不会被永久当作"在跑"卡死整条链。
+
+**留痕与俯瞰**：每次判决写 `archives(kind='stage_gate')`；`gate_stats()` 统计放行/三类驳回次数；
+`stats().blocked_retriggers` = 被拦下的乱触发总数（进度不失衡的可核验口径）。
+俯瞰：`python local-agent/run.py --review-cycle gate` / `--dashboard review_cycle`。
 
 ### ③ 评审段调度器 · 增量收集而非乒乓（`review_cycle`）
 
@@ -108,10 +140,12 @@ r = get_role("架构·评审")
 pack = r.build_review_context(stable_parts={...}, volatile_parts={...}, prev=prev_pack)
 print(pack["context"], pack["saved_ratio"])       # 评审只吃 context
 
-# ② 攒批跑测试（入列 0 成本 → 一次发车整批；同指纹不重复触发）
+# ② 攒批跑测试（入列 0 成本 → 一次发车整批；同指纹不重复触发；阶段门驳回=零构建）
 batch = r.prepare_review_batch("任务A", changed_files=[...],
                                extra_tests=[...], diff_summary="本轮 diff")
-# batch {ok, skipped, diff_fp, selected, plan{summary{cold_start_saved}}, cost_note}
+# batch {ok, skipped, diff_fp, selected, plan{summary{cold_start_saved}}, cost_note, gate}
+# gate.decision ∈ allow / blocked_active / blocked_upstream / blocked_switched
+#   驳回时 batch["skipped"]=True 且 plan=None（不起任何构建）
 
 # ③ 主流程一次搞定（两者结果回写在返回值里，可核验）
 rep = r.do_review("任务A", source="PR #xx", spec_ref="Issue #xx",
@@ -153,6 +187,9 @@ python local-agent/run.py --dashboard review_cycle
 | `batched_runs` | 真发车的批次数（每批 1 次构建） | `review_cycle.stats()` |
 | `avoided_builds` | 被指纹复用拦下的构建次数（=省下的构建） | `review_cycle.stats()` |
 | `reused_rounds` | 同指纹零构建的轮次数 | `review_cycle.stats()` |
+| `blocked_rounds` | 被阶段门拦下的轮次数（抢跑/重复/乱序） | `review_cycle.stats()` |
+| `blocked_retriggers` | 被拦下的"本该串行却并行/重复触发"总次数 | `review_cycle.stats()` |
+| `stage_gates` | 放行 / 三类驳回各多少次（确定性判决分布） | `review_cycle.gate_stats()` |
 
 报表可俯瞰：`run.py --review-cycle stats`、`dashboard review_cycle`。
 
@@ -166,10 +203,12 @@ python local-agent/run.py --dashboard review_cycle
 | `review-context caching`（LLM 前缀缓存） | LLM 层治 token 前缀；本模块治"评审**上下文文本**逐轮复述"，作用在编排/角色层 |
 | `review-metrics`（有效性度量） | 度量治"评审有没有效"，本模块治"评审**有多贵**"，正交 |
 | `reviewer.do_review`（双轴+处置） | 本模块是 `do_review` 的**效率前置**（先攒批、先增量上下文，再双轴评审），不改双轴/处置契约 |
+| `dev_team`（开发小组闭环） | DevTeam 管**小组内**开发执行-验证闭环；阶段门管**跨角色**链条先后（开发→测试→评审），互补不重叠 |
+| `relay`/`relay_card`（接力卡） | 接力卡管"谁接谁的活"；阶段门管"此刻该谁跑"，两者正交 |
 
 ## 六、测试护栏
 
-`local-agent/tests/test_review_efficiency.sh`（7 组信号灯，红灯即阻塞）：
+`local-agent/tests/test_review_efficiency.sh`（9 组信号灯，红灯即阻塞）：
 
 1. 稳定骨架构建 → 复用 → 变更即失效（指纹判据）+ **变更段重建/未变更段复用/context 随骨架更新**；
 2. 攒批去重门：整批一次构建 + 同指纹再入列被拦截；
@@ -177,7 +216,10 @@ python local-agent/run.py --dashboard review_cycle
 4. 评审段调度：`root_dir` 指向仓库根 + **真实变更下真发车**（`dispatched=True`）+ 同指纹轮次复用；
 5. 批量节省口径：10 轮 × 5 测试的构建次数显著下降，且**确认真发过车**（`dispatched_builds>0`）；
 6. 增量上下文 token 量化 + 留痕可回溯；
-7. 评审段大盘 + 控制页 `/review-cycle` 路由可读。
+7. 评审段大盘 + 控制页 `/review-cycle` 路由可读；
+8. **阶段链门控**：抢跑/重复/乱序全拦、链式推进放行、`force` 逃生门留痕（唯一事实源断言）；
+9. **拦截可核验**：被驳回**零构建**（`dispatched=False`）、不得假绿放行、大盘 `blocked_rounds`/
+   `blocked_retriggers` 计数。
 
 **测试隔离（可重复跑）**：测试通过 `BUS_QUEUE_FILE` / `QUOTA_LEDGER_FILE` 环境变量把攒批队列与
 配额账本落到临时目录，不污染工作区共享状态（否则第二次跑会因去重门残留而假失败）。

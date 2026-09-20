@@ -422,11 +422,21 @@
   **与「双轴必走 + 统一处置标签」契约并存不改**，与 `review-metrics` 正交（一个量成本、一个量有效性）。
 - **⑤ 以测试为准 + 逃生门**：整批信号灯（🟢/🔴）决定处置标签（走 `collab.disposition`，不各自取名）；
   需要即时结论时用 `force=True` / `flush=True` 显式发车绕过攒批，**不静默降质量**。
+- **⑥ 阶段链门控·本该串行不得并行/重复触发（stage-gate · Issue #150 打断补齐）**：
+  开发还在跑，测试/评审就并发触发、同一阶段被重复触发，会把链条搞乱、**稀释进度基准致失衡**。
+  约束：跨角色阶段链（`development→testing→review`）走 `review_cycle/gate.py` 确定性门控——
+  **上游未收口不许抢跑**（`blocked_upstream`）、**本阶段已在跑 = 重复触发 → 复用进行中任务
+  不新起不冲进度**（`blocked_active`）、**从下游起头致乱序 → 拒绝**（`blocked_switched`）；
+  被驳回 = **零构建**且**不得给假绿放行标签**（统一映射规范处置 `proceed`）；`force=True`
+  是显式逃生门（留痕 `forced=True`，不静默绕过）；阶段活动登记带静默接管（默认 1800s，
+  `REVIEW_STAGE_QUIET_SECONDS` 可覆盖）防残留卡死链条；判决写 `archives(kind='stage_gate')`，
+  `blocked_retriggers` 是"进度是否失衡"的可核验口径（`--review-cycle gate` / 控制页可俯瞰）。
 
 > 触发：显式 `[触发:架构·评审]` / 语义命中「评审复述/增量上下文/攒批/减CPU损耗/构建损耗/
-> 同指纹不重复/评审段」/ rules 固定。规则层已落地 `review_context/` + `review_cycle/` +
-> `hybrid/bus` 攒批去重门 + `roles/reviewer.py` 主流程接线 + `tests/test_review_efficiency.sh`
-> （7 组信号灯），红灯可查到底接没接上。
+> 同指纹不重复/评审段」/ 或语义命中「开发还没完就跑测试评审/链条乱了/抢跑/重复触发/乱序/
+> 进度失衡/本该串行」/ rules 固定。规则层已落地 `review_context/` + `review_cycle/`（含
+> `gate.py` 阶段链门控 v0.3.0）+ `hybrid/bus` 攒批去重门 + `roles/reviewer.py` 主流程接线 +
+> `tests/test_review_efficiency.sh`（9 组信号灯），红灯可查到底接没接上。
 
 ### 有效性度量模型（Review Metrics · 固定规则 · Issue #100 决策⑤）
 

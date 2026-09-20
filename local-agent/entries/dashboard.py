@@ -159,11 +159,29 @@ def _review_cycle_view():
     """评审段大盘（Issue #150）：攒批把 N 次构建收敛为每轮 1 批、同指纹轮次零构建。"""
     try:
         from review_cycle import Scheduler
+        from review_cycle.gate import StageGate
         sch = Scheduler(dry_run=True)
         ov = sch.overview()
-        return {"ok": True, "stats": ov.get("stats", {}), "cycles": ov.get("cycles", {})}
+        # 阶段链门控大盘（Issue #150 打断补齐）：拦下多少"本该串行却并行/重复触发"
+        gate = StageGate()
+        return {"ok": True, "stats": ov.get("stats", {}),
+                "cycles": ov.get("cycles", {}),
+                "stage_gate": gate.overview(),
+                "segment_state": _segment_state(ov)}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "stats": {}, "cycles": {}}
+
+
+def _segment_state(ov):
+    """评审段当前档（真发车/复用/被阶段门拦下），供控制页一眼看"链条是否失衡"。"""
+    st = (ov or {}).get("stats", {}) or {}
+    return {
+        "active": bool((ov or {}).get("cycles")),
+        "batched_runs": st.get("batched_runs", 0),
+        "reused_rounds": st.get("reused_rounds", 0),
+        "blocked_rounds": st.get("blocked_rounds", 0),
+        "blocked_retriggers": st.get("blocked_retriggers", 0),
+    }
 
 
 def _status_light(ok):
