@@ -151,6 +151,11 @@ declare -a MODULE_MAP=(
 
   # ---- 任务转交闭环 ----
   "local-agent/roles/|local-agent/tests/test_review_tester_handoff.sh,local-agent/tests/test_dual_axis_review.sh"
+  # ---- 评审效率（评审增量上下文/攒批，Issue #150）----
+  "local-agent/review_context/|local-agent/tests/test_review_efficiency.sh"
+  "local-agent/review_cycle/|local-agent/tests/test_review_efficiency.sh"
+  "local-agent/roles/reviewer.py|local-agent/tests/test_review_efficiency.sh,local-agent/tests/test_dual_axis_review.sh"
+  "local-agent/hybrid/bus.py|local-agent/tests/test_review_efficiency.sh,local-agent/tests/test_hybrid_bus.sh"
 
   # ---- 全局 gid/ops ----
   "local-agent/gid.py|local-agent/tests/test_ops_sim.sh"

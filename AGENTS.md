@@ -401,6 +401,43 @@
 > rules 固定。规则层已落地 `reviewer.py`（`do_review` 主流程 + `dual_axis_review` 双轴完整核验）
 > + `tests/test_doc_consistency.sh` 运行时核验缺轴判不完整禁止放行，红灯可查到底有没有走双轴。
 
+### 评审效率·减 CPU 损耗（Review Efficiency · 固定规则 · Issue #150）
+
+项目一大，评审"每次复述整个大项目非常困难、跑测试也非常困难"，而"每次触发评审→跑开发→
+再评审"的**同步乒乓**会把**构建冷启动**与**上下文复述**乘性放大。本规则为仓库级固定 rules，
+对「架构·评审」及所有走评审/测试循环的 agent 生效（详见 `docs/REVIEW_EFFICIENCY.md`）：
+
+- **① 增量上下文·不复述整个项目（review-context）**：评审先 `build_review_context()` 拿
+  **冻结骨架摘要 + 本轮变化**，只吃 `context` 字段；稳定骨架（目标/边界/验收/契约/决策）
+  构建一次即冻结；**内容指纹**是"骨架何时失效"的唯一判据（不靠主观判断），指纹一致即零成本复用；
+  变化轮 `reuse.reusable=True` 且不重建骨架。
+- **② 攒批触发·不逐轮拉构建（review-cycle + hybrid.bus）**：测试一律先 `prepare_review_batch()`
+  **入列（0 成本）**，再一次**发车整批在同一构建内跑完**——N 个测试从 N 次冷启动收敛为 1 次；
+  **同一变更指纹已发过车 → 直接拦截**（`skipped_fp`），同 diff 永不重复触发开发/构建。
+- **③ 评审段确定性调度**：评审段 = `collect→coalesce→dispatch→review` 的确定性状态机 +
+  触发门控（`diff_changed`/`batch_ready`/`fingerprint_new`），**不让 LLM 决定下一步/是否结束**；
+  同指纹轮次判 `reused`，本轮零构建，只引用上轮信号。
+- **④ 主流程内接线（不是"就绪可调"）**：`ReviewerRole.do_review` 前置接线（传 `stable_parts/
+  volatile_parts/changed_files/extra_tests` 即生效），结果回写 `context_pack`/`batch` 字段可核验；
+  **与「双轴必走 + 统一处置标签」契约并存不改**，与 `review-metrics` 正交（一个量成本、一个量有效性）。
+- **⑤ 以测试为准 + 逃生门**：整批信号灯（🟢/🔴）决定处置标签（走 `collab.disposition`，不各自取名）；
+  需要即时结论时用 `force=True` / `flush=True` 显式发车绕过攒批，**不静默降质量**。
+- **⑥ 阶段链门控·本该串行不得并行/重复触发（stage-gate · Issue #150 打断补齐）**：
+  开发还在跑，测试/评审就并发触发、同一阶段被重复触发，会把链条搞乱、**稀释进度基准致失衡**。
+  约束：跨角色阶段链（`development→testing→review`）走 `review_cycle/gate.py` 确定性门控——
+  **上游未收口不许抢跑**（`blocked_upstream`）、**本阶段已在跑 = 重复触发 → 复用进行中任务
+  不新起不冲进度**（`blocked_active`）、**从下游起头致乱序 → 拒绝**（`blocked_switched`）；
+  被驳回 = **零构建**且**不得给假绿放行标签**（统一映射规范处置 `proceed`）；`force=True`
+  是显式逃生门（留痕 `forced=True`，不静默绕过）；阶段活动登记带静默接管（默认 1800s，
+  `REVIEW_STAGE_QUIET_SECONDS` 可覆盖）防残留卡死链条；判决写 `archives(kind='stage_gate')`，
+  `blocked_retriggers` 是"进度是否失衡"的可核验口径（`--review-cycle gate` / 控制页可俯瞰）。
+
+> 触发：显式 `[触发:架构·评审]` / 语义命中「评审复述/增量上下文/攒批/减CPU损耗/构建损耗/
+> 同指纹不重复/评审段」/ 或语义命中「开发还没完就跑测试评审/链条乱了/抢跑/重复触发/乱序/
+> 进度失衡/本该串行」/ rules 固定。规则层已落地 `review_context/` + `review_cycle/`（含
+> `gate.py` 阶段链门控 v0.3.0）+ `hybrid/bus` 攒批去重门 + `roles/reviewer.py` 主流程接线 +
+> `tests/test_review_efficiency.sh`（9 组信号灯），红灯可查到底接没接上。
+
 ### 有效性度量模型（Review Metrics · 固定规则 · Issue #100 决策⑤）
 
 评审/交付"是否有效解决问题"不能靠"笼统解决率 / 主观看法"，必须用**可量化、分档、
@@ -619,6 +656,12 @@ local-agent/dev-standard/              # 开发规范体系（StandardAbility �
   ├── cli.py                          # CLI 接口（MCP 管线）
   ├── rules.md                        # AGENTS.md 引用的规范规则
   └── README.md                       # 模块使用说明
+local-agent/review_context/           # 评审增量上下文（冻结骨架+本轮变化 · Issue #150）
+  ├── spec.py                         # 稳定/变化分段规范（唯一事实源）
+  └── engine.py                       # 构建/指纹/复用判定（确定性）
+local-agent/review_cycle/             # 评审段调度器（攒批+复用+减CPU损耗 · Issue #150）
+  ├── spec.py                         # 状态机/节点/触发门控（唯一事实源）
+  └── cycle.py                        # 确定性调度引擎（Scheduler）
 local-agent/handle/                   # 自适应 @ 定位能力包（HandleAbility 全员能力）
   ├── resolver.py                     # 核心解析器：触发串/探测/跨同仓判定/权限建议
   ├── ability.py                      # HandleAbility 能力类（self_handle/resolve/is_cross）

@@ -615,12 +615,13 @@
     "local-agent/tests/test_hybrid_optimizer.sh": {
       "name": "test_hybrid_optimizer",
       "covers": [
-        "local-agent/hybrid/cache.py",
-        "local-agent/hybrid/parallel.py",
-        "local-agent/hybrid/policy.py",
-        "local-agent/hybrid/cost.py",
+        "local-agent/data/repository.py",
         "local-agent/data/schema.py",
-        "local-agent/data/repository.py"
+        "local-agent/hybrid/bus.py",
+        "local-agent/hybrid/cache.py",
+        "local-agent/hybrid/cost.py",
+        "local-agent/hybrid/parallel.py",
+        "local-agent/hybrid/policy.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.0,
@@ -668,6 +669,24 @@
       ],
       "cpu_cost_est": 2.0,
       "time_est": 5.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_review_efficiency.sh": {
+      "name": "test_review_efficiency",
+      "covers": [
+        "local-agent/review_context/engine.py",
+        "local-agent/review_context/spec.py",
+        "local-agent/review_cycle/cycle.py",
+        "local-agent/review_cycle/spec.py",
+        "local-agent/hybrid/bus.py",
+        "local-agent/roles/reviewer.py",
+        "local-agent/entries/dashboard.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_dual_axis_review.sh"
+      ],
+      "cpu_cost_est": 1.8,
+      "time_est": 6.0,
       "kind": "cpu-dense"
     }
   }
