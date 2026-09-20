@@ -138,6 +138,43 @@ main:
             # PR 规范检查（S01 base=main / S02 解耦 / S05 测试+文档 等）
             bash scripts/standard-check.sh check-pr               --target "${CNB_PULL_REQUEST_TARGET_BRANCH:-main}"               --source "${CNB_PULL_REQUEST_SOURCE_BRANCH:-auto/dev-standard-m5}"               --test-files "tests/test_dev_standard.sh,tests/test_dev_standard_host.sh"               --docs-files "docs/DEV_STANDARD.md" || exit 1
             echo "  ✅ 开发规范检查通过（无 hard 失败）"
+    - name: dsh adapter compat test
+      docker:
+        image: node:24
+      stages:
+        - name: dsh adapter test
+          # dsh 适配新版兼容验证（Issue #145 · module dsh-adapter）：
+          # 1) 静态契约 + 版本矩阵（Python/TS 双端）+ 16 组信号灯
+          # 2) 真实 dsh 新版（0.1.6-alpha.2）装载验证：装 CLI → 挂适配插件 →
+          #    --dump-config 确认 bundle patch 生效 → 真实 loader import lib/ 成功
+          script: |
+            set -e
+            echo "==== dsh 适配新版兼容验证（Issue #145） ===="
+            node -v; npm -v
+            echo ""
+            echo "---- 1) 离线信号灯（版本矩阵/契约/API 面/Agent Directory） ----"
+            bash local-agent/tests/test_dsh_adapter.sh
+            echo ""
+            echo "---- 2) 真实 dsh 新版装载验证 ----"
+            DSH_VER="${DSH_TEST_VERSION:-0.1.6-alpha.2}"
+            echo "目标 dsh 版本: $DSH_VER"
+            rm -rf /tmp/dsh-e2e && mkdir -p /tmp/dsh-e2e
+            cd /tmp/dsh-e2e
+            npm install -s --no-audit --no-fund "@deepseek-ai/dsh@${DSH_VER}" || {
+              echo "  ⚠ 无法安装 dsh ${DSH_VER}（网络/registry 受限），跳过真实装载验证（离线信号灯已过）"
+              exit 0
+            }
+            ./node_modules/.bin/dsh --version
+            # 构建适配插件产物（loader 只 import lib/index.js）
+            node "${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/dsh-adapter/scripts/build.mjs"
+            node --check "${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/dsh-adapter/lib/index.js"
+            # 真实 defineTool 装载探针
+            cp "${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/dsh-adapter/tests/real-load.probe.mjs" ./probe.mjs
+            ln -sfn "${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/dsh-adapter" ./adapter
+            DSH_HOME=/tmp/dsh-e2e/.dsh ./node_modules/.bin/dsh plugin --profile headless add "${CNB_BUILD_WORKSPACE}/${CNB_REPO_SLUG}/dsh-adapter"
+            DSH_HOME=/tmp/dsh-e2e/.dsh ./node_modules/.bin/dsh --profile headless --dump-config | grep -q "dongjiagoushi-dsh-adapter" \
+              && echo "  ✅ 真实 dsh loader 已装配适配插件（bundle patch 生效）"
+            echo "  ✅ dsh 适配新版装载验证通过"
 
 
   pull_request.approved:

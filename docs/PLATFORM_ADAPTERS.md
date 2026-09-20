@@ -122,6 +122,15 @@ LLM 强相关 + 评审；本地测试先行让长时云端开发（跨对话/跨
 
 ### 4.2 deepseek harness
 - **定位**：把 `local-agent/` 直接当作 harness 的一个「agent 团队」。
+
+> **新版适配（Issue #145 · 2026-09）**：DSH 已转向 **all-plugin Cordis**（profile + 组合包 +
+> patch + `defineTool`），npm 最新为 **`0.1.6-alpha.2`**（`latest` 仍 `0.1.5-rc.2`）。旧适配插件
+> （`@dsh-dongjiagoushi/adapter`，Python SDK 主推期形态）**装不上新版**——本轮重做为**独立模块
+> `dsh-adapter/`**：`package.json` 声明 `dsh.bundle.patch`（新版组合包契约）+ `cordis.patch.yml`
+> bundle patch + `src/index.ts`（Cordis `apply(ctx)` + `defineTool` 注册 7 工具）+ **版本闸门**
+> （加载即 `checkVersion()`，缺 API 面显式失败，不静默）。适配目标 `0.1.6-alpha.2`，兼容
+> `>= 0.1.5-rc.1`。**只 import 构建产物 `lib/index.js`**（实测 loader 硬约束），附零依赖构建脚本。
+> CNB DSH 生态（`cnpc/dsh` 等）上做真实装载验证。详见 `docs/DSH_ADAPTER.md` + ADR-0009。
 - **接入方式**：
   ```bash
   # 在 harness 中调用本地团队流水线（含 DAG + 分形 + 秘书入口）
@@ -176,3 +185,5 @@ scale_swarm(tasks, n)    # 分形扩展到 n 个小组
 | 角色库 | `local-agent/roles/*.py` |
 | 接力卡 | `local-agent/relay.py` |
 | 三入口适配层（web/cnb/local） | `local-agent/entries/` |
+| dsh 适配插件（新版 0.1.6） | `dsh-adapter/` + `docs/DSH_ADAPTER.md` |
+| dsh 版本矩阵（TS/Python 双端） | `dsh-adapter/src/compat.ts` + `local-agent/dsh_adapter/compat.py` |
