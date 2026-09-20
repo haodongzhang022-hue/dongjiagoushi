@@ -26,6 +26,7 @@
 | `human` | 适合移交人类判断 | human | human_gate | 需担责/必要成本决策，结果前置叫人类拍板 |
 | `consult` | 适合专家会诊 | consult | expert_consult | 疑难/对错难辨/多项方案都解决不掉，走专家会诊 |
 | `vote` | 适合投票 | vote | consensus_vote | 意见多重、需集体决策/共识表决 |
+| `blocked` | 链式未推进·待上游收口 | block | resume_chain | 阶段链门控驳回（抢跑/重复/乱序），等上游按链收口后再推进（**非放行**，不转交测试） |
 
 > 规范集合定义在 `local-agent/collab/disposition.py` 的 `DISPOSITION_LABELS` /
 > `DISPOSITION_ORDER`，是唯一来源；本表由引擎 spec 校验保持一致。
@@ -36,7 +37,7 @@
 
 任何**审查结论 / 决策点**都必须输出一个规范处置标签：
 
-- **「架构·评审」输出契约强制绑定**：评审结论必须带 `disposition` 字段（七选一），
+- **「架构·评审」输出契约强制绑定**：评审结论必须带 `disposition` 字段（八选一），
   **缺标签即评审未完成**，不视为有效评审；
 - `dispose()` 是**确定性分类器**：给定严重级 + 触发信号 + 场景，**必然返回**一个
   规范标签——即使无任何输入也落到 `proceed` 兜底，保证"恒有标签、稳定触发"；

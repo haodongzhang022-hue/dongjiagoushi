@@ -108,6 +108,47 @@ class BaseRole:
             self.secretary_scale_ability = None
 
     # ------------------------------------------------------------
+    # 阶段链门控生产接线（全员通用 · Issue #150 复评 N2）
+    # ------------------------------------------------------------
+    # 为什么放在基类：阶段收口必须有**生产调用点**。此前 `mark_done` 只存在于
+    # demo 与测试脚本 → 门控把"评审段攒批"整条主路径打死（N2）。挂到全员基类后，
+    # 开发交付 / 评审放行 / 测试收口 / 编排节点完成处都能一行接线，链条才真按序推进。
+    def stage_gate(self, gate=None):
+        """取阶段链门控器（可注入隔离实例，默认共享工作区状态）。"""
+        if gate is not None:
+            return gate
+        from review_cycle.gate import StageGate
+        return StageGate()
+
+    def mark_stage_active(self, task_key, note="", gate=None):
+        """按**自身角色名**登记阶段开工（生产路径一行接线，不各自取名）。"""
+        g = self.stage_gate(gate)
+        return g.mark_role_active(task_key, self.name, note=note)
+
+    def mark_stage_done(self, task_key, gate=None):
+        """按**自身角色名**登记阶段**收口（真做完）**（生产路径一行接线）。
+
+        角色名 → 阶段映射走唯一事实源 `review_cycle.stage_spec.ROLE_STAGE`；
+        未注册角色返回 ok=False（不静默当成收口）。
+        """
+        g = self.stage_gate(gate)
+        return g.mark_role_done(task_key, self.name)
+
+    def mark_role_release(self, task_key, role=None, reason="", gate=None):
+        """按**角色名**释放阶段（阶段结束但**未通过**：驳回/阻塞）——不计完成。
+
+        与 `mark_stage_done` 的区别：`release` 只解除"在跑"，**不计入 `completed`**，
+        因此下游**不会**被放行（评审驳回后测试仍被拦，链条不假推进）。
+        """
+        g = self.stage_gate(gate)
+        return g.mark_role_release(task_key, role or self.name, reason=reason)
+
+    def stage_of(self):
+        """本角色所属阶段（未注册 → None）。"""
+        from review_cycle import stage_spec as _ss
+        return _ss.ROLE_STAGE.get(self.name)
+
+    # ------------------------------------------------------------
     # 七层协作深度能力透传（全员通用 · Issue #47）
     # ------------------------------------------------------------
     def express(self, task_key, to_agent, message, from_agent=None):

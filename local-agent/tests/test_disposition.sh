@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 统一审查处置标签（Review Disposition）功能测试
 # 验证 Issue #31 本轮需求——审查机制"统一全加规范处置标签 + 稳定触发 + 按标签自动化流程"：
-#   ① 规范标签全集齐全（merge/proceed/fix_bug/research/human/consult/vote 七种）
+#   ① 规范标签全集齐全（merge/proceed/fix_bug/research/human/consult/vote/blocked 八种）
 #   ② 稳定触发：任何审查/决策点必然返回规范标签（含无输入兜底）
 #   ③ 归一化映射：严重级/触发信号/既有action 统一映射到规范标签
 #   ④ 非规范标签严格拒绝（require_label）
@@ -15,14 +15,14 @@ PY=python3
 
 export DB_PATH="$(mktemp -d)/test_disposition.db"
 
-echo "===== [disposition] 1. 规范标签全集齐全（统一全加七种） ====="
+echo "===== [disposition] 1. 规范标签全集齐全（统一全加八种） ====="
 $PY - <<'EOF'
 from collab import disposition
 labels = disposition.valid_labels()
 # 用户要求覆盖的处置情况全部在列
-need = {"merge","proceed","fix_bug","research","human","consult","vote"}
+need = {"merge","proceed","fix_bug","research","human","consult","vote","blocked"}
 assert need <= set(labels), (need, labels)
-assert len(labels) == 7, labels
+assert len(labels) == 8, labels
 # spec 机器可读规范：名称/action/route 与标签对齐
 spec = disposition.spec()
 assert spec["labels"] == labels
@@ -42,7 +42,7 @@ from collab import disposition
 r0 = disposition.dispose()
 assert r0["disposition"] == "proceed"
 assert r0["disposition"] in disposition.valid_labels()
-# 七种显式标签都能 dispose 且返回该标签
+# 八种显式标签都能 dispose 且返回该标签
 for lbl in disposition.valid_labels():
     r = disposition.dispose(problem="测试", label=lbl)
     assert r["disposition"] == lbl

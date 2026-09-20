@@ -87,3 +87,24 @@ class TesterRole(BaseRole):
             "next_step": ("继续执行测试矩阵 → 给信号灯(🟢/🟡/🔴) → "
                           "🟢放行合并/🔴[回转]退回:架构·开发（带完整 @ 唤醒），推进到结果"),
         }
+
+    # ------------------------------------------------------------
+    # 阶段链收口（Issue #150 复评 N2 残留）：测试给信号灯 = 链条最后一环收口
+    # ------------------------------------------------------------
+    def finish_testing(self, task_key, signal="🟢", note="", issue_ref=""):
+        """测试收口：🟢 通过 → 登记 `testing` 完成（链条走完）；🔴 阻塞 → 只释放不计完成。
+
+        与「以测试为准」一致：只有 🟢 才算收口；🔴 时**不计完成**，下游不会被放行。
+        """
+        if signal == "🟢":
+            closure = self.mark_stage_done(task_key)
+            if isinstance(closure, dict):
+                closure["note"] = note or "测试 🟢 通过 → 链条收口"
+            closed = True
+        else:
+            closure = self.mark_role_release(
+                task_key, self.name,
+                reason=note or ("测试 %s 未通过 → 只释放，不计完成" % signal))
+            closed = False
+        return {"task_key": task_key, "signal": signal, "closed": closed,
+                "stage_closure": closure, "issue_ref": issue_ref}

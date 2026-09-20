@@ -414,29 +414,46 @@
 - **② 攒批触发·不逐轮拉构建（review-cycle + hybrid.bus）**：测试一律先 `prepare_review_batch()`
   **入列（0 成本）**，再一次**发车整批在同一构建内跑完**——N 个测试从 N 次冷启动收敛为 1 次；
   **同一变更指纹已发过车 → 直接拦截**（`skipped_fp`），同 diff 永不重复触发开发/构建。
+  **去重键控三条硬约束（缺一即 false green，返工 S1/S2/S3 加固）**：① 键 = 真实变更内容指纹
+  **+ `task_key`/批次键**，`diff_summary` 缺省**视为"无指纹"不占门**（绝不退化为空串常量哈希）；
+  ② **演练（dry-run）发车不写穿**持久化去重门；③ `dispatch` **只记本批实际携带**的指纹、
+  **空队列不写门**（旧 `set_pending_fp` 单标量预登记已移除）。
 - **③ 评审段确定性调度**：评审段 = `collect→coalesce→dispatch→review` 的确定性状态机 +
   触发门控（`diff_changed`/`batch_ready`/`fingerprint_new`），**不让 LLM 决定下一步/是否结束**；
-  同指纹轮次判 `reused`，本轮零构建，只引用上轮信号。
+  同指纹轮次判 `reused`，本轮零构建，只引用上轮信号。状态机由 `cycle.advance_state()` **真读取**
+  `spec.STATES/STATE_TRANSITIONS/TRIGGERS` 驱动（非法迁移显式抛错），落轮次 `state`/`trigger` 可核验。
 - **④ 主流程内接线（不是"就绪可调"）**：`ReviewerRole.do_review` 前置接线（传 `stable_parts/
   volatile_parts/changed_files/extra_tests` 即生效），结果回写 `context_pack`/`batch` 字段可核验；
   **与「双轴必走 + 统一处置标签」契约并存不改**，与 `review-metrics` 正交（一个量成本、一个量有效性）。
 - **⑤ 以测试为准 + 逃生门**：整批信号灯（🟢/🔴）决定处置标签（走 `collab.disposition`，不各自取名）；
+  **变更选测失败（`select_error` 非空）→ `review_complete=False` 且不放行**（不得绕过"以测试为准"）；
   需要即时结论时用 `force=True` / `flush=True` 显式发车绕过攒批，**不静默降质量**。
 - **⑥ 阶段链门控·本该串行不得并行/重复触发（stage-gate · Issue #150 打断补齐）**：
   开发还在跑，测试/评审就并发触发、同一阶段被重复触发，会把链条搞乱、**稀释进度基准致失衡**。
-  约束：跨角色阶段链（`development→testing→review`）走 `review_cycle/gate.py` 确定性门控——
-  **上游未收口不许抢跑**（`blocked_upstream`）、**本阶段已在跑 = 重复触发 → 复用进行中任务
-  不新起不冲进度**（`blocked_active`）、**从下游起头致乱序 → 拒绝**（`blocked_switched`）；
-  被驳回 = **零构建**且**不得给假绿放行标签**（统一映射规范处置 `proceed`）；`force=True`
+  约束：跨角色阶段链（`development→review→testing`，**仓库权威链条**：评审通过才转交测试，
+  与 `reviewer.handoff_to_tester()` / `DEV_ENHANCED_NODES` 同源）走 `review_cycle/gate.py`
+  确定性门控——**上游未收口不许抢跑**（`blocked_upstream`）、**本阶段已在跑 = 重复触发 → 复用
+  进行中任务不新起不冲进度**（`blocked_active`）、**下游在跑时回头补上游 = 乱序 → 拒绝**
+  （`blocked_switched`）；被驳回 = **零构建**且**不得给假绿放行标签**（统一映射规范处置
+  `blocked` = 链式未推进·待上游收口，**非放行**，不转交测试）；`force=True`
   是显式逃生门（留痕 `forced=True`，不静默绕过）；阶段活动登记带静默接管（默认 1800s，
-  `REVIEW_STAGE_QUIET_SECONDS` 可覆盖）防残留卡死链条；判决写 `archives(kind='stage_gate')`，
+  `REVIEW_STAGE_QUIET_SECONDS` 可覆盖）防残留卡死链条；**生产路径必须真接线**——开发交付/
+  评审放行/测试收口/编排节点处显式收口（`BaseRole.mark_stage_done` /
+  `orchestrator._stage_wire`），被驳回的轮次**不得**写 `processed_fps`（否则上游事后收口、
+  同一 diff 永不发车、不可自愈）；**收口 vs 释放**：上游收口判据只看 `completed`——**放行**才
+  `mark_done`（下游放行），**未放行/驳回/不完整**一律 `release`（不计完成，下游仍被拦，
+  否则评审驳回后测试照样放行 = 链条假推进）；判决写 `archives(kind='stage_gate')`，
   `blocked_retriggers` 是"进度是否失衡"的可核验口径（`--review-cycle gate` / 控制页可俯瞰）。
+- **⑦ 运行时状态不进版本库**：`hybrid/.bus_queue.json`（含去重门记忆）/`.quota_ledger.json`
+  已 gitignore 并移出版本库——否则门记忆跨机器"继承"，真实测试被别机指纹静默跳过。
 
 > 触发：显式 `[触发:架构·评审]` / 语义命中「评审复述/增量上下文/攒批/减CPU损耗/构建损耗/
 > 同指纹不重复/评审段」/ 或语义命中「开发还没完就跑测试评审/链条乱了/抢跑/重复触发/乱序/
-> 进度失衡/本该串行」/ rules 固定。规则层已落地 `review_context/` + `review_cycle/`（含
-> `gate.py` 阶段链门控 v0.3.0）+ `hybrid/bus` 攒批去重门 + `roles/reviewer.py` 主流程接线 +
-> `tests/test_review_efficiency.sh`（9 组信号灯），红灯可查到底接没接上。
+> 进度失衡/本该串行」/ rules 固定。规则层已落地 `review_context/`（含 `paths.repo_root` 唯一
+> 仓库根解析 + `__main__` CLI）+ `review_cycle/`（含 `gate.py` 阶段链门控 + `advance_state`
+> 状态机真接线 + `__main__` CLI）+ `hybrid/bus` 攒批去重门（无指纹不占门/演练不写穿/只记本批
+> 携带）+ `roles/reviewer.py` 主流程接线 + `tests/test_review_efficiency.sh`（16 组信号灯，
+> 含 false-green 红灯门 + 生产默认路径门 + 驳回不假推进门），红灯可查到底接没接上。
 
 ### 有效性度量模型（Review Metrics · 固定规则 · Issue #100 决策⑤）
 
@@ -658,10 +675,13 @@ local-agent/dev-standard/              # 开发规范体系（StandardAbility �
   └── README.md                       # 模块使用说明
 local-agent/review_context/           # 评审增量上下文（冻结骨架+本轮变化 · Issue #150）
   ├── spec.py                         # 稳定/变化分段规范（唯一事实源）
-  └── engine.py                       # 构建/指纹/复用判定（确定性）
+  ├── paths.py                        # 仓库根解析（唯一事实源 · S8，评审/调度器同口径）
+  ├── engine.py                       # 构建/指纹/复用判定（确定性）
+  └── __main__.py                     # CLI 入口（python -m review_context）
 local-agent/review_cycle/             # 评审段调度器（攒批+复用+减CPU损耗 · Issue #150）
-  ├── spec.py                         # 状态机/节点/触发门控（唯一事实源）
-  └── cycle.py                        # 确定性调度引擎（Scheduler）
+  ├── spec.py                         # 状态机/迁移表/触发门控（唯一事实源）
+  ├── cycle.py                        # 确定性调度引擎（Scheduler + advance_state 状态机）
+  └── __main__.py                     # CLI 入口（python -m review_cycle）
 local-agent/handle/                   # 自适应 @ 定位能力包（HandleAbility 全员能力）
   ├── resolver.py                     # 核心解析器：触发串/探测/跨同仓判定/权限建议
   ├── ability.py                      # HandleAbility 能力类（self_handle/resolve/is_cross）

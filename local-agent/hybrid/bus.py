@@ -6,6 +6,10 @@ Issue #150 追加：同一变更指纹的**重复入列**不得造成重复构�
 "攒批去重门"（同指纹测试已进过队列/已发过车 → 只引用，不再重复处）；
 并允许 `--diff-fp` 显式带上调用方（评审段调度器）算好的指纹。
 
+Issue #150 返工（S2/S3）加固：去重门**只记录本批实际携带的指纹**（不再有与发车无关的
+"登记值"）；**演练（dry-run）发车不写穿**持久化门；**无指纹不占门**（缺省不得退化为
+常量指纹造成跨任务静默跳过）。
+
 对应 Issue #90 收尾诉求："这些测试非常消耗核时……打包一批跑，应该不会那么慢。
 和公交车一样，无论多少，有需要就每隔15分钟发车，没有就不跑。然后这一批以
 计划形式跑完，不是拉起了跑1个关闭再唤醒构建很久再跑。"
@@ -103,15 +107,18 @@ class BusRunner(object):
         """把一个或多个测试投进待跑队列（0 成本，绝不立即拉起构建）。
 
         tests:   单个脚本路径 or 脚本路径 list。
-        diff_fp: 变更指纹（Issue #150 攒批去重门）——同一指纹**已发过车**的测试
-                 再入列时不再重复处（避免同 diff 反复触发构建）；
-                 仍在队列中的同指纹测试也不重复加。
+        diff_fp: 变更指纹（Issue #150 攒批去重门）——该指纹**已真发过车**（非演练）时，
+                 本批不再重复入列（避免同 diff 反复触发构建）。
+
+        去重粒度（Issue #150 返工 S4 澄清，文档与实现对齐）：**测试粒度**——
+        同一测试已在队列中即不重复入列；**同指纹的不同测试仍各自入列**
+        （指纹只作**跨批次**去重门，不吞掉别的测试）。
 
         返回 {queued, batch_size, due_in, next_due, skipped_fp}。
         """
         if isinstance(tests, str):
             tests = [tests]
-        d = self._load()
+        d = self._load()          # 单次载入（避免重复 I/O）
         processed = set(d.get("processed_fps", []) or [])
         # ---- 指纹去重门：同一变更指纹的测试已经跑过 → 不再重复入列（省一次构建）----
         if diff_fp and diff_fp in processed:
@@ -119,9 +126,10 @@ class BusRunner(object):
                     "reason": "该变更指纹已发过车（攒批去重门）→ 不重复构建",
                     "next_due_in": 0}
 
-        tests = [t for t in tests if t and t not in self._queued_set()]
+        queued_names = {t["test"] for t in d.get("tests", [])}
+        tests = [t for t in tests if t and t not in queued_names]
         if not tests:
-            st = self.status()
+            st = self.status(data=d)      # 复用已载入数据，不重复 I/O
             st["skipped_fp"] = None
             return st
         for t in tests:
@@ -133,31 +141,31 @@ class BusRunner(object):
                 "ts": _now_ts(),
             })
         d["interval"] = self.interval
-        d["pending_fp"] = diff_fp or d.get("pending_fp")
         self._save(d)
-        st = self.status()
+        st = self.status(data=d)          # 复用已载入数据，不重复 I/O
         st["skipped_fp"] = None
         return st
 
     def _queued_set(self):
         return {t["test"] for t in self._load().get("tests", [])}
 
-    # ---------- 攒批去重门（公开接口 · 替代外部直连私有 _load/_save） ----------
-    def set_pending_fp(self, diff_fp):
-        """登记"本班车对应的变更指纹"（公开接口，勿直连 `_load/_save`）。
-
-        发车（`dispatch`）时会把 `pending_fp` 落入 `processed_fps` 去重门，
-        之后同一指纹再入列/发车即被拦截，不重复触发构建。
-        调用方（如评审段调度器 / CLI）应走本方法而非操作私有状态。
-        """
-        d = self._load()
-        d["pending_fp"] = diff_fp
-        self._save(d)
-        return {"pending_fp": diff_fp}
-
+    # ---------- 攒批去重门（公开接口 · 只读查询，不再有"登记值"写入口） ----------
     def processed_fps(self):
-        """已发过车的变更指纹集合（去重门记忆，供调用方查询）。"""
+        """已**真发过车**（非演练）的变更指纹集合（去重门记忆，供调用方查询）。
+
+        写门规则见 `dispatch()`：只记录**本批实际携带**的指纹，且**演练发车不写穿**。
+        旧的 `set_pending_fp()` 单标量登记接口已移除——"登记值 ≠ 本批实际携带"
+        正是 Issue #150 返工 S3 的根因（登记值会被无关发车误记，跨调用方互相覆盖）。
+        """
         return set(self._load().get("processed_fps", []) or [])
+
+    def is_processed(self, diff_fp):
+        """某指纹是否已真发过车（去重门查询）。
+
+        无指纹（None/空）→ 恒 False：**无指纹不占门**，避免"缺省即常量指纹"
+        造成跨任务静默跳过（Issue #150 返工 S1）。
+        """
+        return bool(diff_fp) and diff_fp in self.processed_fps()
 
     # ---------- 判定（该不该发车） ----------
     def should_dispatch(self, now=None):
@@ -180,8 +188,9 @@ class BusRunner(object):
                 "queued": queued, "elapsed": int(elapsed)}
 
     # ---------- 状态（站台信息） ----------
-    def status(self):
-        d = self._load()
+    def status(self, data=None):
+        # data: 可选，调用方已载入的队列 dict（避免重复 I/O；不传则自行载入）
+        d = data if data is not None else self._load()
         tests = d.get("tests", [])
         now = _now_epoch()
         last = float(d.get("last_dispatch", 0.0))
@@ -197,13 +206,14 @@ class BusRunner(object):
             "last_dispatch": _now_ts() if last else "",
             "last_dispatch_ts": last,
             "dispatch_count": len(d.get("history", [])),
-            # Issue #150 攒批去重门：已处理的变更指纹数（同指纹不再触发构建）
+            # Issue #150 攒批去重门：已**真发过车**的变更指纹数（同指纹不再触发构建；
+            # 演练发车不写穿，见 dispatch()）。pending_fp 单标量已移除（S3 根因）。
             "processed_fps": len(d.get("processed_fps", []) or []),
-            "pending_fp": d.get("pending_fp"),
+            "processed_fp_list": list(d.get("processed_fps", []) or []),
         }
 
     # ---------- 发车（整批跑完 · 一次构建） ----------
-    def dispatch(self, now=None, extra_tests=None, note="bus batch"):
+    def dispatch(self, now=None, extra_tests=None, note="bus batch", diff_fp=None):
         """发一班车：把队列里全部待跑测试作为一批计划，整批跑完。
 
         复用 ParallelExecutor（单进程内批量跑全部），一次环境/一次构建摊全批；
@@ -212,16 +222,31 @@ class BusRunner(object):
 
         now: 传入便于测试注入时间。
         extra_tests: 可选，发车前临时追加（不落队列）。
+        diff_fp: 可选，调用方声明的**本批变更指纹**（与队列条目自带的指纹取并集）。
+
+        去重门写门规则（Issue #150 返工 S2/S3 修正）：
+          - 只记录**本批实际携带**的指纹（队列条目自带 diff_fp ∪ 显式 diff_fp），
+            不再记录与本次发车无关的"登记值"（S3：登记值 ≠ 本批实际携带）；
+          - **演练（dry_run=True）发车不写穿持久化门**——演练未真跑测试，
+            写门会让后续真实执行被静默跳过（S2）。演练结果用 `gate_written=False` 显式标注；
+          - 空队列提前返回，**不写任何门状态**。
         """
         d = self._load()
-        tests = [t["test"] for t in d.get("tests", [])]
+        entries = list(d.get("tests", []))
+        tests = [t["test"] for t in entries]
+        # 本批**实际携带**的指纹 = 队列条目自带指纹（去空）∪ 调用方显式声明
+        carried_fps = [e.get("diff_fp") for e in entries if e.get("diff_fp")]
+        if diff_fp:
+            carried_fps.append(diff_fp)
         if extra_tests:
             tests.extend(extra_tests if isinstance(extra_tests, list) else [extra_tests])
         # 去重保序
         seen = set(); tests = [t for t in tests if not (t in seen or seen.add(t))]
 
         if not tests:
-            return {"dispatched": 0, "reason": "empty", "tests": []}
+            # 空队列：不写门状态（不发车 = 不占门），显式说明原因
+            return {"dispatched": 0, "reason": "empty", "tests": [],
+                    "gate_written": False, "carried_fps": []}
 
         # ---- 整批作为一批计划，在单个执行器里跑完（一次构建摊全批） ----
         plan = self._run_plan(tests)
@@ -239,24 +264,30 @@ class BusRunner(object):
             "fail": plan["summary"]["fail"],
             "wall_seconds": plan["summary"].get("wall_seconds", plan["summary"].get("total_duration", 0)),
             "note": note,
+            "dry_run": bool(self.dry_run),
+            "carried_fps": sorted(set(carried_fps)),
         })
         d["tests"] = []
         d["last_dispatch"] = now
         d["interval"] = self.interval
-        # ---- 攒批去重门（Issue #150）：记录本班车跑过的变更指纹，同指纹不再触发构建 ----
-        fp = d.get("pending_fp")
-        if fp:
+        # ---- 攒批去重门（Issue #150）：只记本批实际携带的指纹，且演练不写穿 ----
+        gate_written = False
+        if not self.dry_run:
             fps = list(d.get("processed_fps", []) or [])
-            if fp not in fps:
-                fps.append(fp)
+            for fp in carried_fps:
+                if fp not in fps:
+                    fps.append(fp)
             d["processed_fps"] = fps[-DEFAULT_FP_HISTORY:]
-            d["pending_fp"] = None
+            gate_written = bool(carried_fps)
         self._save(d)
 
         plan["dispatched"] = len(tests)
         plan["finish"] = finish
         plan["queued_cleared"] = True
         plan["history_count"] = len(history)
+        plan["carried_fps"] = sorted(set(carried_fps))
+        plan["gate_written"] = gate_written
+        plan["dry_run"] = bool(self.dry_run)
         return plan
 
     # ---------- 整批执行（一批计划） ----------
@@ -342,20 +373,21 @@ class BusRunner(object):
 
         这是云端 cron / CI 定时器每 interval 调一次的统一入口：
         无需求（队列空）不发车（无空转构建）；有需求到点整批发车。
+
+        diff_fp: 调用方声明的**本批变更指纹**；已真发过车 → skip（不重复构建）。
+                 未处理过时**不落任何状态**——指纹只在真正发车时随本批写入去重门
+                 （S3 修正：不再有"登记值"提前写盘、被无关发车误记）。
         """
-        if diff_fp:
-            d = self._load()
-            if diff_fp in set(d.get("processed_fps", []) or []):
-                return {"action": "skip", "reason": "该变更指纹已发过车（攒批去重门）",
-                        "diff_fp": diff_fp}
-            d["pending_fp"] = diff_fp
-            self._save(d)
+        if diff_fp and self.is_processed(diff_fp):
+            return {"action": "skip", "reason": "该变更指纹已发过车（攒批去重门）",
+                    "diff_fp": diff_fp}
         verdict = self.should_dispatch(now)
         if not verdict["dispatch"]:
             return {"action": "wait", **verdict}
         return {"action": "dispatch", **self.dispatch(now=now,
                                                       extra_tests=extra_tests,
-                                                      note=note)}
+                                                      note=note,
+                                                      diff_fp=diff_fp)}
 
 
 # 便捷单例

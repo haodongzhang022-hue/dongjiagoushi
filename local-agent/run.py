@@ -30,12 +30,24 @@ import sys
 # 允许直接以脚本运行（python run.py）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import orchestrator
-import relay
 from roles import list_roles
 
 # 规模伸缩层（架构升级核心）
 from scale import engine, spec, profile, prescale, plugin
+
+
+# ---- 编排层懒加载（复评 P3）----
+# `orchestrator` 顶层 `import yaml`，而部分环境（CI/最小容器）未装 pyyaml。
+# 此前 run.py 顶层 import 它 → 连 `--review-cycle gate`（纯门控大盘，与编排无关）
+# 也直接崩。改为**用到时才导入**：门控/评审段 CLI 不再被无关依赖拖垮。
+def _orchestrator():
+    import orchestrator
+    return orchestrator
+
+
+def _relay():
+    import relay
+    return relay
 
 
 def _serve_http(dash_mod, port=8080):
@@ -325,11 +337,11 @@ def main():
                               ensure_ascii=False, indent=2))
             return 0
         if act == "demo":
-            # 演示"链条按序推进"：先让上游（开发→测试）收口，评审段才允许触发
+            # 演示"链条按序推进"：先让上游（开发）收口，评审段才允许触发
+            # （顺序唯一事实源 = 开发 → 评审 → 测试）
             from review_cycle.gate import StageGate
             g = StageGate()
             g.mark_done("demo", "development")
-            g.mark_done("demo", "testing")
             sch._gate = g
             out = sch.run("demo", {"goal": "评审不再逐轮复述整个项目",
                                    "boundary": "只优化上下文/构建复用，不改需求边界",
@@ -402,7 +414,7 @@ def main():
         return 0
 
     if args.clear:
-        relay.clear()
+        _relay().clear()
         print("已清空接力卡")
         return 0
 
@@ -426,13 +438,13 @@ def main():
         return 0
 
     if args.resume:
-        card = relay.load()
+        card = _relay().load()
         if not card:
             print("无接力卡可续跑，请先 --pipeline 或 --role 启动。")
             return 1
         print(f"[续跑] 从接力卡当前进度续跑：{card.get('current_progress')}")
         # 简化：续跑 = 重新跑完整流水线（保留 req）
-        report = orchestrator.run_pipeline(card["req"], backend=args.backend)
+        report = _orchestrator().run_pipeline(card["req"], backend=args.backend)
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
 
@@ -440,7 +452,7 @@ def main():
         parser.error("--req 必填（除非使用 --list-roles/--list-profiles/--resume/--clear）")
 
     if args.pipeline:
-        report = orchestrator.run_pipeline(
+        report = _orchestrator().run_pipeline(
             args.req,
             backend=args.backend,
             use_fusion=not args.no_fusion,
@@ -453,7 +465,7 @@ def main():
         return 0
 
     if args.role:
-        result = orchestrator.run_role(args.role, args.req, backend=args.backend)
+        result = _orchestrator().run_role(args.role, args.req, backend=args.backend)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 

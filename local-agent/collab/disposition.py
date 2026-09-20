@@ -88,11 +88,22 @@ DISPOSITION_LABELS = {
         "route": "consensus_vote",
         "when": "意见多重、需集体决策/共识表决（peer.consensus_judge）",
     },
+    # 阶段链门控驳回专用（Issue #150 复评 N3）：**非放行**标签。
+    # 语义＝「链条本该按序推进，此刻这一环被门控驳回」——不是质量结论、也不是放行，
+    # 故**不得**映射到 merge/proceed（那会真转交测试、给假绿）。用途：驳回时明确表达
+    # "等上游收口后按链推进"，替代此前误映射的 `proceed`（它 ∈ PASS_DISPOSITIONS）。
+    "blocked": {
+        "name": "链式未推进·待上游收口",
+        "action": "block",
+        "route": "resume_chain",
+        "when": "阶段链门控驳回（上游未收口=抢跑 / 本阶段重复触发 / 回头补上游=乱序），"
+                "需等上游按链条收口后再推进（非终局、非放行）",
+    },
 }
 
 # 规范标签的稳定顺序（文档/看板/测试据此对齐）
 DISPOSITION_ORDER = ["merge", "proceed", "fix_bug", "research",
-                     "human", "consult", "vote"]
+                     "human", "consult", "vote", "blocked"]
 
 
 # ======================================================================
@@ -334,6 +345,16 @@ def route(label, problem="", task_id="", cohort_id="", **kwargs):
             "steps": ["触发共识表决(peer.consensus_judge)",
                       "按收敛判定(2~3人无否决/4+人≥2/3)",
                       "未共识→显式上报小组长→总师→人类"],
+        })
+    elif label == "blocked":
+        flow.update({
+            "handoff": "上游阶段（按链回退一环）",
+            "blocked": True,
+            "proceed": False,      # 明确：**非放行**
+            "revert": False,       # 明确：不是质量结论，不打回开发返工
+            "steps": ["阶段链门控驳回（抢跑/重复/乱序）",
+                      "本轮零构建（dispatched=False）",
+                      "等上游阶段收口 → 按链重新推进（不假绿放行、不转交测试）"],
         })
     return flow
 

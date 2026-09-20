@@ -27,7 +27,8 @@ except Exception:  # noqa: BLE001
     disposition = None
 
 
-# 评审通过 → 可放行转交测试的规范处置标签（其余需回转/调研/会诊/交人）
+# 评审通过 → 可放行转交测试的规范处置标签（其余需回转/调研/会诊/交人/等上游收口）
+# 注意（N3）：`blocked`（阶段链门控驳回）**必须不在**此集合内——它非放行、不转交测试。
 PASS_DISPOSITIONS = ("merge", "proceed")
 
 
@@ -113,44 +114,49 @@ class ReviewerRole(BaseRole):
 
           ① **攒批**：受影响测试先入列（0 成本），再在本调度点一次发车整批跑完
              —— 一次冷启动摊全批（N 个测试从 N 次构建收敛为 1 次）；
-          ② **指纹去重门**：同一变更指纹已发过车 → **不重复触发构建**，只引用上轮结论；
+          ② **指纹去重门**：同一变更指纹**已真发过车** → **不重复触发构建**，只引用上轮结论；
           ③ **变更感知选测**：只跑受变更影响的测试（复用 hybrid.selector，不各自取名）；
           ④ **阶段链门控（本 Issue 打断补齐）**：本该串行的链条不得并行触发——
              上游（开发）未收口就抢跑测试/评审 → **直接驳回、不起任何构建**；
              本阶段已在跑（重复触发）→ 复用进行中的任务，**不新起、不冲进度**。
              `force=True` 是显式逃生门（"我知道在抢跑/复用"）。
 
-        返回 {ok, diffusion, selected, bus, plan, skipped, reason, cost_note, gate}
+        去重键控（Issue #150 返工 S1/S2 修正）：
+          - 指纹 = `fingerprint(diff_summary)` **且** 掺入 `task_key`（批次键）——
+            去重键 = 「真实变更内容指纹 + 任务/批次」，防跨任务误命中；
+          - `diff_summary` **缺省/空** → 视为**无指纹**（`diff_fp=None`），**不占门**、
+            不做去重（而非退化为空串常量哈希造成跨任务静默跳过）；
+          - `dry_run=True`（演练）**不写穿**持久化去重门，真实执行不会被演练静默跳过。
+
+        返回 {ok, diff_fp, selected, bus, plan, skipped, reason, cost_note, gate}
+        （返回键同时含 diff_fp 去重键与 gate 阶段门判决）
         """
         # ---- 阶段链门控（先判链、再谈攒批；驳回即零构建，正是"乱触发"要拦下的）----
+        # 走 `admit`（判定 + 判决计数 + 放行才登记活跃），不用裸 should_trigger——
+        # 否则 overview 的 gates 计数拿不到数据（复评 P1）。
         from review_cycle.gate import StageGate, record_gate
         g = gate or StageGate()
-        gv = g.should_trigger(task_key, stage, force=force)
+        gv = g.admit(task_key, stage, note="评审攒批触发", force=force)
         record_gate(gv)
         if not gv["allow"]:
             return {"ok": True, "skipped": True, "diff_fp": None,
                     "selected": [], "bus": None, "plan": None,
-                    "gate": gv, "reused": gv.get("decision") == "blocked_active",
+                    "gate": gv, "reused": gv.get("reused", False),
                     "reason": "[阶段门:%s] %s" % (gv["decision"], gv["reason"]),
                     "cost_note": "阶段门驳回 → 零构建（拦下一次乱触发）"}
-        if not gv.get("forced"):
-            g.mark_active(task_key, stage, note="评审攒批触发")
 
         try:
             from hybrid.bus import BusRunner
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "reason": "hybrid.bus 不可用: %s" % e,
                     "selected": [], "skipped": True, "gate": gv}
-        try:
-            from review_context import engine as _ctx
-            diff_fp = _ctx.fingerprint(diff_summary or "")
-        except Exception:  # noqa: BLE001
-            diff_fp = None
+        # ---- 去重键 = 真实变更内容指纹 + 任务/批次键（S1）----
+        diff_fp = self._dedup_key(diff_summary, task_key)
 
         bus = BusRunner(dry_run=dry_run, timeout=300)
-        # ---- 指纹去重门：同一变更指纹已跑过 → 不重复触发构建 ----
-        # 走 bus 公开接口 `processed_fps()`，不直连私有 `_load/_save`
-        if diff_fp and not force and diff_fp in bus.processed_fps():
+        # ---- 指纹去重门：同一指纹已**真发过车** → 不重复触发构建 ----
+        # 无指纹（缺省 diff_summary）不占门，直接放行去跑（S1：缺省不得退化为常量指纹）
+        if diff_fp and not force and bus.is_processed(diff_fp):
             return {"ok": True, "skipped": True, "diff_fp": diff_fp,
                     "selected": [], "bus": None, "plan": None, "gate": gv,
                     "reason": "同变更指纹已发过车（指纹去重门）→ 不重复触发构建",
@@ -162,9 +168,7 @@ class ReviewerRole(BaseRole):
         if changed_files:
             try:
                 from hybrid.selector import IncrementalSelector
-                sel = IncrementalSelector(
-                    root_dir=os.path.dirname(os.path.dirname(
-                        os.path.abspath(__file__))))
+                sel = IncrementalSelector(root_dir=self.review_repo_root())
                 selected = list(sel.select(changed_files) or [])
             except Exception as e:  # noqa: BLE001
                 selected = []
@@ -173,10 +177,13 @@ class ReviewerRole(BaseRole):
             selected.extend(extra_tests if isinstance(extra_tests, list)
                             else [extra_tests])
         if not selected:
+            # S6：选测失败时**不得**照常放行——显式 blocked，交由 do_review 落 fix_bug
+            blocked = bool(select_error)
             return {"ok": True, "skipped": True, "diff_fp": diff_fp,
                     "selected": [], "bus": None, "plan": None, "gate": gv,
                     "select_error": select_error,
-                    "reason": ("变更选测失败（%s）→ 不拉构建" % select_error)
+                    "blocked": blocked,
+                    "reason": ("变更选测失败（%s）→ 不拉构建，且不得放行" % select_error)
                     if select_error else "变更未命中任何测试 → 不拉构建",
                     "cost_note": "省下一次构建冷启动"}
 
@@ -185,17 +192,51 @@ class ReviewerRole(BaseRole):
                     diff_fp=diff_fp)
         plan = None
         if flush:
-            plan = bus.dispatch(note="评审整批发车(%s)" % task_key)
+            plan = bus.dispatch(note="评审整批发车(%s)" % task_key, diff_fp=diff_fp)
         summary = (plan or {}).get("summary", {}) or {}
         return {
             "ok": True, "skipped": False, "diff_fp": diff_fp, "gate": gv,
-            "select_error": select_error,
+            "select_error": select_error, "blocked": False,
+            "dry_run": bool(dry_run),
+            "gate_written": bool((plan or {}).get("gate_written")),
             "selected": selected, "bus": bus.status(), "plan": plan,
             "reason": "攒批：%d 个受影响测试作为一批，一次构建跑完" % len(selected),
             "cost_note": "一次冷启动摊全批，省 %d 次构建冷启动" % max(
                 0, len(selected) - 1),
             "summary": summary,
         }
+
+    # ------------------------------------------------------------
+    # 去重键控 + 仓库根（Issue #150 返工 S1/S8）
+    # ------------------------------------------------------------
+    @staticmethod
+    def review_repo_root():
+        """评审相关模块统一用的**仓库根**（唯一事实源，S8：不再两处各自解析）。"""
+        try:
+            from review_context.paths import repo_root
+            return repo_root()
+        except Exception:  # noqa: BLE001
+            # 兜底：<repo>/local-agent/roles/reviewer.py → 上溯三级
+            return os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+
+    @staticmethod
+    def _dedup_key(diff_summary, task_key=""):
+        """去重键 = 「真实变更内容指纹 + 任务/批次键」（S1）。
+
+        - `diff_summary` 缺省/空白 → 返回 **None**（显式视为"无指纹"，不占门）；
+        - 否则 `fingerprint({diff_summary, task_key})`——掺入 task_key，使
+          **同一变更内容在不同任务下不会被误判为已处理**（跨任务静默跳过被消除）。
+        """
+        text = (diff_summary or "").strip()
+        if not text:
+            return None
+        try:
+            from review_context import engine as _ctx
+        except Exception:  # noqa: BLE001
+            return None
+        return _ctx.fingerprint({"diff_summary": text,
+                                 "task_key": (task_key or "").strip()})
 
     # ------------------------------------------------------------
     # 双轴评审（必走闸门 · Issue #98 · 借鉴 mattpocock code-review 双轴不互相污染）
@@ -371,7 +412,8 @@ class ReviewerRole(BaseRole):
           - 双轴均达标 → disposition=merge/proceed → 真实转交测试（handoff_to_tester）。
 
         返回结构化评审主流程报告，供留痕核验；`axes_complete` 与 `disposition`
-        双闸门，缺一即评审不完整（不视为有效评审）。
+        双闸门，缺一即评审不完整（不视为有效评审）。另：变更选测失败（`select_error`
+        非空）→ `review_complete=False` 且不放行（S6：不得绕过"以测试为准"）。
         """
         # ⓪ Issue #150：评审增量上下文 + 攒批触发门控（先攒批、再评审，省构建省复述）
         context_pack = None
@@ -418,25 +460,81 @@ class ReviewerRole(BaseRole):
                 "disposition": "fix_bug",
                 "disposition_result": disposition_result,
                 "effectiveness": eff,
+                # 不完整 → 只释放 review 活跃、**不计完成**（测试仍被拦）
+                "stage_closure": self._release_review_stage(
+                    gate, task_key, stage, "评审不完整（缺轴）→ 不计完成"),
                 "route": route,
                 "note": "评审未走完双轴，不完整，禁止放行（打回补齐双轴）。",
             }
 
+        # ②.5 阶段链门控驳回（N3）：**非质量结论、非放行**——不得给 merge/proceed，
+        #     也不得转交测试。驳回说明"链条本该按序推进，此刻这一环被门控驳回"，
+        #     统一落规范处置标签 `blocked`（`route=resume_chain`，不在 PASS_DISPOSITIONS）。
+        gate_verdict = (batch or {}).get("gate") or {}
+        gate_blocked = bool(gate_verdict) and not gate_verdict.get("allow", True)
+        if gate_blocked and not gate_verdict.get("forced"):
+            label = "blocked"
+            if disposition is not None:
+                label = disposition.dispose(
+                    problem="阶段链门控驳回(%s)" % gate_verdict.get("decision", ""),
+                    label="blocked").get("disposition", "blocked")
+                if label in PASS_DISPOSITIONS:   # 兜底纠正，防回归
+                    label = "blocked"
+            eff = self._record_review_disposition(
+                disposition_label=label, blocked=True,
+                axes_complete=True, task_key=task_key, source=source)
+            return {
+                "task_key": task_key,
+                "source": source,
+                "context_pack": context_pack,
+                "batch": batch,
+                "axis_report": axis_report,
+                "axes_complete": True,
+                "review_complete": False,
+                "disposition": label,
+                "gate_blocked": True,
+                "gate": gate_verdict,
+                "disposition_result": {
+                    "disposition": label,
+                    "reason": "阶段链门控驳回：%s" % gate_verdict.get("reason", ""),
+                    "note": "链条按序推进：等上游收口后再触发，本轮零构建、不转交测试。",
+                },
+                "effectiveness": eff,
+                # 门控驳回 → 阶段本就未推进：只释放（不计完成）
+                "stage_closure": self._release_review_stage(
+                    gate, task_key, stage, "阶段门控驳回 → 不计完成"),
+                "route": None,
+                "route_type": "blocked_chain",
+                "note": ("阶段链门控驳回（%s）→ 本轮零构建、不假绿放行、不转交测试；"
+                         "等上游阶段收口后按链重新推进。"
+                         % gate_verdict.get("decision", "")),
+            }
+
         # ③ 双轴完整 → 按必改优先原则落规范处置标签
-        severity = severity_hint or ("🔴" if axis_report["blocked"] else "🟢")
+        # S6：变更选测失败（select_error）**不得放行**——以测试为准被绕过即 false green。
+        # 口径：选测失败 → 本轮拿不到可信测试信号 → 与"有必修"同等级（fix_bug）。
+        select_error = (batch or {}).get("select_error", "") or ""
+        batch_blocked = bool((batch or {}).get("blocked")) or bool(select_error)
+        blocked = bool(axis_report["blocked"]) or batch_blocked
+        severity = severity_hint or ("🔴" if blocked else "🟢")
         disp = self.dispose(problem="", severity=severity,
-                            signals=["defect"] if axis_report["blocked"] else [],
+                            signals=["defect"] if blocked else [],
                             scenario_hint=spec_ref)
         disposition_label = (disp.get("disposition") or "fix_bug").lower()
-        # 双轴有必修但 dispose 落回 proceed/merge 时兜底纠正为 fix_bug
-        if axis_report["blocked"] and disposition_label in PASS_DISPOSITIONS:
+        # 有必修（双轴 / 选测失败）但 dispose 落回 proceed/merge 时兜底纠正为 fix_bug
+        if blocked and disposition_label in PASS_DISPOSITIONS:
             disposition_label = "fix_bug"
             disp = {"disposition": "fix_bug",
-                    "reason": "双轴存在必修/spec 不忠实，纠正放行标签为 fix_bug"}
+                    "reason": ("双轴存在必修/spec 不忠实"
+                               if axis_report["blocked"]
+                               else "变更选测失败（select_error）不可信")
+                              + "，纠正放行标签为 fix_bug"}
+        # S6：select_error 非空 → 本轮评审**不完整**（拿不到测试信号，不得当"评完放行"）
+        review_complete = not select_error
 
         # ④ 按处置路由
         if auto_route:
-            if disposition_label in PASS_DISPOSITIONS:
+            if disposition_label in PASS_DISPOSITIONS and review_complete:
                 route = self.handoff_to_tester(
                     task_key, issue_ref=issue_ref,
                     review_summary=(f"双轴均达标(source={source}) "
@@ -444,10 +542,20 @@ class ReviewerRole(BaseRole):
                                     f"Spec:{axis_report['axes']['spec']}"),
                     disposition_label=disposition_label)
                 route_type = "handoff_to_tester"
+            elif disposition_label in ("merge", "proceed"):
+                # 理论不可达（放行分支已在上面处理）；兜底不改道，显式暴露
+                route = None
+                route_type = "manual"
+            elif disposition_label == "blocked":
+                # 阶段链未推进：不转交测试、也不当质量结论打回开发（等上游收口）
+                route = None
+                route_type = "blocked_chain"
             else:
                 route = self.revert_to_developer(
                     task_key,
-                    reason=(f"评审处置={disposition_label}：{axis_report['note']}"),
+                    reason=(f"评审处置={disposition_label}："
+                            + (f"变更选测失败 {select_error}，测试信号不可信"
+                               if select_error else axis_report["note"])),
                     next_requirement=("按双轴必修项返工，复评清零再放行"
                                       if disposition_label == "fix_bug"
                                       else "按对应处置推进"))
@@ -456,9 +564,25 @@ class ReviewerRole(BaseRole):
             route = None
             route_type = "manual"
 
+        # N2 阶段收口（生产路径接线）：评审这一环做完了 → 把链交回下游。
+        # **放行（merge/proceed）→ `mark_done`（计入 completed → 测试才被放行）**；
+        # **未放行（fix_bug/blocked/…）→ `release`（只解除活跃、不计完成 → 测试仍被拦）**。
+        # 残留修正：此前无条件 `mark_done` → 评审**驳回**后测试仍被放行 = 链条假推进。
+        try:
+            from review_cycle.gate import StageGate
+            _g = gate or StageGate()
+            if disposition_label in PASS_DISPOSITIONS and review_complete:
+                stage_closure = _g.mark_done(task_key, stage)
+            else:
+                stage_closure = _g.release(
+                    task_key, stage,
+                    reason="评审处置=%s（未放行）→ 只释放，不计完成" % disposition_label)
+        except Exception:  # noqa: BLE001
+            stage_closure = None
+
         eff = self._record_review_disposition(
             disposition_label=disposition_label,
-            blocked=axis_report["blocked"],
+            blocked=blocked,
             axes_complete=True,
             task_key=task_key, source=source)
         return {
@@ -470,17 +594,33 @@ class ReviewerRole(BaseRole):
             "batch": batch,
             "axis_report": axis_report,
             "axes_complete": True,
-            "review_complete": True,
-            "blocked": axis_report["blocked"],
+            "review_complete": review_complete,
+            "select_error": select_error,
+            "blocked": blocked,
             "disposition": disposition_label,
             "disposition_result": disp,
             "effectiveness": eff,
+            "stage_closure": stage_closure,
             "route_type": route_type,
             "route": route,
             "note": (
-                "双轴均达标，已按处置路由。" if not axis_report["blocked"]
-                else "双轴存在必修/spec 不忠实，已打回。"),
+                "双轴均达标，已按处置路由。" if not blocked
+                else ("变更选测失败（%s）→ 测试信号不可信，不得放行。" % select_error
+                      if select_error
+                      else "双轴存在必修/spec 不忠实，已打回。")),
         }
+
+    @staticmethod
+    def _release_review_stage(gate, task_key, stage, reason):
+        """只释放评审活跃、**不计完成**（未放行/不完整/门控驳回时用）。
+
+        N2 残留修正：评审**未放行**时若仍 `mark_done` → 下游测试被放行 = 链条假推进。
+        """
+        try:
+            from review_cycle.gate import StageGate
+            return (gate or StageGate()).release(task_key, stage, reason=reason)
+        except Exception:  # noqa: BLE001
+            return None
 
     # ------------------------------------------------------------
     # 评审通过 → 真实转交「架构·测试」（解决"只描述没真交付"）

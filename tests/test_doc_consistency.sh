@@ -144,9 +144,9 @@ echo "▶ 五、统一审查处置标签（Review Disposition）一致性"
 file_exists "REVIEW_DISPOSITION.md 存在" "docs/REVIEW_DISPOSITION.md"
 contains "AGENTS.md 含统一审查处置标签规则" "$(cat AGENTS.md)" "统一审查处置标签"
 
-# 引擎（唯一规范来源）应存在，且 spec 覆盖七种标签
+# 引擎（唯一规范来源）应存在，且 spec 覆盖八种标签
 OUT=$($PY -c "import sys; sys.path.insert(0,'local-agent'); from collab import disposition; print(','.join(disposition.spec()['labels']))" 2>/dev/null)
-check "disposition.spec 七种标签" "merge,proceed,fix_bug,research,human,consult,vote" "$OUT"
+check "disposition.spec 八种标签" "merge,proceed,fix_bug,research,human,consult,vote,blocked" "$OUT"
 
 # 评审输出契约强制绑定 disposition
 contains "评审输出契约含 disposition" "$(cat local-agent/roles/reviewer.py)" "disposition"
@@ -286,13 +286,21 @@ sys.path.insert(0, "local-agent")
 try:
     from review_cycle.gate import StageGate
     from review_cycle import stage_spec
-    assert stage_spec.STAGE_ORDER == ("development", "testing", "review")
+    # N1 校正：仓库权威链条 = 开发 → 评审 → 测试（评审通过才转交测试）
+    assert stage_spec.STAGE_ORDER == ("development", "review", "testing"), stage_spec.STAGE_ORDER
+    assert stage_spec.UPSTREAM == {"review": "development", "testing": "review"}
     g = StageGate(state_file=tempfile.mktemp(suffix=".json"))
     g.mark_active("T", "development")
     v = g.should_trigger("T", "review")
     assert v["allow"] is False and v["decision"] == "blocked_upstream", v
     v2 = g.should_trigger("T", "development")
     assert v2["decision"] == "blocked_active", v2
+    # 链式推进：开发收口 → 评审放行 → 评审收口 → 测试放行
+    g.mark_done("T", "development")
+    assert g.should_trigger("T", "review")["allow"] is True
+    g.mark_active("T", "review")
+    g.mark_done("T", "review")
+    assert g.should_trigger("T", "testing")["allow"] is True
 except Exception as e:
     print("ERR", e); sys.exit(1)
 PYINNER3
