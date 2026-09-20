@@ -126,13 +126,22 @@ class BaseRole:
         return g.mark_role_active(task_key, self.name, note=note)
 
     def mark_stage_done(self, task_key, gate=None):
-        """按**自身角色名**登记阶段收口（生产路径一行接线）。
+        """按**自身角色名**登记阶段**收口（真做完）**（生产路径一行接线）。
 
         角色名 → 阶段映射走唯一事实源 `review_cycle.stage_spec.ROLE_STAGE`；
         未注册角色返回 ok=False（不静默当成收口）。
         """
         g = self.stage_gate(gate)
         return g.mark_role_done(task_key, self.name)
+
+    def mark_role_release(self, task_key, role=None, reason="", gate=None):
+        """按**角色名**释放阶段（阶段结束但**未通过**：驳回/阻塞）——不计完成。
+
+        与 `mark_stage_done` 的区别：`release` 只解除"在跑"，**不计入 `completed`**，
+        因此下游**不会**被放行（评审驳回后测试仍被拦，链条不假推进）。
+        """
+        g = self.stage_gate(gate)
+        return g.mark_role_release(task_key, role or self.name, reason=reason)
 
     def stage_of(self):
         """本角色所属阶段（未注册 → None）。"""

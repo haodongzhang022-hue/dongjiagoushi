@@ -438,9 +438,11 @@
   `blocked` = 链式未推进·待上游收口，**非放行**，不转交测试）；`force=True`
   是显式逃生门（留痕 `forced=True`，不静默绕过）；阶段活动登记带静默接管（默认 1800s，
   `REVIEW_STAGE_QUIET_SECONDS` 可覆盖）防残留卡死链条；**生产路径必须真接线**——开发交付/
-  评审放行/测试收口/编排节点处显式 `mark_done`（`BaseRole.mark_stage_done` /
+  评审放行/测试收口/编排节点处显式收口（`BaseRole.mark_stage_done` /
   `orchestrator._stage_wire`），被驳回的轮次**不得**写 `processed_fps`（否则上游事后收口、
-  同一 diff 永不发车、不可自愈）；判决写 `archives(kind='stage_gate')`，
+  同一 diff 永不发车、不可自愈）；**收口 vs 释放**：上游收口判据只看 `completed`——**放行**才
+  `mark_done`（下游放行），**未放行/驳回/不完整**一律 `release`（不计完成，下游仍被拦，
+  否则评审驳回后测试照样放行 = 链条假推进）；判决写 `archives(kind='stage_gate')`，
   `blocked_retriggers` 是"进度是否失衡"的可核验口径（`--review-cycle gate` / 控制页可俯瞰）。
 - **⑦ 运行时状态不进版本库**：`hybrid/.bus_queue.json`（含去重门记忆）/`.quota_ledger.json`
   已 gitignore 并移出版本库——否则门记忆跨机器"继承"，真实测试被别机指纹静默跳过。
@@ -450,8 +452,8 @@
 > 进度失衡/本该串行」/ rules 固定。规则层已落地 `review_context/`（含 `paths.repo_root` 唯一
 > 仓库根解析 + `__main__` CLI）+ `review_cycle/`（含 `gate.py` 阶段链门控 + `advance_state`
 > 状态机真接线 + `__main__` CLI）+ `hybrid/bus` 攒批去重门（无指纹不占门/演练不写穿/只记本批
-> 携带）+ `roles/reviewer.py` 主流程接线 + `tests/test_review_efficiency.sh`（10 组信号灯，
-> 含 false-green 红灯门），红灯可查到底接没接上。
+> 携带）+ `roles/reviewer.py` 主流程接线 + `tests/test_review_efficiency.sh`（16 组信号灯，
+> 含 false-green 红灯门 + 生产默认路径门 + 驳回不假推进门），红灯可查到底接没接上。
 
 ### 有效性度量模型（Review Metrics · 固定规则 · Issue #100 决策⑤）
 

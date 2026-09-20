@@ -602,4 +602,56 @@ assert oa["rounds"][0]["diff_fp"] != ob["rounds"][0]["diff_fp"], "跨任务同�
 print("  OK S3c：调度器发车携带本轮 diff_fp（落门）+ 不落他方未携带指纹 + 跨任务不误拦")
 PYEOF12
 
+echo "===== [review-eff] 16. 驳回不假推进：评审未放行 → 下游测试仍被拦（N2 残留门）====="
+$PY - <<'PYEOF16'
+import os, tempfile
+os.environ["REVIEW_STAGE_FILE"] = tempfile.mktemp(suffix=".json")
+os.environ["DB_PATH"] = tempfile.mktemp(suffix=".db")
+from data import admin
+admin.init()
+from roles import get_role
+from review_cycle.gate import StageGate
+
+T = "驳回不假推进"
+dev = get_role("架构·开发"); rev = get_role("架构·评审"); tst = get_role("架构·测试")
+g = StageGate()
+
+# ① 开发交付 → development 收口 → 评审才被放行
+dev.mark_stage_done(T)
+assert g.should_trigger(T, "review")["allow"] is True, "开发收口后评审该放行"
+# 评审**前**测试必须被拦（评审在测试上游）
+assert g.should_trigger(T, "testing")["decision"] == "blocked_upstream"
+
+# ② 评审**驳回**（🔴必修 → fix_bug）→ **不得**计入 review 完成 → 测试仍被拦
+rep = rev.do_review(T, source="PR", spec_ref="Issue",
+                    standards_axis={"🔴": ["严重缺陷"], "note": "必修"},
+                    spec_axis={"faithful": True}, auto_route=False)
+assert rep["disposition"] == "fix_bug", rep["disposition"]
+assert rep["stage_closure"] is not None, "评审应回写 stage_closure"
+# 驳回 → 只释放（不计完成）：completed 里**不得**出现 review
+assert "review" not in (rep["stage_closure"].get("completed") or []), \
+    "驳回不得计入 review 完成（否则链条假推进）"
+assert g.should_trigger(T, "testing")["decision"] == "blocked_upstream", \
+    "N2 残留：评审驳回后测试不得被放行（链条不假推进）"
+
+# ③ 评审**放行**（🟢）→ 计入 review 完成 → 测试才被放行
+rep2 = rev.do_review(T, source="PR", spec_ref="Issue",
+                     standards_axis={"🔴": [], "note": "无必修"},
+                     spec_axis={"faithful": True}, auto_route=False)
+assert rep2["disposition"] in ("merge", "proceed"), rep2["disposition"]
+assert "review" in (rep2["stage_closure"].get("completed") or []), rep2["stage_closure"]
+assert g.should_trigger(T, "testing")["allow"] is True, "评审放行后测试才该被放行"
+
+# ④ 测试收口点：🟢 计入完成；🔴 只释放不计完成
+assert hasattr(tst, "finish_testing"), "测试应具备 finish_testing 收口点（N2 生产路径）"
+ok = tst.finish_testing(T, signal="🟢")
+assert ok["closed"] is True and "testing" in (ok["stage_closure"].get("completed") or [])
+T2 = "测试阻塞"
+tst.finish_testing(T2, signal="🔴")
+assert "testing" not in (StageGate()._load().get(T2, {}).get("completed") or []), \
+    "🔴 阻塞不得计入 testing 完成"
+print("  OK 驳回不假推进：评审未放行 → 测试仍被拦；放行才推进；测试🟢收口/🔴不记完成")
+PYEOF16
+
+
 echo "===== [review-eff] ALL PASS ====="

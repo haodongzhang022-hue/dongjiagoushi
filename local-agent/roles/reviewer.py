@@ -460,6 +460,9 @@ class ReviewerRole(BaseRole):
                 "disposition": "fix_bug",
                 "disposition_result": disposition_result,
                 "effectiveness": eff,
+                # 不完整 → 只释放 review 活跃、**不计完成**（测试仍被拦）
+                "stage_closure": self._release_review_stage(
+                    gate, task_key, stage, "评审不完整（缺轴）→ 不计完成"),
                 "route": route,
                 "note": "评审未走完双轴，不完整，禁止放行（打回补齐双轴）。",
             }
@@ -497,6 +500,9 @@ class ReviewerRole(BaseRole):
                     "note": "链条按序推进：等上游收口后再触发，本轮零构建、不转交测试。",
                 },
                 "effectiveness": eff,
+                # 门控驳回 → 阶段本就未推进：只释放（不计完成）
+                "stage_closure": self._release_review_stage(
+                    gate, task_key, stage, "阶段门控驳回 → 不计完成"),
                 "route": None,
                 "route_type": "blocked_chain",
                 "note": ("阶段链门控驳回（%s）→ 本轮零构建、不假绿放行、不转交测试；"
@@ -558,13 +564,21 @@ class ReviewerRole(BaseRole):
             route = None
             route_type = "manual"
 
-        # N2 阶段收口（生产路径接线）：评审这一环做完了 → 把链交回下游
-        # （放行 → 测试可触发；打回 → 开发可重新触发）。此前无此调用点 → 链条永不推进。
+        # N2 阶段收口（生产路径接线）：评审这一环做完了 → 把链交回下游。
+        # **放行（merge/proceed）→ `mark_done`（计入 completed → 测试才被放行）**；
+        # **未放行（fix_bug/blocked/…）→ `release`（只解除活跃、不计完成 → 测试仍被拦）**。
+        # 残留修正：此前无条件 `mark_done` → 评审**驳回**后测试仍被放行 = 链条假推进。
         try:
             from review_cycle.gate import StageGate
-            (gate or StageGate()).mark_done(task_key, stage)
+            _g = gate or StageGate()
+            if disposition_label in PASS_DISPOSITIONS and review_complete:
+                stage_closure = _g.mark_done(task_key, stage)
+            else:
+                stage_closure = _g.release(
+                    task_key, stage,
+                    reason="评审处置=%s（未放行）→ 只释放，不计完成" % disposition_label)
         except Exception:  # noqa: BLE001
-            pass
+            stage_closure = None
 
         eff = self._record_review_disposition(
             disposition_label=disposition_label,
@@ -586,6 +600,7 @@ class ReviewerRole(BaseRole):
             "disposition": disposition_label,
             "disposition_result": disp,
             "effectiveness": eff,
+            "stage_closure": stage_closure,
             "route_type": route_type,
             "route": route,
             "note": (
@@ -594,6 +609,18 @@ class ReviewerRole(BaseRole):
                       if select_error
                       else "双轴存在必修/spec 不忠实，已打回。")),
         }
+
+    @staticmethod
+    def _release_review_stage(gate, task_key, stage, reason):
+        """只释放评审活跃、**不计完成**（未放行/不完整/门控驳回时用）。
+
+        N2 残留修正：评审**未放行**时若仍 `mark_done` → 下游测试被放行 = 链条假推进。
+        """
+        try:
+            from review_cycle.gate import StageGate
+            return (gate or StageGate()).release(task_key, stage, reason=reason)
+        except Exception:  # noqa: BLE001
+            return None
 
     # ------------------------------------------------------------
     # 评审通过 → 真实转交「架构·测试」（解决"只描述没真交付"）

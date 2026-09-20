@@ -102,7 +102,7 @@ class StageGate(object):
     @staticmethod
     def _blank(task_key, now):
         return {"task_key": task_key, "active": None, "visited": [],
-                "verdicts": {}, "updated_at": now}
+                "completed": [], "verdicts": {}, "updated_at": now}
 
     # ---------- 登记阶段活动（某阶段"正在跑"） ----------
     def mark_active(self, task_key, stage, note="", now=None):
@@ -133,9 +133,11 @@ class StageGate(object):
 
     # ---------- 阶段收口（某阶段做完，"交回"给链条） ----------
     def mark_done(self, task_key, stage, now=None):
-        """登记某阶段收口：仅当其正是当前活跃阶段才解除（防误清）。
+        """登记某阶段**收口（真做完）**：解除活跃 + 计入 `completed`。
 
-        同时把该阶段记入 `visited`（供乱序判定"回头补上游"）。
+        `completed` 是**上游收口判据**（`should_trigger` 只看它）——只有真做完的阶段
+        才放行下游，避免"曾跑过/曾活跃"被误当收口（复评 N2 残留：评审**驳回**后
+        测试仍被放行 = 链条假推进）。
         """
         self._validate_stage(stage)
         now = now if now is not None else time.time()
@@ -147,11 +149,48 @@ class StageGate(object):
             rec["updated_at"] = now
         if stage not in rec.get("visited", []):
             rec.setdefault("visited", []).append(stage)
+        if stage not in rec.get("completed", []):
+            rec.setdefault("completed", []).append(stage)
         rec["last_done"] = {"stage": stage, "at": now}
         d[task_key] = rec
         self._save(d)
         return {"ok": True, "task_key": task_key, "stage": stage,
-                "cleared": active.get("stage") == stage}
+                "cleared": active.get("stage") == stage,
+                "completed": list(rec.get("completed", []))}
+
+    # ---------- 阶段释放（阶段结束但**未通过**：驳回/回转） ----------
+    def release(self, task_key, stage, reason="", now=None):
+        """释放某阶段的活跃登记但**不记完成**（评审驳回 / 测试阻塞：本轮没通过）。
+
+        与 `mark_done` 的区别：`release` 只解除"在跑"，**不计入 `completed`** →
+        下游**不会**被放行（评审驳回后测试仍被拦，链条不假推进）。
+        """
+        self._validate_stage(stage)
+        now = now if now is not None else time.time()
+        d = self._load()
+        rec = d.get(task_key) or self._blank(task_key, now)
+        active = rec.get("active") or {}
+        if active.get("stage") == stage:
+            rec["active"] = None
+            rec["updated_at"] = now
+        if stage not in rec.get("visited", []):
+            rec.setdefault("visited", []).append(stage)
+        rec["last_release"] = {"stage": stage, "at": now, "reason": reason}
+        d[task_key] = rec
+        self._save(d)
+        return {"ok": True, "task_key": task_key, "stage": stage,
+                "released": active.get("stage") == stage,
+                "completed": list(rec.get("completed", []))}
+
+    def mark_role_release(self, task_key, role, reason="", now=None):
+        """按**角色名**释放阶段（未通过时用，不计完成）。"""
+        stage = spec.ROLE_STAGE.get(role)
+        if stage is None:
+            return {"ok": False, "reason": "未注册角色 %r（spec.ROLE_STAGE）" % role,
+                    "task_key": task_key, "role": role}
+        out = self.release(task_key, stage, reason=reason, now=now)
+        out["role"] = role
+        return out
 
     # ---------- 生产路径接线便捷入口（N2：阶段收口必须有真实调用点） ----------
     def mark_role_done(self, task_key, role, now=None):
@@ -203,6 +242,7 @@ class StageGate(object):
             "since": active.get("since"),
             "repeats": active.get("repeats", 0),
             "visited": list(rec.get("visited", [])),
+            "completed": list(rec.get("completed", [])),
             "verdicts": dict(rec.get("verdicts", {}) or {}),
             "updated_at": rec.get("updated_at"),
         }
@@ -217,13 +257,14 @@ class StageGate(object):
         self._validate_stage(stage)
         now = now if now is not None else time.time()
         rec = self._load().get(task_key) or {}
-        visited = list(rec.get("visited", []))
+        completed = list(rec.get("completed", []))
         active = self.active_stage(task_key, now=now)
         upstream = spec.UPSTREAM.get(stage)
-        # 上游是否已收口：**上游（或更上游）确已完成后**才为 True；
-        # 仅"正在活跃推进"不算收口（活跃在上游 = 上游还在跑，本阶段发起即抢跑）。
+        # 上游是否已收口：**上游确已做完（completed）**才为 True。
+        # 仅"曾跑过/正在活跃推进/被驳回释放"都**不算**收口——评审驳回后测试仍须等
+        # 评审真通过（N2 残留修正：否则驳回 = 链条假推进）。
         up_done = (upstream is not None and
-                   upstream in visited and
+                   upstream in completed and
                    active != upstream)
 
         def _verdict(decision):

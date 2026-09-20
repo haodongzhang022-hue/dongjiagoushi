@@ -146,6 +146,10 @@ collect(提交增量，不立即唤醒)
 - **生产路径必须真接线（N2）**：阶段收口 `mark_done` 接在开发交付 / 评审放行 / 测试收口 /
   编排节点（`BaseRole.mark_stage_done` + `orchestrator._stage_wire`），且**被驳回的轮次不得写
   `processed_fps`**（否则上游事后收口、同一份 diff 永不发车、不可自愈）；
+- **收口 vs 释放（N2 残留修正）**：上游收口判据只看 `completed`——
+  **放行**才 `mark_done`（计入 `completed` → 下游被放行）；**未放行/驳回/不完整/门控驳回**
+  一律 `release`（只解除"在跑"、**不计完成**）→ 下游**仍被拦**。此前评审无条件 `mark_done`，
+  会让**评审驳回**后测试照样被放行 = 链条假推进（测试组 16 红灯门）；
 - **驳回轮不计 `reused`（N4）**：驳回既非真发车、也非"复用省构建"，不得虚增
   `reused_rounds` / `avoided_builds` 的省量口径；
 - `force=True` 是**显式逃生门**（"我知道在抢跑/复用"），判决留痕 `forced=True`，不静默绕过；
@@ -246,7 +250,7 @@ python3 local-agent/run.py --dashboard review_cycle
 
 ## 六、测试护栏
 
-`local-agent/tests/test_review_efficiency.sh`（15 组信号灯，红灯即阻塞）：
+`local-agent/tests/test_review_efficiency.sh`（16 组信号灯，红灯即阻塞）：
 
 1. 稳定骨架构建 → 复用 → 变更即失效（指纹判据）+ **变更段重建/未变更段复用/context 随骨架更新**；
 2. 攒批去重门：整批一次构建 + 同指纹再入列被拦截；
@@ -263,6 +267,9 @@ python3 local-agent/run.py --dashboard review_cycle
 14. **N2 生产默认路径**：**不注入 gate** 的链式推进 + 真发车（开发未收口驳回 → 开发收口 →
     发车 → 评审收口 → 测试放行），直测"生产接线缺失"这一原缺陷；
 15. **S3c**：调度器发车必须携带本轮 `diff_fp`（落门）+ 不落他方未携带指纹 + 跨任务不误拦；
+16. **驳回不假推进（N2 残留门）**：评审**未放行**（`fix_bug`）→ `release` 不计完成 →
+    **下游测试仍被拦**；评审**放行**才 `mark_done` → 测试被放行；测试 `finish_testing`
+    🟢 计入完成 / 🔴 只释放不计完成；
 10. **false-green 红灯门（返工新增）**：① 跨任务同缺省指纹（无指纹）**不得**互相跳过、
     跨任务同内容指纹因 `task_key` 不同**不得**互相跳过；② **演练后真实执行不得被跳过**；
     ③ 空队列发车 + 无关发车**不得**误记指纹；④ 选测失败（`select_error`）→ `review_complete=False`
