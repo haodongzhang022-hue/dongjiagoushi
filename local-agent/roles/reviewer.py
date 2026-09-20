@@ -27,7 +27,8 @@ except Exception:  # noqa: BLE001
     disposition = None
 
 
-# 评审通过 → 可放行转交测试的规范处置标签（其余需回转/调研/会诊/交人）
+# 评审通过 → 可放行转交测试的规范处置标签（其余需回转/调研/会诊/交人/等上游收口）
+# 注意（N3）：`blocked`（阶段链门控驳回）**必须不在**此集合内——它非放行、不转交测试。
 PASS_DISPOSITIONS = ("merge", "proceed")
 
 
@@ -131,18 +132,18 @@ class ReviewerRole(BaseRole):
         （返回键同时含 diff_fp 去重键与 gate 阶段门判决）
         """
         # ---- 阶段链门控（先判链、再谈攒批；驳回即零构建，正是"乱触发"要拦下的）----
+        # 走 `admit`（判定 + 判决计数 + 放行才登记活跃），不用裸 should_trigger——
+        # 否则 overview 的 gates 计数拿不到数据（复评 P1）。
         from review_cycle.gate import StageGate, record_gate
         g = gate or StageGate()
-        gv = g.should_trigger(task_key, stage, force=force)
+        gv = g.admit(task_key, stage, note="评审攒批触发", force=force)
         record_gate(gv)
         if not gv["allow"]:
             return {"ok": True, "skipped": True, "diff_fp": None,
                     "selected": [], "bus": None, "plan": None,
-                    "gate": gv, "reused": gv.get("decision") == "blocked_active",
+                    "gate": gv, "reused": gv.get("reused", False),
                     "reason": "[阶段门:%s] %s" % (gv["decision"], gv["reason"]),
                     "cost_note": "阶段门驳回 → 零构建（拦下一次乱触发）"}
-        if not gv.get("forced"):
-            g.mark_active(task_key, stage, note="评审攒批触发")
 
         try:
             from hybrid.bus import BusRunner
@@ -463,6 +464,46 @@ class ReviewerRole(BaseRole):
                 "note": "评审未走完双轴，不完整，禁止放行（打回补齐双轴）。",
             }
 
+        # ②.5 阶段链门控驳回（N3）：**非质量结论、非放行**——不得给 merge/proceed，
+        #     也不得转交测试。驳回说明"链条本该按序推进，此刻这一环被门控驳回"，
+        #     统一落规范处置标签 `blocked`（`route=resume_chain`，不在 PASS_DISPOSITIONS）。
+        gate_verdict = (batch or {}).get("gate") or {}
+        gate_blocked = bool(gate_verdict) and not gate_verdict.get("allow", True)
+        if gate_blocked and not gate_verdict.get("forced"):
+            label = "blocked"
+            if disposition is not None:
+                label = disposition.dispose(
+                    problem="阶段链门控驳回(%s)" % gate_verdict.get("decision", ""),
+                    label="blocked").get("disposition", "blocked")
+                if label in PASS_DISPOSITIONS:   # 兜底纠正，防回归
+                    label = "blocked"
+            eff = self._record_review_disposition(
+                disposition_label=label, blocked=True,
+                axes_complete=True, task_key=task_key, source=source)
+            return {
+                "task_key": task_key,
+                "source": source,
+                "context_pack": context_pack,
+                "batch": batch,
+                "axis_report": axis_report,
+                "axes_complete": True,
+                "review_complete": False,
+                "disposition": label,
+                "gate_blocked": True,
+                "gate": gate_verdict,
+                "disposition_result": {
+                    "disposition": label,
+                    "reason": "阶段链门控驳回：%s" % gate_verdict.get("reason", ""),
+                    "note": "链条按序推进：等上游收口后再触发，本轮零构建、不转交测试。",
+                },
+                "effectiveness": eff,
+                "route": None,
+                "route_type": "blocked_chain",
+                "note": ("阶段链门控驳回（%s）→ 本轮零构建、不假绿放行、不转交测试；"
+                         "等上游阶段收口后按链重新推进。"
+                         % gate_verdict.get("decision", "")),
+            }
+
         # ③ 双轴完整 → 按必改优先原则落规范处置标签
         # S6：变更选测失败（select_error）**不得放行**——以测试为准被绕过即 false green。
         # 口径：选测失败 → 本轮拿不到可信测试信号 → 与"有必修"同等级（fix_bug）。
@@ -495,6 +536,14 @@ class ReviewerRole(BaseRole):
                                     f"Spec:{axis_report['axes']['spec']}"),
                     disposition_label=disposition_label)
                 route_type = "handoff_to_tester"
+            elif disposition_label in ("merge", "proceed"):
+                # 理论不可达（放行分支已在上面处理）；兜底不改道，显式暴露
+                route = None
+                route_type = "manual"
+            elif disposition_label == "blocked":
+                # 阶段链未推进：不转交测试、也不当质量结论打回开发（等上游收口）
+                route = None
+                route_type = "blocked_chain"
             else:
                 route = self.revert_to_developer(
                     task_key,
@@ -508,6 +557,14 @@ class ReviewerRole(BaseRole):
         else:
             route = None
             route_type = "manual"
+
+        # N2 阶段收口（生产路径接线）：评审这一环做完了 → 把链交回下游
+        # （放行 → 测试可触发；打回 → 开发可重新触发）。此前无此调用点 → 链条永不推进。
+        try:
+            from review_cycle.gate import StageGate
+            (gate or StageGate()).mark_done(task_key, stage)
+        except Exception:  # noqa: BLE001
+            pass
 
         eff = self._record_review_disposition(
             disposition_label=disposition_label,

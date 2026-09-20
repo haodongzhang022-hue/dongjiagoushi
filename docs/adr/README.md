@@ -44,7 +44,7 @@
 | [0009-默认真实传输](0009-live-transport-over-mock.md) | 默认走真实 cnb.cool 传输，mock 降为单测/兜底 | Accepted |
 | [0010-三宿主真实传输](0010-three-host-real-transport.md) | 本地/网页/云端三宿主同契约真实机制，非 mock 假装 | Accepted |
 | [0011-评审增量上下文+攒批异步](0011-review-incremental-coalesced-cycle.md) | 评审循环走增量上下文+攒批异步，不做同步乒乓逐轮复述/构建 | Accepted |
-| [0012-阶段链门控](0012-stage-chain-gate.md) | 开发→测试→评审走阶段链门控，不让本该串行的环节并行/重复触发 | Accepted |
+| [0012-阶段链门控](0012-stage-chain-gate.md) | 开发→评审→测试走阶段链门控，不让本该串行的环节并行/重复触发 | Accepted |
 
 ## 维护纪律
 

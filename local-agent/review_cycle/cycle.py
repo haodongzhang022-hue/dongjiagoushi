@@ -113,7 +113,7 @@ class Round(object):
     def __init__(self, task_key, index, diff_fp, pack_fp,
                  dispatched=False, reused=False, tests=None, disposition_label="",
                  cost=None, state="idle", select_error="", trigger="",
-                 stage_gate=None):
+                 stage_gate=None, gate_blocked=False, node=""):
         self.task_key = task_key
         self.index = index
         self.diff_fp = diff_fp
@@ -130,6 +130,11 @@ class Round(object):
         self.select_error = select_error
         # 阶段链门控判决（Issue #150 打断补齐）：非 None 表示本轮触发前过了门控
         self.stage_gate = stage_gate or {}
+        # 本轮是否**被阶段门驳回**（N4）：驳回轮既非真发车、也非"复用省构建"，
+        # 不得计入 reused/avoided_builds（省量口径不得虚增）
+        self.gate_blocked = bool(gate_blocked)
+        # 本轮落在评审段的哪个节点（读 spec.NODES/STATE_NODE，P5：声明真被读取）
+        self.node = node
 
     def to_dict(self):
         return {
@@ -140,6 +145,8 @@ class Round(object):
             "cost": self.cost, "state": self.state, "trigger": self.trigger,
             "select_error": self.select_error,
             "stage_gate": self.stage_gate,
+            "gate_blocked": self.gate_blocked,
+            "node": self.node,
         }
 
 
@@ -156,6 +163,8 @@ class Scheduler(object):
     def __init__(self, dry_run=True, root_dir=None, interval=None, bus=None,
                  gate=None, stage="review"):
         self.dry_run = dry_run
+        # 变更清单不可用时的显式说明（🟢：git 不可用不静默当"无变更"，留痕区分）
+        self.select_note = ""
         # 本调度器驱动的是**阶段链上的哪一环**（默认评审环；测试环传 stage="testing"）
         self.stage = stage
         # 阶段链门控器（Issue #150 打断补齐）：开发未收口即不许抢跑测试/评审
@@ -173,6 +182,20 @@ class Scheduler(object):
             return self._gate
         self._gate = _gate_mod.StageGate()
         return self._gate
+
+    # ---------- 评审段节点表（S5/P5：spec.NODES 声明**真被读取**，不各自取名） ----------
+    def segment_nodes(self):
+        """评审段内部节点表（读唯一事实源 `spec.NODES`）。
+
+        返回 [{"id","role","action","node_order"}]；供 CLI/大盘/测试读取，
+        避免"声明了 NODES 却没人用"（复评 P5）。
+        """
+        return [dict(n, node_order=i) for i, n in enumerate(spec.NODES)]
+
+    @staticmethod
+    def node_of_state(state):
+        """状态 → 承载节点 id（唯一事实源 `spec.STATE_NODE`）。"""
+        return spec.STATE_NODE.get(state, "")
 
     # ---------- 攒批通道：入列 0 成本，到点/显式 flush 才发车 ----------
     def _bus_runner(self):
@@ -299,11 +322,11 @@ class Scheduler(object):
             # ③ 阶段链门控（Issue #150 打断补齐）：本该串行，不得并行抢跑/重复触发
             #    上游（开发）未收口 → 驳回；本阶段已在跑 → 复用（不新起任务/不冲进度）
             gate = self._gate_runner()
-            gv = gate.should_trigger(task_key, self.stage, force=force)
+            # 走 `admit`（判定 + 判决计数 + 放行才登记活跃）——裸 should_trigger 不计数，
+            # 会让 gate.overview() 的 gates 恒为 0（复评 P1）。
+            gv = gate.admit(task_key, self.stage, force=force,
+                            note="评审段 %s 第 %d 轮" % (task_key, i + 1))
             _gate_mod.record_gate(gv)
-            if gv["allow"] and not gv.get("forced"):
-                gate.mark_active(task_key, self.stage,
-                                 note="评审段 %s 第 %d 轮" % (task_key, i + 1))
 
             # ④④ 攒批入列（0 成本）→ 本轮调度点整批发车（一次构建跑完一批）
             #    门控驳回 → **不触发任何构建**（这正是"乱触发"要拦下的那部分）
@@ -311,7 +334,10 @@ class Scheduler(object):
             dispatched = False
             if tests and not already and gv["allow"]:
                 bus = self._bus_runner()
-                bus.enqueue(tests, source="review_cycle",
+                # S3c：本轮 diff_fp 必须**显式交给 bus**（走 enqueue 携带，勿再 dispatch
+                # 重复登记）——否则调度路径"同 diff 不重复触发"实际失效，且队列残留他方
+                # 指纹时会把别人的指纹记成自己的（复评 S3c）。
+                bus.enqueue(tests, source="review_cycle", diff_fp=diff_fp,
                             note="评审段 %s 第 %d 轮" % (task_key, i + 1))
                 plan = bus.dispatch(note="review_cycle %s r%d" % (task_key, i + 1))
                 dispatched = True
@@ -324,12 +350,18 @@ class Scheduler(object):
             if not gv["allow"]:
                 disp = self._dispose_blocked(gv)
                 rnd = Round(task_key, i + 1, diff_fp, pack["stable_fp"],
-                            dispatched=False, reused=True, tests=tests,
+                            dispatched=False,
+                            # N4：驳回轮**既非真发车、也非"复用省构建"**——
+                            # 一律不计 reused（否则 reused_rounds/avoided_builds 虚增）
+                            reused=False, tests=tests,
                             disposition_label=disp, cost=self._cost(None, pack),
                             state="blocked", select_error=select_error,
-                            stage_gate=gv)
+                            trigger="gate_blocked", stage_gate=gv,
+                            gate_blocked=True,
+                            node=self.node_of_state("idle"))
                 rounds.append(rnd)
-                processed.add(diff_fp)
+                # N2：被驳回的轮次**不得**把 diff_fp 记入 processed（否则上游事后收口、
+                # 同一份 diff 也永不发车 → 门控把主路径打死且不可自愈）
                 rec["rounds"].append(rnd.to_dict())
                 rec["stage_gate"] = gv
                 continue
@@ -345,11 +377,23 @@ class Scheduler(object):
                         dispatched=dispatched, reused=already, tests=tests,
                         disposition_label=disp, cost=self._cost(plan, pack),
                         state=cur_state, select_error=select_error,
-                        trigger=trigger, stage_gate=gv)
+                        trigger=trigger, stage_gate=gv,
+                        node=self.node_of_state(cur_state))
             rounds.append(rnd)
             if diff_fp:
                 processed.add(diff_fp)
             rec["rounds"].append(rnd.to_dict())
+            # 本轮段已跑完 → 登记本阶段收口（链条交回下游；下一轮重新按链推进）。
+            # 这样多轮 run 内不会把"自己持有的进行中阶段"误判成外部重复触发
+            # （blocked_active），同时保证 run 结束后链条确实是"未在跑"状态。
+            if dispatched or already:
+                gate.mark_done(task_key, self.stage)
+
+        # N2：本轮段真推进过（有真发车/复用轮）→ 登记**本阶段收口**，把链交回下游。
+        # 这是生产路径的 mark_done 接线点（此前只存在于 demo/测试脚本 → 评审段永不发车）。
+        advanced = any(r.dispatched or r.reused for r in rounds)
+        if advanced:
+            gate.mark_done(task_key, self.stage)
 
         # 跑完本轮段：有轮次则落 done（评审段完成，走合法路径校验），无轮次保持 idle
         if rounds:
@@ -387,19 +431,25 @@ class Scheduler(object):
 
     # ---------- 内部：被阶段门驳回了该给什么处置标签 ----------
     def _dispose_blocked(self, verdict):
-        """门控驳回 ≠ 质量结论：不得给 merge/proceed（那是"放行"语义，会假绿）。
+        """门控驳回 ≠ 质量结论：**必须给非放行标签**（复评 N3）。
 
-        驳回说明链条要按序推进 → 统一映射到规范处置标签：
-          · blocked_upstream / blocked_switched（抢跑/乱序）→ `proceed`
-            （含义：先继续推进上游/按序推进，不是终局，别卡死链条）；
-          · blocked_active（重复触发）→ `proceed`（复用进行中的任务，不再起新任务）。
-        复用同一 `collab.disposition` 分类器，不自取名。
+        此前映射到 `proceed` 是**错的**——`proceed` ∈ `reviewer.PASS_DISPOSITIONS`
+        （`passes_to_tester("proceed") is True`），会让"一个测试都没跑"的驳回轮
+        照样转交测试、给出假绿放行。
+
+        正确口径：驳回 = 「链条本该按序推进，此刻这一环被门控驳回」→ 规范处置标签
+        **`blocked`（链式未推进·待上游收口）**，它是 `collab.disposition` 唯一事实源里的
+        非放行标签（`route=resume_chain`），**不**在 PASS_DISPOSITIONS 内，不转交测试。
         """
         if disposition is None:
-            return "proceed"
+            return "blocked"
         problem = "阶段链门控驳回(%s)" % verdict.get("decision", "")
-        return disposition.dispose(problem=problem, severity="🟡").get(
-            "disposition", "proceed")
+        label = disposition.dispose(problem=problem, label="blocked").get(
+            "disposition", "blocked")
+        # 兜底纠正：任何"放行"语义标签都不得出现在驳回轮（防回归）
+        if label in ("merge", "proceed"):
+            label = "blocked"
+        return label
 
     # ---------- 内部：处置（复用统一审查处置标签，不各自取名） ----------
     def _dispose(self, signals, vol, reused):
@@ -442,9 +492,11 @@ class Scheduler(object):
                 if r.get("dispatched"):
                     dispatched += 1
                     batches += r.get("cost", {}).get("batches", 0)
-                if r.get("reused"):
+                # N4：只有**真复用**（同指纹零构建）才计入 reused；
+                # 被阶段门驳回的轮次（gate_blocked）既未发车也未省构建，不得虚增省量
+                if r.get("reused") and not r.get("gate_blocked"):
                     reused += 1
-                if r.get("state") == "blocked":
+                if r.get("state") == "blocked" or r.get("gate_blocked"):
                     blocked += 1
                 g = r.get("stage_gate") or {}
                 d = g.get("decision")
@@ -481,6 +533,7 @@ class Scheduler(object):
         cycles = _load_state()
         return {
             "module": spec.MODULE,
+            "nodes": self.segment_nodes(),   # P5：NODES 声明真被读取并透出
             "stats": self.stats(),
             "cycles": {
                 k: {"state": v.get("state"),

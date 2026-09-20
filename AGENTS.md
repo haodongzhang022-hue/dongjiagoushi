@@ -430,12 +430,17 @@
   需要即时结论时用 `force=True` / `flush=True` 显式发车绕过攒批，**不静默降质量**。
 - **⑥ 阶段链门控·本该串行不得并行/重复触发（stage-gate · Issue #150 打断补齐）**：
   开发还在跑，测试/评审就并发触发、同一阶段被重复触发，会把链条搞乱、**稀释进度基准致失衡**。
-  约束：跨角色阶段链（`development→testing→review`）走 `review_cycle/gate.py` 确定性门控——
-  **上游未收口不许抢跑**（`blocked_upstream`）、**本阶段已在跑 = 重复触发 → 复用进行中任务
-  不新起不冲进度**（`blocked_active`）、**从下游起头致乱序 → 拒绝**（`blocked_switched`）；
-  被驳回 = **零构建**且**不得给假绿放行标签**（统一映射规范处置 `proceed`）；`force=True`
+  约束：跨角色阶段链（`development→review→testing`，**仓库权威链条**：评审通过才转交测试，
+  与 `reviewer.handoff_to_tester()` / `DEV_ENHANCED_NODES` 同源）走 `review_cycle/gate.py`
+  确定性门控——**上游未收口不许抢跑**（`blocked_upstream`）、**本阶段已在跑 = 重复触发 → 复用
+  进行中任务不新起不冲进度**（`blocked_active`）、**下游在跑时回头补上游 = 乱序 → 拒绝**
+  （`blocked_switched`）；被驳回 = **零构建**且**不得给假绿放行标签**（统一映射规范处置
+  `blocked` = 链式未推进·待上游收口，**非放行**，不转交测试）；`force=True`
   是显式逃生门（留痕 `forced=True`，不静默绕过）；阶段活动登记带静默接管（默认 1800s，
-  `REVIEW_STAGE_QUIET_SECONDS` 可覆盖）防残留卡死链条；判决写 `archives(kind='stage_gate')`，
+  `REVIEW_STAGE_QUIET_SECONDS` 可覆盖）防残留卡死链条；**生产路径必须真接线**——开发交付/
+  评审放行/测试收口/编排节点处显式 `mark_done`（`BaseRole.mark_stage_done` /
+  `orchestrator._stage_wire`），被驳回的轮次**不得**写 `processed_fps`（否则上游事后收口、
+  同一 diff 永不发车、不可自愈）；判决写 `archives(kind='stage_gate')`，
   `blocked_retriggers` 是"进度是否失衡"的可核验口径（`--review-cycle gate` / 控制页可俯瞰）。
 - **⑦ 运行时状态不进版本库**：`hybrid/.bus_queue.json`（含去重门记忆）/`.quota_ledger.json`
   已 gitignore 并移出版本库——否则门记忆跨机器"继承"，真实测试被别机指纹静默跳过。

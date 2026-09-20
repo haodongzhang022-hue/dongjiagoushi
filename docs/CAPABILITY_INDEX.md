@@ -32,13 +32,13 @@
 | **全员** | 开发规范能力（StandardAbility）| 合规/规范/检查/标准 | `local-agent/dev-standard/` | docs/DEV_STANDARD.md | Issue #83 |
 | **协作** | 同岗协作（PeerCollab）| 会诊/编队/补位/同岗 | `local-agent/collab/` | docs/PEER_COLLAB.md | Issue #47 |
 | **协作** | 同岗收尾闭环 | 会诊未收敛/收尾 | `local-agent/collab/closure.py` | docs/PEER_COLLAB_CLOSURE.md | Issue #47 |
-| **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 |
+| **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote/blocked | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 · #150 |
 | **质量** | 有效性度量模型 | 度量/有效性/解决度/缺陷/稳定性/通用性/一致性 | `local-agent/review_metrics/` | docs/REVIEW_METRICS.md | Issue #100 决策⑤ |
 | **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
 | **质量** | 功能级校验（feature-verify）| 功能校验/功能做完/feature-verify/feature-regress/坏功能定位 | `scripts/feature-verify/` + `scripts/feature-verify.sh` | docs/FEATURE_VERIFY.md | Issue #109 |
 | **效率** | 评审增量上下文（review-context）| 评审复述/增量上下文/冻结骨架/免复述/上下文复用 | `local-agent/review_context/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-context v0.2.0 |
 | **效率** | 评审段调度器（review-cycle）| 评审段/攒批/异步收集/同指纹不重复构建/减CPU损耗 | `local-agent/review_cycle/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-cycle v0.2.0 |
-| **协作** | 阶段链门控（stage-gate）| 阶段链/抢跑/重复触发/乱序/链条按序推进/进度失衡 | `local-agent/review_cycle/gate.py` | docs/REVIEW_EFFICIENCY.md §二.④ | Issue #150 · module review-cycle v0.3.0 |
+| **协作** | 阶段链门控（stage-gate）| 阶段链/抢跑/重复触发/乱序/链条按序推进/进度失衡 | `local-agent/review_cycle/gate.py` | docs/REVIEW_EFFICIENCY.md §二.④ | Issue #150 · module review-cycle v0.3.2 |
 | **效率** | 攒批去重门（bus diff_fp）| 攒批去重/同指纹不重复发车/一次构建摊全批 | `local-agent/hybrid/bus.py` | docs/REVIEW_EFFICIENCY.md | Issue #150（hybrid bus 增强）|
 | **质量** | 审核前置助手（决策补全）| 二选一/拿不准/解决不掉/换方案 | `roles/manager.py`(审核前置) | docs/REVIEWER_PRECURSOR.md | Issue #47 |
 | **防无效** | 监控哨兵 | 监控/哨兵/停滞/横跳/无效努力 | `local-agent/sentinel/` | docs/SENTINEL.md | Issue #33 |
@@ -113,7 +113,7 @@
 | 我要改模型/想知道某角色用哪个模型/想知道配置有没有真生效 | model-routing（改 `local-agent/model_routing/models.yml` 一处：default.chain 通用链 + roles 按角色覆盖；角色名已接进调用链，改配置即长期生效；`PYTHONPATH=local-agent python3 -m model_routing.cli chain [角色]`）|
 | 评审每轮都要我复述整个大项目 | 评审增量上下文（review-context：冻结骨架摘要 + 本轮变化）|
 | 评审/开发反复触发、CPU 构建损耗大 | 评审段调度器（review-cycle：攒批 + 同指纹不重复触发 + 一次构建摊全批）|
-| 开发还没完就跑测试/评审、链条乱了/进度失衡 | 阶段链门控（stage-gate：上游未收口不抢跑 + 同阶段不重复触发，驳回即零构建）|
+| 开发还没完就跑测试/评审、链条乱了/进度失衡 | 阶段链门控（stage-gate：开发→评审→测试，上游未收口不抢跑 + 同阶段不重复触发，驳回即零构建 + 非放行 `blocked`）|
 
 ## 四、维护纪律
 

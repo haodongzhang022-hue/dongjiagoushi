@@ -33,7 +33,8 @@ def main(argv=None):
     d = sub.add_parser("demo", help="演示：两轮评审段的增量复用 + 攒批")
     d.add_argument("--real", action="store_true", help="真实执行测试（默认演练）")
     sub.add_parser("stats", help="省下的成本报表")
-    sub.add_parser("overview", help="全局俯瞰（每任务轮次表 + 报表）")
+    sub.add_parser("overview", help="全局俯瞰（节点表 + 每任务轮次表 + 报表）")
+    sub.add_parser("nodes", help="评审段内部节点表（唯一事实源 spec.NODES）")
     sub.add_parser("gate", help="阶段链门控大盘（放行/三类驳回统计）")
 
     r = sub.add_parser("run", help="跑一轮/多轮评审段")
@@ -54,6 +55,10 @@ def main(argv=None):
         return 0
     if args.cmd == "overview":
         _dump(sch.overview())
+        return 0
+    if args.cmd == "nodes":
+        _dump({"module": spec.MODULE, "module_version": spec.MODULE_VERSION,
+               "nodes": sch.segment_nodes()})
         return 0
     if args.cmd == "gate":
         from review_cycle.gate import StageGate, gate_stats

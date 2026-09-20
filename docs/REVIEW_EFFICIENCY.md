@@ -122,8 +122,12 @@ collect(提交增量，不立即唤醒)
 > 也就是说中间本该以链条进行，往后运行的他一次触发了。开发和测试就乱了。
 > 导致重复触发也会导致进度失衡。」
 
-把「开发 → 测试 → 评审」从"一次触发就多点并发"改回**链式有序推进**。唯一事实源
-`review_cycle/stage_spec.py`（`STAGE_ORDER` / `UPSTREAM` / `GATE_DECISIONS`），
+把「开发 → 评审 → 测试」从"一次触发就多点并发"改回**链式有序推进**。唯一事实源
+`review_cycle/stage_spec.py`（`STAGE_ORDER` / `UPSTREAM` / `GATE_DECISIONS`）。
+> **顺序依据（复评 N1 校正）**：仓库权威链条是 **开发 → 评审 → 测试**——`roles/reviewer.py`
+> 首行即「评审通过后**真实转交测试**」（`handoff_to_tester()`），`topology/topologies.py`
+> 的 `DEV_ENHANCED_NODES`（`review` depends_on `dev_*`；`test` depends_on `review`）同源。
+> 此前误写为 开发→测试→评审，会把评审永久拦在测试之后、与既有转交链路语义颠倒。
 引擎 `review_cycle/gate.py` 做**确定性判定**（不让 LLM 决定"现在该谁跑"）：
 
 | 判决 | 含义 | 动作 |
@@ -131,12 +135,19 @@ collect(提交增量，不立即唤醒)
 | `allow` | 上游已收口 + 本阶段未在跑 | 链式往后推进（才允许起构建） |
 | `blocked_active` | **本阶段已在跑**（重复触发） | **复用进行中的任务**，不新起、不冲进度 |
 | `blocked_upstream` | **上游未收口**就发起本阶段（抢跑） | 拒绝，**零构建**，先让上游按链收口 |
-| `blocked_switched` | 下游已跑过再回头补上游（乱序） | 拒绝，防止一条链被并行拆成两条 |
+| `blocked_switched` | **下游正在跑时回头补上游**（乱序） | 拒绝，防止一条链被并行拆成两条 |
 
 **为什么能"拦下且不假绿"**：
 - 驳回 = **零构建**（`dispatched=False`），这正是"乱触发"里最贵的那部分；
-- 驳回**不得给 `merge`/`proceed`** 之外假绿放行语义的标签——`_dispose_blocked` 统一映射到
-  规范处置 `proceed`（含义："按序继续推进"，不是终局，不卡死链条）；
+- 驳回**不得给假绿放行标签**——`_dispose_blocked` 统一映射到规范处置 **`blocked`**
+  （含义："链式未推进·待上游收口"，`route=resume_chain`，**非放行**、不转交测试）。
+  > 复评 N3 修正：此前映射到 `proceed` 是错的——`proceed` ∈ `PASS_DISPOSITIONS`
+  > （`passes_to_tester("proceed") is True`），会让"一个测试都没跑"的驳回轮照样转交测试；
+- **生产路径必须真接线（N2）**：阶段收口 `mark_done` 接在开发交付 / 评审放行 / 测试收口 /
+  编排节点（`BaseRole.mark_stage_done` + `orchestrator._stage_wire`），且**被驳回的轮次不得写
+  `processed_fps`**（否则上游事后收口、同一份 diff 永不发车、不可自愈）；
+- **驳回轮不计 `reused`（N4）**：驳回既非真发车、也非"复用省构建"，不得虚增
+  `reused_rounds` / `avoided_builds` 的省量口径；
 - `force=True` 是**显式逃生门**（"我知道在抢跑/复用"），判决留痕 `forced=True`，不静默绕过；
 - 阶段活动登记表带**静默接管**（`DEFAULT_QUIET_SECONDS=1800`，可用 `REVIEW_STAGE_QUIET_SECONDS`
   覆盖）——某阶段打标残留不会被永久当作"在跑"卡死整条链。
@@ -230,12 +241,12 @@ python3 local-agent/run.py --dashboard review_cycle
 | `review-context caching`（LLM 前缀缓存） | LLM 层治 token 前缀；本模块治"评审**上下文文本**逐轮复述"，作用在编排/角色层 |
 | `review-metrics`（有效性度量） | 度量治"评审有没有效"，本模块治"评审**有多贵**"，正交 |
 | `reviewer.do_review`（双轴+处置） | 本模块是 `do_review` 的**效率前置**（先攒批、先增量上下文，再双轴评审），不改双轴/处置契约 |
-| `dev_team`（开发小组闭环） | DevTeam 管**小组内**开发执行-验证闭环；阶段门管**跨角色**链条先后（开发→测试→评审），互补不重叠 |
+| `dev_team`（开发小组闭环） | DevTeam 管**小组内**开发执行-验证闭环；阶段门管**跨角色**链条先后（开发→评审→测试），互补不重叠 |
 | `relay`/`relay_card`（接力卡） | 接力卡管"谁接谁的活"；阶段门管"此刻该谁跑"，两者正交 |
 
 ## 六、测试护栏
 
-`local-agent/tests/test_review_efficiency.sh`（10 组信号灯，红灯即阻塞）：
+`local-agent/tests/test_review_efficiency.sh`（15 组信号灯，红灯即阻塞）：
 
 1. 稳定骨架构建 → 复用 → 变更即失效（指纹判据）+ **变更段重建/未变更段复用/context 随骨架更新**；
 2. 攒批去重门：整批一次构建 + 同指纹再入列被拦截；
@@ -244,9 +255,14 @@ python3 local-agent/run.py --dashboard review_cycle
 5. 批量节省口径：10 轮 × 5 测试的构建次数显著下降，且**确认真发过车**（`dispatched_builds>0`）；
 6. 增量上下文 token 量化 + 留痕可回溯；
 7. 评审段大盘 + 控制页 `/review-cycle` 路由可读；
-8. **阶段链门控**：抢跑/重复/乱序全拦、链式推进放行、`force` 逃生门留痕（唯一事实源断言）；
-9. **拦截可核验**：被驳回**零构建**（`dispatched=False`）、不得假绿放行、大盘 `blocked_rounds`/
-   `blocked_retriggers` 计数；
+11. **阶段链门控**：抢跑/重复/乱序全拦、链式推进放行、`force` 逃生门留痕（唯一事实源断言 +
+    N1 顺序校正 + P1 `gates` 真实计数）；
+12. **拦截可核验**：被驳回**零构建**（`dispatched=False`）、**非放行标签 `blocked`**（N3）、
+    驳回轮不计 `reused`（N4）、上游收口后同 diff 可发车（N2 可自愈）、大盘计数；
+13. **N3 端到端**：被门驳回的 `do_review` 不得假绿放行 / 不得转交测试（`route_type=blocked_chain`）；
+14. **N2 生产默认路径**：**不注入 gate** 的链式推进 + 真发车（开发未收口驳回 → 开发收口 →
+    发车 → 评审收口 → 测试放行），直测"生产接线缺失"这一原缺陷；
+15. **S3c**：调度器发车必须携带本轮 `diff_fp`（落门）+ 不落他方未携带指纹 + 跨任务不误拦；
 10. **false-green 红灯门（返工新增）**：① 跨任务同缺省指纹（无指纹）**不得**互相跳过、
     跨任务同内容指纹因 `task_key` 不同**不得**互相跳过；② **演练后真实执行不得被跳过**；
     ③ 空队列发车 + 无关发车**不得**误记指纹；④ 选测失败（`select_error`）→ `review_complete=False`

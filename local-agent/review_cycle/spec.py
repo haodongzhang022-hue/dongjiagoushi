@@ -8,7 +8,7 @@
 """
 
 MODULE = "review-cycle"
-MODULE_VERSION = "v0.3.1"
+MODULE_VERSION = "v0.3.2"
 
 # 评审段状态机（确定性；不让 LLM 决定"下一步/是否结束"）
 # 状态推进由 cycle.advance_state() 依据「本轮的触发门控 + 是否发车」确定性计算，
@@ -38,12 +38,26 @@ TRIGGER_STATE = {
 }
 
 # 评审段节点（DAG 顺序；每个节点有"触发门控"，满足才真触发，否则复用/跳过）
+# 说明：这是**评审段内部**的证据流水线（拿测试信号 → 回评审），不是跨角色阶段链
+# （跨角色链条见 `stage_spec.STAGE_ORDER` = 开发→评审→测试）。两者分工不同，勿混。
 NODES = (
     {"id": "collect",     "role": "架构·开发", "action": "提交本轮增量（不立即唤醒）"},
     {"id": "coalesce",    "role": "架构·测试", "action": "攒批：变更感知选测 + 入列 Bus"},
     {"id": "dispatch",    "role": "架构·测试", "action": "整批发车：一次构建跑完一批"},
     {"id": "review",      "role": "架构·评审", "action": "增量上下文回评审（冻结骨架+本轮变化）"},
 )
+
+# 节点 id 的有序元组（由 NODES 派生，供引擎/CLI/测试读取，不各自再写一遍）
+NODE_IDS = tuple(n["id"] for n in NODES)
+
+# 评审段状态 → 承载它的节点 id（状态机与节点表**同源**，不各自取名）
+STATE_NODE = {
+    "idle": "collect",
+    "collecting": "coalesce",
+    "dispatched": "dispatch",
+    "reviewed": "review",
+    "done": "review",
+}
 
 # 触发门控（哪个信号满足才真触发，否则判定"复用/跳过"）
 TRIGGERS = (
@@ -56,4 +70,5 @@ TRIGGERS = (
 DEFAULT_INTERVAL_SECONDS = 900
 
 __all__ = ["MODULE", "MODULE_VERSION", "STATES", "STATE_TRANSITIONS",
-           "TRIGGER_STATE", "NODES", "TRIGGERS", "DEFAULT_INTERVAL_SECONDS"]
+           "TRIGGER_STATE", "NODES", "NODE_IDS", "STATE_NODE", "TRIGGERS",
+           "DEFAULT_INTERVAL_SECONDS"]

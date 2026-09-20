@@ -129,7 +129,7 @@ class BusRunner(object):
         queued_names = {t["test"] for t in d.get("tests", [])}
         tests = [t for t in tests if t and t not in queued_names]
         if not tests:
-            st = self.status()
+            st = self.status(data=d)      # 复用已载入数据，不重复 I/O
             st["skipped_fp"] = None
             return st
         for t in tests:
@@ -142,7 +142,7 @@ class BusRunner(object):
             })
         d["interval"] = self.interval
         self._save(d)
-        st = self.status()
+        st = self.status(data=d)          # 复用已载入数据，不重复 I/O
         st["skipped_fp"] = None
         return st
 
@@ -188,8 +188,9 @@ class BusRunner(object):
                 "queued": queued, "elapsed": int(elapsed)}
 
     # ---------- 状态（站台信息） ----------
-    def status(self):
-        d = self._load()
+    def status(self, data=None):
+        # data: 可选，调用方已载入的队列 dict（避免重复 I/O；不传则自行载入）
+        d = data if data is not None else self._load()
         tests = d.get("tests", [])
         now = _now_epoch()
         last = float(d.get("last_dispatch", 0.0))

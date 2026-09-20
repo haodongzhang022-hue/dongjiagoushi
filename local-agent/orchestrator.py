@@ -123,6 +123,38 @@ def _fractal_develop(plan, req, llm, card, team):
     return card["output"]
 
 
+# ---------------------------------------------------------------------------
+# 阶段链门控生产接线（Issue #150 复评 N2）
+# ---------------------------------------------------------------------------
+# 背景：阶段门控的 `mark_done` 此前只存在于 demo 与测试脚本，生产路径**没有任何收口
+# 登记点** → 上游"永不收口"→ 评审段整条主路径被打死（复评 N2）。
+# 这里把编排节点执行前后接到阶段链上：角色开工登记活跃、节点完成登记收口，
+# 链条据此按「开发 → 评审 → 测试」有序推进（阶段名映射走唯一事实源 ROLE_STAGE）。
+def _stage_task_key(req):
+    """编排内的稳定阶段任务键（同一需求二次触发不漂移）。"""
+    return "pipeline:" + (req or "")[:48]
+
+
+def _stage_wire(role_name, req, phase, gate=None):
+    """按角色名把编排节点接到阶段链（开工/收口），返回留痕 dict。
+
+    phase: "active"（节点开工）| "done"（节点收口）
+    未注册阶段角色（如经理/秘书）→ 返回 ok=False，不影响主流程。
+    """
+    try:
+        from review_cycle import stage_spec as _ss
+        if role_name not in _ss.ROLE_STAGE:
+            return {"ok": False, "reason": "角色无阶段", "role": role_name}
+        from review_cycle.gate import StageGate
+        g = gate or StageGate()
+        tk = _stage_task_key(req)
+        if phase == "active":
+            return g.mark_role_active(tk, role_name, note="编排节点开工")
+        return g.mark_role_done(tk, role_name)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": str(e), "role": role_name}
+
+
 def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
              force_topology=None, complexity=None, subtasks=None, concurrency=None):
     """执行团队流水线到交付。默认走 DAG 调度；use_dag=False 回退线性。
@@ -361,7 +393,10 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                         out = f"[错误] 未注册角色 {nd['role']}"
                         card["status"] = "blocked"
                     else:
+                        # N2 阶段链接线：开工登记 → 执行 → 收口登记（链条按序推进）
+                        _stage_wire(nd["role"], req, "active")
                         out = _run_one(role, card.get("input", req), llm, card, nd)
+                        _stage_wire(nd["role"], req, "done")
 
                 card["output"] = out
                 card["input"] = out  # 下游消费本环输出
@@ -442,7 +477,10 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                     out = f"[错误] 未注册角色 {nd['role']}"
                     card["status"] = "blocked"
                 else:
+                    # N2 阶段链接线（线性回退同样接上，避免"只有 DAG 才按序"）
+                    _stage_wire(nd["role"], req, "active")
                     out = _run_one(role, card.get("input", req), llm, card, nd)
+                    _stage_wire(nd["role"], req, "done")
 
             card["output"] = out
             card["input"] = out
@@ -500,8 +538,11 @@ def run_role(role_name, req, backend=None, llm=None):
     role = get_role(role_name)
     if role is None:
         return {"error": f"未注册角色 {role_name}；可用: {list(get_role_registry_names())}"}
+    # N2 阶段链接线：单角色触发同样登记开工/收口（否则门控看不到上游收口）
+    _stage_wire(role_name, req, "active")
     output = role.run(llm, req)
-    return {"role": role_name, "output": output}
+    stage_done = _stage_wire(role_name, req, "done")
+    return {"role": role_name, "output": output, "stage_done": stage_done}
 
 
 def get_role_registry_names():
