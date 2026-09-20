@@ -8,9 +8,11 @@
 """
 
 MODULE = "review-cycle"
-MODULE_VERSION = "v0.3.0"
+MODULE_VERSION = "v0.3.1"
 
 # 评审段状态机（确定性；不让 LLM 决定"下一步/是否结束"）
+# 状态推进由 cycle.advance_state() 依据「本轮的触发门控 + 是否发车」确定性计算，
+# 不是硬编码常量（Issue #150 返工 S5：声明即接线，文档与实现一致）。
 STATES = (
     "idle",        # 未开始
     "collecting",  # 增量收集中（开发/测试请求已入列，尚未发车）
@@ -18,6 +20,22 @@ STATES = (
     "reviewed",    # 已回评审（拿到双轴/处置）
     "done",        # 评审段完成
 )
+
+# 状态合法迁移表（确定性；越界迁移即编程错误，advance_state 会拒绝）
+STATE_TRANSITIONS = {
+    "idle": ("collecting",),
+    "collecting": ("dispatched", "reviewed"),
+    "dispatched": ("reviewed",),
+    "reviewed": ("done",),
+    "done": (),
+}
+
+# 触发门控 → 状态推进的确定性映射（TRIGGERS 的每项对应一个目标状态）
+TRIGGER_STATE = {
+    "diff_changed": "collecting",     # 变更指纹变化 → 进入收集
+    "batch_ready": "dispatched",      # 攒批就绪且真发车 → 已发车
+    "fingerprint_new": "reviewed",    # 指纹未被处理过 → 可做评审处置
+}
 
 # 评审段节点（DAG 顺序；每个节点有"触发门控"，满足才真触发，否则复用/跳过）
 NODES = (
@@ -37,5 +55,5 @@ TRIGGERS = (
 # 默认攒批窗口（秒）：BusRunner 的"15 分钟一班"由 hybrid.bus 承载，此处仅声明期望
 DEFAULT_INTERVAL_SECONDS = 900
 
-__all__ = ["MODULE", "MODULE_VERSION", "STATES", "NODES", "TRIGGERS",
-           "DEFAULT_INTERVAL_SECONDS"]
+__all__ = ["MODULE", "MODULE_VERSION", "STATES", "STATE_TRANSITIONS",
+           "TRIGGER_STATE", "NODES", "TRIGGERS", "DEFAULT_INTERVAL_SECONDS"]

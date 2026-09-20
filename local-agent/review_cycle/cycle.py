@@ -13,6 +13,7 @@ from review_cycle import spec
 from review_cycle import stage_spec
 from review_cycle import gate as _gate_mod
 from review_context import engine as ctx_engine
+from review_context.paths import repo_root as _repo_root
 
 # 可选依赖（缺失即降级，不崩）：评审角色 / 回写桥 / 哨兵
 try:
@@ -51,6 +52,59 @@ def _save_state(data):
 
 
 # ---------------------------------------------------------------------------
+# 一.5、状态机推进（确定性 · S5：spec.STATES/TRIGGERS 声明必须真被读取）
+# ---------------------------------------------------------------------------
+def advance_state(current, trigger, dispatched=False, reused=False,
+                  select_error=""):
+    """依据「触发门控 + 本轮事实」确定性推进评审段状态（不让 LLM 决定下一步）。
+
+    规则（与 spec.TRIGGER_STATE / spec.STATE_TRANSITIONS 同源，不各自取名）：
+      - 选测失败（select_error）→ 停在 collecting（拿不到测试信号，不得进 reviewed）；
+      - 真发车（dispatched）→ 走到 reviewed（本轮内 collect→dispatched→reviewed）；
+      - 复用轮（reused）→ 走到 reviewed（零构建，引用上轮信号）；
+      - 其余 → 保持当前状态。
+    目标状态若与当前不直接相邻，沿 spec.STATE_TRANSITIONS **逐跳走合法路径**（如
+    idle → collecting → dispatched → reviewed）；无合法路径 → 显式抛错，不静默放行。
+    """
+    if current not in spec.STATES:
+        raise ValueError("未知评审段状态: %r" % (current,))
+    if trigger not in spec.TRIGGERS:
+        raise ValueError("未知触发门控: %r" % (trigger,))
+    if select_error:
+        target = "collecting"
+    elif dispatched or reused:
+        target = "reviewed"
+    else:
+        target = current
+    return walk_to(current, target)
+
+
+def walk_to(current, target):
+    """沿 spec.STATE_TRANSITIONS 逐跳走到目标状态（BFS 最短路径，确定性）。
+
+    无合法路径 → 显式抛错（不静默放行）；`current == target` 原样返回。
+    """
+    if current not in spec.STATES:
+        raise ValueError("未知评审段状态: %r" % (current,))
+    if target not in spec.STATES:
+        raise ValueError("未知目标状态: %r" % (target,))
+    if target == current:
+        return current
+    queue = [current]
+    seen = {current}
+    while queue:
+        node = queue.pop(0)
+        for nxt in spec.STATE_TRANSITIONS.get(node, ()):
+            if nxt in seen:
+                continue
+            if nxt == target:
+                return nxt
+            seen.add(nxt)
+            queue.append(nxt)
+    raise ValueError("非法状态迁移（无合法路径）: %s → %s" % (current, target))
+
+
+# ---------------------------------------------------------------------------
 # 二、轮次（round）—— 同一评审段的多轮迭代，靠指纹判定"是否真需要跑"
 # ---------------------------------------------------------------------------
 class Round(object):
@@ -58,7 +112,7 @@ class Round(object):
 
     def __init__(self, task_key, index, diff_fp, pack_fp,
                  dispatched=False, reused=False, tests=None, disposition_label="",
-                 cost=None, state="idle", select_error="",
+                 cost=None, state="idle", select_error="", trigger="",
                  stage_gate=None):
         self.task_key = task_key
         self.index = index
@@ -70,6 +124,8 @@ class Round(object):
         self.disposition = disposition_label
         self.cost = cost or {}
         self.state = state
+        # 本轮命中的触发门控（spec.TRIGGERS 之一，S5：声明真被读取）
+        self.trigger = trigger
         # 选测失败显式留痕（不静默吞：空串=无错，非空=真实故障信息）
         self.select_error = select_error
         # 阶段链门控判决（Issue #150 打断补齐）：非 None 表示本轮触发前过了门控
@@ -81,7 +137,7 @@ class Round(object):
             "diff_fp": self.diff_fp, "pack_fp": self.pack_fp,
             "dispatched": self.dispatched, "reused": self.reused,
             "tests": self.tests, "disposition": self.disposition,
-            "cost": self.cost, "state": self.state,
+            "cost": self.cost, "state": self.state, "trigger": self.trigger,
             "select_error": self.select_error,
             "stage_gate": self.stage_gate,
         }
@@ -105,8 +161,9 @@ class Scheduler(object):
         # 阶段链门控器（Issue #150 打断补齐）：开发未收口即不许抢跑测试/评审
         self._gate = gate
         self.gate = gate
-        # _HERE = <repo>/local-agent → 仓库根 = dirname(_HERE)（修复：原先多 dirname 一次解析到 "/"）
-        self.root_dir = root_dir or os.path.dirname(_HERE)
+        # 仓库根走**唯一事实源** review_context.paths.repo_root()（S8：与评审角色同口径，
+        # 不再两处各自 dirname 导致语义分裂）
+        self.root_dir = root_dir or _repo_root()
         self.interval = interval or spec.DEFAULT_INTERVAL_SECONDS
         self._bus = bus
 
@@ -144,6 +201,19 @@ class Scheduler(object):
         sel = IncrementalSelector(root_dir=self.root_dir)
         return list(sel.select(changed) or [])
 
+    @staticmethod
+    def _dedup_fp(diff_summary, task_key=""):
+        """去重键 = 真实变更内容指纹 + 任务/批次键（与 reviewer._dedup_key 同口径）。
+
+        空/缺省 `diff_summary` → 返回 ""（视为**无指纹**，不占门、不去重），
+        避免退化为空串常量哈希造成跨任务静默跳过（S1）。
+        """
+        text = (diff_summary or "").strip()
+        if not text:
+            return ""
+        return ctx_engine.fingerprint({"diff_summary": text,
+                                       "task_key": (task_key or "").strip()})
+
     def _changed_files(self):
         """变更文件清单（确定性回退链，兼容本地开发与 CI/PR 两种场景）。
 
@@ -170,6 +240,10 @@ class Scheduler(object):
             files = [x for x in proc.stdout.splitlines() if x.strip()]
             if files:
                 return files
+        # git 全部候选不可用（返回码非 0 / 异常）与「真的无变更」语义不同：
+        # 留一条 self.select_note 显式区分，避免"看起来没变更"掩盖真实故障（C01）。
+        self.select_note = ("git 不可用或无基线：变更清单为空（调用方可显式传 "
+                            "changed_files 注入）")
         return []
 
     # ---------- 主入口：跑一轮（或增量多轮）评审段 ----------
@@ -191,20 +265,26 @@ class Scheduler(object):
         """
         cycles = _load_state()
         rec = cycles.get(task_key) or {"task_key": task_key, "rounds": [],
-                                       "processed_fps": []}
+                                       "processed_fps": [], "state": "idle"}
         processed = set(rec.get("processed_fps", []))
         rounds = []
         pack = prev_pack
         volatiles = round_volatiles or [volatile or {}]
         bus_state = None   # 最后一班车的站台状态（供返回/俯瞰；无发车则 None）
+        # 起始状态：上一段已 done（终态）→ 本次是**新评审段**，从 idle 重新走
+        # （避免终态后再迁移被状态机拒绝；确定性，不做隐式重置）
+        prev_state = rec.get("state") or "idle"
+        cur_state = "idle" if prev_state == "done" else prev_state
 
         for i in range(min(max_rounds, len(volatiles))):
             vol = dict(volatiles[i] or {})
             # ① 增量上下文：只吃 (冻结骨架摘要 + 本轮变化)
             pack = ctx_engine.build(stable or {}, vol, prev=pack, task_key=task_key)
             # ② 触发门控：diff 指纹已处理过且非强制 → 不重复触发开发/构建
-            diff_fp = ctx_engine.fingerprint(vol.get("diff_summary", ""))
+            #    去重键掺入 task_key（与 reviewer._dedup_key 同口径，防跨任务误命中）
+            diff_fp = self._dedup_fp(vol.get("diff_summary", ""), task_key)
             already = (diff_fp in processed) and not force
+            trigger = "diff_changed" if not already else "fingerprint_new"
             select_error = ""
             if already:
                 tests = []
@@ -236,6 +316,7 @@ class Scheduler(object):
                 plan = bus.dispatch(note="review_cycle %s r%d" % (task_key, i + 1))
                 dispatched = True
                 bus_state = bus.status()
+                trigger = "batch_ready"
 
             # ⑤ 以测试为准：整批信号决定处置（无测试/复用时引用上轮信号）
             #    门控驳回 → 阶段未真正推进，不给 merge/proceed（不假装放行）
@@ -254,18 +335,27 @@ class Scheduler(object):
                 continue
             disp = self._dispose(test_signals, vol, reused=already)
 
-            # ⑥ 回评审（增量上下文）：评审只吃 pack["context"]
+            # ⑥ 状态机确定性推进（spec.STATES/TRIGGERS 真被读取，S5）
+            cur_state = advance_state(cur_state, trigger,
+                                      dispatched=dispatched, reused=already,
+                                      select_error=select_error)
+
+            # ⑦ 回评审（增量上下文）：评审只吃 pack["context"]
             rnd = Round(task_key, i + 1, diff_fp, pack["stable_fp"],
                         dispatched=dispatched, reused=already, tests=tests,
                         disposition_label=disp, cost=self._cost(plan, pack),
-                        state="reviewed", select_error=select_error,
-                        stage_gate=gv)
+                        state=cur_state, select_error=select_error,
+                        trigger=trigger, stage_gate=gv)
             rounds.append(rnd)
-            processed.add(diff_fp)
+            if diff_fp:
+                processed.add(diff_fp)
             rec["rounds"].append(rnd.to_dict())
 
+        # 跑完本轮段：有轮次则落 done（评审段完成，走合法路径校验），无轮次保持 idle
+        if rounds:
+            cur_state = walk_to(cur_state, "done")
         rec["processed_fps"] = sorted(processed)
-        rec["state"] = "done" if rounds else "idle"
+        rec["state"] = cur_state
         rec["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         with _STATE_LOCK:
             cycles[task_key] = rec
@@ -362,6 +452,9 @@ class Scheduler(object):
                     gates[d] += 1
                 saved_tokens += r.get("cost", {}).get("context_saved_tokens", 0)
         avoided = reused  # 被复用拦下的构建次数 = 省下的构建
+        select_errors = sum(
+            1 for rec in cycles.values() for r in rec.get("rounds", [])
+            if r.get("select_error"))
         return {
             "module": spec.MODULE,
             "module_version": spec.MODULE_VERSION,
@@ -371,6 +464,7 @@ class Scheduler(object):
             "batched_runs": batches,
             "reused_rounds": reused,
             "avoided_builds": avoided,
+            "select_error_count": select_errors,   # S7：选测故障不静默
             "context_saved_tokens": saved_tokens,
             # ---- 阶段链门控（Issue #150 打断补齐）：拦下多少"乱触发"（重复/抢跑/乱序）----
             "stage_gates": gates,
@@ -395,12 +489,20 @@ class Scheduler(object):
                                       if r.get("dispatched")),
                     "reused": sum(1 for r in v.get("rounds", [])
                                   if r.get("reused")),
+                    # S7：选测失败已持久化到轮次，俯瞰必须透出（不静默藏）
+                    "select_errors": [
+                        r.get("select_error") for r in v.get("rounds", [])
+                        if r.get("select_error")],
                     "blocked": sum(1 for r in v.get("rounds", [])
                                    if r.get("state") == "blocked"),
                     "active_stage": (v.get("stage_gate") or {}).get("stage", ""),
                     "updated_at": v.get("updated_at")}
                 for k, v in cycles.items()
             },
+            # S7：全局 select_error 计数（人类/哨兵一眼看到有无选测故障）
+            "select_error_count": sum(
+                1 for v in cycles.values() for r in v.get("rounds", [])
+                if r.get("select_error")),
         }
 
     def reset(self):

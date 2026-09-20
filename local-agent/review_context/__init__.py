@@ -16,17 +16,20 @@
   - fingerprint(payload)                             内容指纹（唯一失效判据）
   - reuse_decision(prev, sources)                    能否复用冻结骨架 + 原因
   - estimate_saved_tokens(pack)                      量化省下的复述 token
+  - repo_root()                                      仓库根解析（唯一事实源 · S8）
 
 CLI：
   python -m review_context build --stable '{"a":"..."}' --volatile '{"b":"..."}'
   python -m review_context demo
 """
-from . import spec, engine
+from . import spec, engine, paths
 from .engine import (build, fingerprint, reuse_decision,
                      estimate_saved_tokens, reset_for_tests)
+from .paths import repo_root
 
 __all__ = [
-    "spec", "engine",
+    "spec", "engine", "paths",
     "build", "fingerprint", "reuse_decision",
     "estimate_saved_tokens", "reset_for_tests",
+    "repo_root",
 ]

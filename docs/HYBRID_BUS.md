@@ -59,6 +59,26 @@ python3 -m hybrid.cli bus dispatch --real
 发车默认参数：`--interval 900`（15 分钟）、`--parallel 4`、`--timeout 600`。
 `--dry` 演练模式不真跑，仅产出等效汇总（安全审计用）。
 
+### 攒批去重门（`--diff-fp` · Issue #150 返工加固）
+
+`--diff-fp <指纹>` 让"同一变更指纹"不重复触发构建。三条硬约束（缺一即 false green）：
+
+1. **无指纹不占门**：不传 `--diff-fp`（或评审侧 `diff_summary` 缺省）→ 视为**无指纹**，
+   不去重、不写门；**绝不**退化为空串常量哈希（`sha256:e3b0c44298fc`）而让无关任务被静默跳过；
+2. **演练不写穿**：`--dry` 发车**不写**持久化去重门（`gate_written=False`）——
+   演练没真跑测试，写门会让后续真实执行被静默跳过；
+3. **只记本批实际携带**：只把**本批实际携带**的指纹（队列条目自带 ∪ `--diff-fp`）写入门；
+   **空队列发车不写任何门状态**（返回 `carried_fps=[]` / `gate_written=False`）。
+
+> 去重粒度是**测试粒度**：同一测试已在队列中不重复入列；**同指纹的不同测试仍各自入列**
+> （指纹只作跨批次门，不吞掉别的测试）。
+
+### 运行时状态不进版本库（Issue #150 返工 S11）
+
+`.bus_queue.json`（攒批队列，含去重门记忆）/ `.quota_ledger.json`（配额账本）是**运行时状态**，
+已纳入 `.gitignore` 并从版本库移除——否则去重门记忆会**跨机器"继承"**，导致本机真实测试被
+别的机器留下的指纹静默跳过。
+
 ## 四、程序化接口
 
 ```python
@@ -100,8 +120,8 @@ result = b.tick()   # {"action": "wait", ...} 或 {"action": "dispatch", ...}
 local-agent/hybrid/bus.py          公交车式批量测试计划执行器（核心）
 local-agent/hybrid/cli.py          bus enqueue/status/dispatch/tick 子命令
 local-agent/hybrid/__init__.py     导出 BusRunner / default_bus
-local-agent/hybrid/.bus_queue.json 攒批队列（首次运行自动生成）
-local-agent/tests/test_hybrid_bus.sh  自含信号灯（20 项）
+local-agent/hybrid/.bus_queue.json 攒批队列（首次运行自动生成 · 已 gitignore，不进版本库）
+local-agent/tests/test_hybrid_bus.sh  自含信号灯（19 项）
 docs/HYBRID_BUS.md                 本文件
 ```
 

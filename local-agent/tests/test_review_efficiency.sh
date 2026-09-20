@@ -50,27 +50,40 @@ print("  ✅ S1：变更段重建（goal→%s）+ 未变更段复用 + context �
 print("      指纹判据: %s" % p2["stable_fp"])
 PYEOF
 
-echo "===== [review-eff] 2. 攒批去重门：同变更指纹不重复触发构建 ====="
+echo "===== [review-eff] 2. 攒批去重门：同变更指纹不重复触发构建（演练不写穿） ====="
 $PY - <<'PYEOF'
 import tempfile
 from hybrid.bus import BusRunner
-qf = tempfile.mktemp(suffix=".json")
-b = BusRunner(queue_file=qf, dry_run=True, interval=0)
-r = b.enqueue(["local-agent/tests/test_a.sh", "local-agent/tests/test_b.sh"],
-              diff_fp="fp-150")
+# --- 2a. 演练：整批一次构建测算 + **不写穿**去重门（S2） ---
+qf_dry = tempfile.mktemp(suffix=".json")
+bd = BusRunner(queue_file=qf_dry, dry_run=True, interval=0)
+r = bd.enqueue(["local-agent/tests/test_a.sh", "local-agent/tests/test_b.sh"],
+               diff_fp="fp-150")
 assert r["queued"] == 2
-plan = b.dispatch(note="批1")
+plan = bd.dispatch(note="批1", diff_fp="fp-150")
 assert plan["dispatched"] == 2 and plan["queued_cleared"] is True
 # 一次构建摊全批：2 个测试原本要 2 次冷启动，整批只要 1 次
 assert plan["summary"]["cold_starts_naive"] == 2
 assert plan["summary"]["cold_starts_batched"] == 1
 assert plan["summary"]["cold_start_saved"] == 1
+# S2：演练发车**不得**写穿持久化去重门
+assert plan["gate_written"] is False, "演练发车不得写穿去重门"
+assert bd.processed_fps() == set(), f"演练后门必须为空：{bd.processed_fps()}"
+
+# --- 2b. 真实发车：写门 → 同指纹再入列/再 tick 被拦截 ---
+qf = tempfile.mktemp(suffix=".json")
+b = BusRunner(queue_file=qf, dry_run=False, interval=0)
+b.enqueue(["local-agent/tests/test_probe.sh"], diff_fp="fp-real")
+plan2 = b.dispatch(note="批2", diff_fp="fp-real")
+assert plan2["gate_written"] is True, "真实发车必须写门"
+assert plan2["carried_fps"] == ["fp-real"], plan2["carried_fps"]
+assert b.processed_fps() == {"fp-real"}
 # 同指纹再次入列 → 拦截，不再触发构建
-r2 = b.enqueue(["local-agent/tests/test_a.sh"], diff_fp="fp-150")
-assert r2["queued"] == 0 and r2["skipped_fp"] == "fp-150", r2
-t = b.tick(diff_fp="fp-150")
+r2 = b.enqueue(["local-agent/tests/test_probe.sh"], diff_fp="fp-real")
+assert r2["queued"] == 0 and r2["skipped_fp"] == "fp-real", r2
+t = b.tick(diff_fp="fp-real")
 assert t["action"] == "skip", t
-print("  ✅ 整批一次构建(cold_start_saved=%d) + 同指纹再入列被拦截" %
+print("  ✅ 演练一次构建测算(cold_start_saved=%d)+不写穿；真实发车写门并拦截同指纹" %
       plan["summary"]["cold_start_saved"])
 PYEOF
 
@@ -186,7 +199,159 @@ print("  ✅ 省下 token ~%d，留痕 %d 条（reused=%s）"
       % (engine.estimate_saved_tokens(p2), len(recent), recent[-1]["reused"]))
 PYEOF
 
-echo "===== [review-eff] 7. 大盘俯瞰：评审段 + 控制页可读省下的成本 ====="
+echo "===== [review-eff] 7. false-green 红灯门（返工 S1/S2/S3/S6/S5/S8/S7） ====="
+$PY - <<'PYEOF'
+import os, tempfile
+from roles import get_role
+from hybrid.bus import BusRunner
+from review_cycle.gate import StageGate
+
+qf = tempfile.mktemp(suffix=".json")
+os.environ["BUS_QUEUE_FILE"] = qf
+r = get_role("架构·评审")
+
+def _gate(task):
+    """隔离的阶段门 + 让上游（开发→测试）先收口，专注验证去重门语义（不受阶段门干扰）。"""
+    g = StageGate(state_file=tempfile.mktemp(suffix=".json"))
+    g.mark_done(task, "development"); g.mark_done(task, "testing")
+    return g
+
+# --- S1-①：缺省 diff_summary → 视为"无指纹"，不占门、跨任务不得互相跳过 ---
+a = r.prepare_review_batch(task_key="任务A", extra_tests=["local-agent/tests/test_a.sh"],
+                           diff_summary="", dry_run=True, gate=_gate("任务A"))
+b = r.prepare_review_batch(task_key="任务B", extra_tests=["local-agent/tests/test_b.sh"],
+                           diff_summary="", dry_run=True, gate=_gate("任务B"))
+assert a["diff_fp"] is None, f"缺省 diff_summary 必须视为无指纹，实际 {a['diff_fp']!r}"
+assert b["diff_fp"] is None
+assert b["skipped"] is False and b["selected"] == ["local-agent/tests/test_b.sh"], \
+    f"任务B 的真实测试不得被任务A 静默跳过：{b}"
+# 常量空串哈希绝不得出现在去重门里
+assert "sha256:e3b0c44298fc" not in BusRunner(queue_file=qf).processed_fps()
+
+# --- S1-②：同一变更内容 + 不同 task_key → 去重键不同，不得互相跳过 ---
+c = r.prepare_review_batch(task_key="任务C", extra_tests=["local-agent/tests/test_c.sh"],
+                           diff_summary="同一份变更", dry_run=True, gate=_gate("任务C"))
+d = r.prepare_review_batch(task_key="任务D", extra_tests=["local-agent/tests/test_d.sh"],
+                           diff_summary="同一份变更", dry_run=True, gate=_gate("任务D"))
+assert c["diff_fp"] and d["diff_fp"] and c["diff_fp"] != d["diff_fp"], \
+    "去重键必须掺入 task_key（跨任务同内容不得同键）"
+assert d["skipped"] is False, "跨任务同内容不得被静默跳过"
+
+# --- S2：演练（dry-run）不得写穿持久化门 → 后续真实执行照跑 ---
+os.environ["BUS_QUEUE_FILE"] = tempfile.mktemp(suffix=".json")
+r2 = get_role("架构·评审")
+# 用各自独立的阶段门（S2 只验"去重门写穿"这一件事；阶段门的重复触发拦截由第 9 组专测）
+dry = r2.prepare_review_batch(task_key="T", extra_tests=["local-agent/tests/test_a.sh"],
+                              diff_summary="diff-X", dry_run=True, gate=_gate("T"))
+assert dry["gate_written"] is False, f"演练不得写穿去重门：{dry.get('gate_written')}"
+real = r2.prepare_review_batch(task_key="T", extra_tests=["local-agent/tests/test_a.sh"],
+                               diff_summary="diff-X", dry_run=False, gate=_gate("T"))
+assert real["skipped"] is False, "演练后真实执行不得被跳过（S2 false green）"
+assert real["selected"], "真实执行必须真的带上测试"
+
+# --- S3-①：空队列发车 + 无关发车不得误记指纹 ---
+qf3 = tempfile.mktemp(suffix=".json")
+b3 = BusRunner(queue_file=qf3, dry_run=False, interval=0)
+empty = b3.dispatch(diff_fp="X-未真跑", note="empty")
+assert empty["gate_written"] is False, "空队列发车不得写门"
+assert b3.processed_fps() == set(), f"空队列发车后门必须为空：{b3.processed_fps()}"
+b3.enqueue(["local-agent/tests/test_probe.sh"])
+p3 = b3.dispatch(note="unrelated")
+assert "X-未真跑" not in b3.processed_fps(), "无关发车不得误记别的指纹（S3）"
+assert p3["carried_fps"] == [], f"本批未携带任何指纹，carried 应为空：{p3['carried_fps']}"
+# X 的真实测试不再被静默跳过
+e3 = b3.enqueue(["local-agent/tests/test_x.sh"], diff_fp="X-未真跑")
+assert e3.get("queued") == 1, "X 的真实测试不得被误记的指纹静默跳过"
+
+# --- S6：选测失败（select_error）→ review_complete=False 且不放行 ---
+os.environ["BUS_QUEUE_FILE"] = tempfile.mktemp(suffix=".json")
+r3 = get_role("架构·评审")
+rep = r3.do_review("选测失败任务", source="PR #x", spec_ref="Issue #x",
+                   standards_axis={"🔴": [], "note": "ok"},
+                   spec_axis={"faithful": True},
+                   changed_files=["不存在的源码路径.py"],  # 命中不了任何测试 → select 空
+                   gate=_gate("选测失败任务"), auto_route=False)
+# 该路径 select 返回空（非异常）→ 视为"未命中"不阻塞；用显式 select_error 校验真失败路径
+import roles.reviewer as rv
+orig = rv.ReviewerRole.prepare_review_batch
+def _boom(self, *a, **k):
+    out = orig(self, *a, **k)
+    out["select_error"] = "RuntimeError: 选测器炸了"
+    out["blocked"] = True
+    return out
+rv.ReviewerRole.prepare_review_batch = _boom
+try:
+    rep2 = r3.do_review("选测真失败", source="PR #y", spec_ref="Issue #y",
+                        standards_axis={"🔴": [], "note": "ok"},
+                        spec_axis={"faithful": True},
+                        extra_tests=["local-agent/tests/test_a.sh"],
+                        gate=_gate("选测真失败"), auto_route=False)
+finally:
+    rv.ReviewerRole.prepare_review_batch = orig
+assert rep2["review_complete"] is False, "select_error 非空 → 评审不完整"
+assert rep2["disposition"] == "fix_bug", f"select_error 不得照常放行，实际 {rep2['disposition']}"
+assert rep2["blocked"] is True
+
+# --- S8：仓库根唯一（评审角色 == 调度器） ---
+from review_cycle import Scheduler
+assert r3.review_repo_root() == Scheduler(dry_run=True).root_dir, "仓库根解析必须唯一（S8）"
+print("  ✅ S1/S2/S3/S6/S8 红灯门全过（缺省不占门 / 演练不写穿 / 只记本批携带 / 选测失败不放行 / 仓库根唯一）")
+PYEOF
+
+echo "===== [review-eff] 8. 状态机真接线 + 俯瞰透出 select_error（S5/S7） ====="
+$PY - <<'PYEOF'
+import os, tempfile
+os.environ["BUS_QUEUE_FILE"] = tempfile.mktemp(suffix=".json")
+from review_cycle import Scheduler, spec
+from review_cycle.cycle import advance_state, walk_to
+
+# S5：STATES/TRIGGERS 声明真被读取驱动状态
+assert spec.STATE_TRANSITIONS and spec.TRIGGER_STATE, "状态迁移表必须存在"
+class _AllowGate:
+    """放行全部触发的门（本组只验状态机推进；阶段门语义由第 9 组专测）。"""
+    def should_trigger(self, task_key, stage, force=False, now=None):
+        return {"allow": True, "decision": "allow", "reason": "test", "forced": False,
+                "task_key": task_key, "stage": stage, "active_stage": None,
+                "upstream": None, "upstream_done": True, "actor": ""}
+    def mark_active(self, *a, **k):
+        return {"ok": True}
+sch = Scheduler(dry_run=True, gate=_AllowGate())
+sch.reset()
+out = sch.run("状态机任务", {"goal": "G" * 200}, None,
+              round_volatiles=[{"diff_summary": "d1"}, {"diff_summary": "d1"}],
+              max_rounds=2, changed_files=["local-agent/hybrid/bus.py"])
+r0, r1 = out["rounds"][0], out["rounds"][1]
+assert r0["state"] == "reviewed" and r0["trigger"] == "batch_ready", r0
+assert r1["state"] == "reviewed" and r1["trigger"] == "fingerprint_new", r1
+assert out["state"] == "done", out["state"]
+# 非法迁移显式抛错（不静默放行）
+try:
+    walk_to("done", "collecting")
+    raise AssertionError("done → collecting 应抛非法迁移")
+except ValueError:
+    pass
+# 选测失败 → 停在 collecting（不进 reviewed）
+assert advance_state("idle", "diff_changed", select_error="boom") == "collecting"
+
+# S7：overview/stats 透出 select_error（不静默藏）
+ov = sch.overview()
+assert "select_error_count" in ov, "overview 必须透出 select_error 计数"
+assert "select_error_count" in ov["stats"]
+print("  ✅ S5 状态机真接线（trigger/state 落轮次 + 非法迁移抛错）+ S7 俯瞰透出 select_error")
+PYEOF
+
+echo "===== [review-eff] 9. 文档 CLI 可执行（S9）+ ADR 路径一致（S10） ====="
+REPO_ROOT="$(cd .. && pwd)"   # 脚本开头已 cd 到 local-agent，故 .. 即仓库根
+PYTHONPATH="$REPO_ROOT/local-agent" $PY -m review_context demo >/dev/null 2>&1 || { echo "  ❌ python -m review_context 跑不通"; exit 1; }
+PYTHONPATH="$REPO_ROOT/local-agent" $PY -m review_cycle stats >/dev/null 2>&1 || { echo "  ❌ python -m review_cycle 跑不通"; exit 1; }
+PYTHONPATH="$REPO_ROOT/local-agent" $PY -m hybrid.cli bus status >/dev/null 2>&1 || { echo "  ❌ python -m hybrid.cli 跑不通"; exit 1; }
+PYTHONPATH="$REPO_ROOT/local-agent" $PY -m review_cycle gate >/dev/null 2>&1 || { echo "  ❌ python -m review_cycle gate 跑不通"; exit 1; }
+test -f "$REPO_ROOT/docs/adr/0011-review-incremental-coalesced-cycle.md" || { echo "  ❌ ADR-0011 路径不一致"; exit 1; }
+grep -q "0011-review-incremental-coalesced-cycle" "$REPO_ROOT/docs/REVIEW_EFFICIENCY.md" || { echo "  ❌ REVIEW_EFFICIENCY 未引用 ADR-0011"; exit 1; }
+grep -q "0011-review-incremental-coalesced-cycle" "$REPO_ROOT/docs/adr/README.md" || { echo "  ❌ ADR README 未登记 0011"; exit 1; }
+echo "  ✅ 文档 CLI 均可跑通 + ADR-0011 路径引用一致"
+
+echo "===== [review-eff] 10. 大盘俯瞰：评审段 + 控制页可读省下的成本 ====="
 $PY - <<'PYEOF'
 from review_cycle import Scheduler
 from entries import dashboard as dash

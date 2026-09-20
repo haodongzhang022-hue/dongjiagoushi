@@ -7,6 +7,8 @@
 > **定位**：把「评审 ⇄ 开发」的**同步乒乓**改成**异步攒批 + 增量复用**，从三处砍掉损耗。
 > 承载：`local-agent/review_context/` + `local-agent/review_cycle/` + `hybrid/bus.py`（攒批去重门）
 > + `roles/reviewer.py`（主流程接线）。文档与引擎对齐，禁止漂移。
+> **决策记录**：[`docs/adr/0011-review-incremental-coalesced-cycle.md`](adr/0011-review-incremental-coalesced-cycle.md)
+> （为何选"增量上下文 + 攒批异步"、未选方案与代价）。
 
 ## 一、损耗到底在哪（先把账算清）
 
@@ -64,6 +66,55 @@
 - **攒批去重门（新增·本 Issue）**：`enqueue(tests, diff_fp=...)` 带变更指纹，
   **同一指纹已发过车 → 直接拦截**（`skipped_fp`），不再重复处 → 同 diff 永不重复触发构建。
 
+**去重键控三条硬约束（返工 S1/S2/S3，缺一即 false green）**：
+
+1. **键 = 真实变更内容指纹 + 任务/批次键**：评审段/评审角色算的 `diff_fp` 是
+   `fingerprint({diff_summary, task_key})`——掺入 `task_key` 后，**同一变更内容在不同任务下
+   不会被误判为"已处理"**（消除跨任务静默跳过）。`diff_summary` **缺省/空白 → 视为"无指纹"
+   （`diff_fp=None`），不占门、不做去重**，绝**不得**退化为空串常量哈希（`sha256:e3b0c44298fc`）
+   而让后续无关任务被静默跳过；
+2. **演练不写穿**：`dry_run=True`（演练）发车**不写**持久化 `processed_fps`——
+   演练没真跑测试，写门会让**后续真实执行被静默跳过**（`gate_written=False` 显式标注）；
+3. **只记本批实际携带**：`dispatch` 只把**本批实际携带**的指纹（队列条目自带 ∪ 显式 `diff_fp`）
+   写入去重门；**空队列提前返回不写任何门状态**。不再有"与发车无关的登记值"被误记
+   （旧的 `set_pending_fp` 单标量预登记接口已移除，正是"登记值 ≠ 本批实际携带"的根因）。
+
+### ③ 评审段调度器 · 增量收集而非乒乓（`review_cycle`）
+
+评审段（review segment）= 一次「评审 → 开发增量 → 测试信号 → 回评审」的调度单位：
+
+```
+collect(提交增量，不立即唤醒)
+   → coalesce(变更感知选测 + 入列 Bus，0 成本)
+      → dispatch(整批发车，一次构建跑完一批)
+         → review(增量上下文回评审：冻结骨架摘要 + 本轮变化)
+```
+
+确定性状态机（`spec.STATES` / `spec.STATE_TRANSITIONS` / `spec.TRIGGERS` /
+`spec.TRIGGER_STATE`），**由 `cycle.advance_state()` 真读取驱动**（不是声明了不用），
+不让 LLM 决定"下一步/是否结束"：
+
+- **触发门控**：`diff_changed`（指纹变才真触发开发/构建）/ `batch_ready`（队列非空才发车）/
+  `fingerprint_new`（指纹未被处理过才做评审处置）；
+- **同指纹轮次复用**：`reused=True` → 本轮**零构建**，只引用上轮测试信号与结论；
+- **以测试为准**：整批信号灯（🟢/🔴）决定处置标签（走 `collab.disposition`，不各自取名）。
+
+**三条工程约束（缺一即"永不发车"，信号灯红灯拦）**：
+
+1. `root_dir` 必须解析到**仓库根**（`os.path.dirname(_HERE)`，`_HERE=<repo>/local-agent`）——
+   多 `dirname` 一次会解析到 `/`，`git diff` 与选测全部落空；
+2. 选测器用 `IncrementalSelector(root_dir=…)` **显式实例化**——`default_selector` 是**实例**
+   不是工厂函数，当函数调用会 `TypeError`（`hasattr(default_selector,"root_dir")` 恒 True 是
+   **误导性判据**，实例本就带该属性）；
+3. 选测失败**不静默吞**（对齐 dev-standard C01）：异常上抛/显式留痕到本轮 `select_error`，
+   由调用方降级为"不拉构建"，避免"看起来没变更"掩盖真实故障。
+
+`run()` 支持 `changed_files=[...]` 显式注入变更清单（替代工作区 `git diff`，供测试/调用方用）。
+无注入时 `_changed_files()` 走**确定性回退链**，兼容本地开发与 CI/PR 两种场景：
+工作区 diff → 暂存区 diff → `origin/main...HEAD` → `main...HEAD` → `HEAD~1..HEAD`（取首个非空）。
+`tests/test_review_efficiency.sh` 组 4 断言**真实变更下 `dispatched=True` 且 `batched_runs>0`**，
+组 5 断言 `dispatched_builds>0`——防"取 0 也算过"的过宽断言掩盖"永不发车"。
+
 ### ④ 阶段链门控 · 本该串行不得并行/重复触发（`review_cycle.gate` · 打断补齐）
 
 > **用户痛点（Issue #150 追加）**：
@@ -94,40 +145,6 @@
 `stats().blocked_retriggers` = 被拦下的乱触发总数（进度不失衡的可核验口径）。
 俯瞰：`python local-agent/run.py --review-cycle gate` / `--dashboard review_cycle`。
 
-### ③ 评审段调度器 · 增量收集而非乒乓（`review_cycle`）
-
-评审段（review segment）= 一次「评审 → 开发增量 → 测试信号 → 回评审」的调度单位：
-
-```
-collect(提交增量，不立即唤醒)
-   → coalesce(变更感知选测 + 入列 Bus，0 成本)
-      → dispatch(整批发车，一次构建跑完一批)
-         → review(增量上下文回评审：冻结骨架摘要 + 本轮变化)
-```
-
-确定性状态机（`spec.STATES` / `spec.NODES` / `spec.TRIGGERS`），不让 LLM 决定"下一步/是否结束"：
-
-- **触发门控**：`diff_changed`（指纹变才真触发开发/构建）/ `batch_ready`（队列非空才发车）/
-  `fingerprint_new`（指纹未被处理过才做评审处置）；
-- **同指纹轮次复用**：`reused=True` → 本轮**零构建**，只引用上轮测试信号与结论；
-- **以测试为准**：整批信号灯（🟢/🔴）决定处置标签（走 `collab.disposition`，不各自取名）。
-
-**三条工程约束（缺一即"永不发车"，信号灯红灯拦）**：
-
-1. `root_dir` 必须解析到**仓库根**（`os.path.dirname(_HERE)`，`_HERE=<repo>/local-agent`）——
-   多 `dirname` 一次会解析到 `/`，`git diff` 与选测全部落空；
-2. 选测器用 `IncrementalSelector(root_dir=…)` **显式实例化**——`default_selector` 是**实例**
-   不是工厂函数，当函数调用会 `TypeError`（`hasattr(default_selector,"root_dir")` 恒 True 是
-   **误导性判据**，实例本就带该属性）；
-3. 选测失败**不静默吞**（对齐 dev-standard C01）：异常上抛/显式留痕到本轮 `select_error`，
-   由调用方降级为"不拉构建"，避免"看起来没变更"掩盖真实故障。
-
-`run()` 支持 `changed_files=[...]` 显式注入变更清单（替代工作区 `git diff`，供测试/调用方用）。
-无注入时 `_changed_files()` 走**确定性回退链**，兼容本地开发与 CI/PR 两种场景：
-工作区 diff → 暂存区 diff → `origin/main...HEAD` → `main...HEAD` → `HEAD~1..HEAD`（取首个非空）。
-`tests/test_review_efficiency.sh` 组 4 断言**真实变更下 `dispatched=True` 且 `batched_runs>0`**，
-组 5 断言 `dispatched_builds>0`——防"取 0 也算过"的过宽断言掩盖"永不发车"。
-
 ## 三、接线（不是"就绪可调"，是主流程内必走）
 
 评审角色 `ReviewerRole` 主流程内自动接线，可关可降级：
@@ -156,25 +173,35 @@ rep = r.do_review("任务A", source="PR #xx", spec_ref="Issue #xx",
 # rep["context_pack"] / rep["batch"] / rep["disposition"] / rep["axes_complete"]
 ```
 
-CLI：
+CLI（**均可从仓库根直接跑通** · 返工 S9：所有 `python -m` 都带 `PYTHONPATH=local-agent`，
+且已补 `__main__` 入口，不再"文档写了跑不通"）：
 
 ```bash
 # 评审上下文增量复用（构建一次 → 复用）
-python -m review_context.cli demo
+PYTHONPATH=local-agent python3 -m review_context demo
+PYTHONPATH=local-agent python3 -m review_context build \
+       --stable '{"goal":"..."}' --volatile '{"diff_summary":"..."}'
 
-# 评审段调度（run / overview / stats / demo）
-python local-agent/run.py --review-cycle demo
-python local-agent/run.py --review-cycle overview
-python local-agent/run.py --review-cycle run --rc-task 任务A \
-       --rc-stable '{"goal":"..."}' --rc-volatile '{"diff_summary":"..."}'
+# 评审段调度（run / overview / stats / demo · 已补 __main__）
+PYTHONPATH=local-agent python3 -m review_cycle demo
+PYTHONPATH=local-agent python3 -m review_cycle stats
+PYTHONPATH=local-agent python3 -m review_cycle overview
+PYTHONPATH=local-agent python3 -m review_cycle run --task-key 任务A \
+       --stable '{"goal":"..."}' --volatile '{"diff_summary":"..."}'
+# 阶段链门控（本该串行不得并行/重复触发）
+PYTHONPATH=local-agent python3 -m review_cycle gate   # 放行/三类驳回统计
+# 等价（run.py 接线，同一引擎）
+python3 local-agent/run.py --review-cycle demo
+python3 local-agent/run.py --review-cycle overview
+python3 local-agent/run.py --review-cycle gate
 
 # Bus 攒批 + 指纹去重门
-python -m hybrid.cli bus enqueue local-agent/tests/test_a.sh --diff-fp sha256:xxxx
-python -m hybrid.cli bus dispatch --diff-fp sha256:xxxx
-python -m hybrid.cli bus status          # status 含 processed_fps（去重门记忆）
+PYTHONPATH=local-agent python3 -m hybrid.cli bus enqueue local-agent/tests/test_a.sh --diff-fp sha256:xxxx
+PYTHONPATH=local-agent python3 -m hybrid.cli bus dispatch --diff-fp sha256:xxxx
+PYTHONPATH=local-agent python3 -m hybrid.cli bus status   # status 含 processed_fps（去重门记忆）
 
 # 跨端聚合控制页读评审段大盘
-python local-agent/run.py --dashboard review_cycle
+python3 local-agent/run.py --dashboard review_cycle
 ```
 
 ## 四、省了什么（可核验的口径）
@@ -208,7 +235,7 @@ python local-agent/run.py --dashboard review_cycle
 
 ## 六、测试护栏
 
-`local-agent/tests/test_review_efficiency.sh`（9 组信号灯，红灯即阻塞）：
+`local-agent/tests/test_review_efficiency.sh`（10 组信号灯，红灯即阻塞）：
 
 1. 稳定骨架构建 → 复用 → 变更即失效（指纹判据）+ **变更段重建/未变更段复用/context 随骨架更新**；
 2. 攒批去重门：整批一次构建 + 同指纹再入列被拦截；
@@ -219,7 +246,12 @@ python local-agent/run.py --dashboard review_cycle
 7. 评审段大盘 + 控制页 `/review-cycle` 路由可读；
 8. **阶段链门控**：抢跑/重复/乱序全拦、链式推进放行、`force` 逃生门留痕（唯一事实源断言）；
 9. **拦截可核验**：被驳回**零构建**（`dispatched=False`）、不得假绿放行、大盘 `blocked_rounds`/
-   `blocked_retriggers` 计数。
+   `blocked_retriggers` 计数；
+10. **false-green 红灯门（返工新增）**：① 跨任务同缺省指纹（无指纹）**不得**互相跳过、
+    跨任务同内容指纹因 `task_key` 不同**不得**互相跳过；② **演练后真实执行不得被跳过**；
+    ③ 空队列发车 + 无关发车**不得**误记指纹；④ 选测失败（`select_error`）→ `review_complete=False`
+    且**不放行**；⑤ 状态机 `spec.STATES/TRIGGERS` 真被读取驱动 `Round.state`/`trigger`；
+    ⑥ 仓库根解析唯一（评审角色 == 调度器）。
 
 **测试隔离（可重复跑）**：测试通过 `BUS_QUEUE_FILE` / `QUOTA_LEDGER_FILE` 环境变量把攒批队列与
 配额账本落到临时目录，不污染工作区共享状态（否则第二次跑会因去重门残留而假失败）。
