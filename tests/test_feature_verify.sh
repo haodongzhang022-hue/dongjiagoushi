@@ -23,6 +23,9 @@
 #   T16 跨 PR 雷回归（Issue #162 收口）：映射前置登记（目录后落地）不得判 RED，
 #       但"目录有、映射无"仍须 RED——两方向同时锁死，防合 #161 后主线变红
 #   T17 脚本可执行位回归：feature-verify.sh / change-aware / 自测 / selector 样例 保持 100755
+#   T18 空转灯回归（Issue #162 复评 S2）：T16a/Then-9a 须带真实 modules.map，
+#       真走到 ①「未登记」判据（而非"映射表不存在"提前 exit 永远红）
+#   T19 静默通道回归（Issue #162 复评 S3）：僵尸映射行命中实现源变更时须发 ⚠️，不静默通过
 #
 # 用法：bash tests/test_feature_verify.sh
 # 运行依赖：bash + git（纯逻辑）；python 样例在 python 环境跑（无则优雅跳过）
@@ -316,12 +319,19 @@ echo ""
 echo "▶ T16 跨 PR 雷回归（映射前置登记 vs 目录有映射无）"
 T16V="$(mktemp -d)"; mkdir -p "$T16V/only_dir" "$T16V/_templates"
 echo '#!/usr/bin/env bash' > "$T16V/only_dir/x.sh"
+# 关键：临时证据库须带**真实 modules.map**，否则 check_map 在"映射表不存在"就 exit 1
+# （永远红，走不到 ①）→ 空转信号灯（复评 S2）。放入 map 后本灯才真测「目录有、映射无」。
+cp scripts/feature-verify/modules.map "$T16V/modules.map"
 # (a) 目录有、映射无 → RED（真漏跑方向）
-if FEATURE_VERIFY_DIR="$T16V" bash scripts/feature-verify.sh --check-map >/dev/null 2>&1; then
+if FEATURE_VERIFY_DIR="$T16V" bash scripts/feature-verify.sh --check-map >"$T16V/a.out" 2>&1; then
   bad "T16a: 证据目录有、映射表无 → --check-map 仍绿（漏跑守护失效）"
 else
   ok "T16a: 证据目录有、映射表无 → RED（漏跑方向牙齿不丢）"
 fi
+# (a2) 有鉴别力：输出必须真走到 ①「未登记」判据，而非"映射表不存在"提前 exit
+grep -q "模块 \[only_dir\] 未在" "$T16V/a.out" 2>/dev/null \
+  && ok "T16a2: 真走到 ①未登记判据（非'映射表不存在'空转红灯）" \
+  || bad "T16a2: 未走到 ①（空转红灯，S2 未修）"
 # (b) 映射有、目录无（前置登记）→ 绿（容忍跨 PR 中间态）
 cat > "$T16V/m_forward.map" <<'MAPEOF'
 only_dir: local-agent/collab/engine.py: local-agent/collab/engine\.py
@@ -351,6 +361,46 @@ for f in scripts/feature-verify.sh scripts/change-aware-test.sh tests/test_featu
   [ "$m" = "100755" ] && ok "$f 保持 100755" || bad "$f 可执行位回归（$m，应 100755）"
 done
 
+
+# ---- T18 空转灯回归：T16a/Then-9a 真走到 ①（复评 S2）----
+echo ""
+echo "▶ T18 空转灯回归（临时证据库须带真实 modules.map，真走到 ①）"
+T18V="$(mktemp -d)"; mkdir -p "$T18V/only_dir" "$T18V/_templates"
+echo '#!/usr/bin/env bash' > "$T18V/only_dir/x.sh"
+# 无 map：check_map 在"映射表不存在"提前 exit 1 → 永远红、走不到 ①（空转）
+if FEATURE_VERIFY_DIR="$T18V" bash scripts/feature-verify.sh --check-map >"$T18V/nomap.out" 2>&1; then
+  bad "T18a: 无 map 时 --check-map 竟绿（异常）"
+else
+  grep -q "映射表不存在" "$T18V/nomap.out" \
+    && ok "T18a: 无 map → 早退于'映射表不存在'（证明裸 FEATURE_VERIFY_DIR 是空转红灯）" \
+    || bad "T18a: 无 map 未早退于'映射表不存在'"
+fi
+# 有 map：必须真走到 ①「模块未登记 → RED」
+cp scripts/feature-verify/modules.map "$T18V/modules.map"
+FEATURE_VERIFY_DIR="$T18V" bash scripts/feature-verify.sh --check-map >"$T18V/withmap.out" 2>&1
+grep -q "模块 \[only_dir\] 未在" "$T18V/withmap.out" \
+  && ok "T18b: 带真实 map → 真走到 ①未登记判据（空转已消除）" \
+  || bad "T18b: 带真实 map 仍未走到 ①（S2 未修）"
+rm -rf "$T18V"
+
+# ---- T19 静默通道回归：僵尸映射行命中实现源 → 须发 ⚠️（复评 S3）----
+echo ""
+echo "▶ T19 静默通道回归（僵尸行不得吞掉未映射 ⚠️）"
+T19V="$(mktemp -d)"; mkdir -p "$T19V/other"
+echo '#!/usr/bin/env bash' > "$T19V/other/x.sh"
+cat > "$T19V/m.map" <<'MAPEOF'
+zombie: local-agent/novel/core.py: local-agent/novel/core\.py
+other: local-agent/novel/other.py: local-agent/novel/other\.py
+MAPEOF
+T19OUT="$(FEATURE_VERIFY_DIR="$T19V" FEATURE_VERIFY_MAP="$T19V/m.map" \
+          FEATURE_VERIFY_CHANGED_FILES="local-agent/novel/core.py" \
+          bash scripts/feature-verify.sh --changed 2>&1)"
+if printf '%s\n' "$T19OUT" | grep -q "映射选中的模块 \[zombie\] 无证据目录/脚本"; then
+  ok "T19: 僵尸行命中实现源变更 → 显式 ⚠️（静默通道已堵）"
+else
+  bad "T19: 僵尸行命中仍静默通过（S3 未修，OUT=$T19OUT）"
+fi
+rm -rf "$T19V"
 # ---- 汇总 ----
 echo ""
 echo "======================================================"

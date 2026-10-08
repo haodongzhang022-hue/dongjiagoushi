@@ -30,6 +30,7 @@
 # 环境变量（测试用，确定性注入）：
 #   FEATURE_VERIFY_CHANGED_FILES   # 直接指定变更文件（换行/逗号分隔），跳过 git 探测
 #   FEATURE_VERIFY_MAP             # 指定映射表路径（默认 scripts/feature-verify/modules.map）
+#   FEATURE_VERIFY_DIR             # 指定证据库根目录（默认 scripts/feature-verify，hermetic 测试注入）
 # ============================================================
 set -uo pipefail
 
@@ -228,9 +229,16 @@ select_by_changes() {
   if [ -n "$sel_modules" ]; then
     while IFS= read -r m; do
       [ -n "$m" ] || continue
+      local _hit=0
       for f in "${ALL_SCRIPTS[@]}"; do
-        [ "$(basename "$(dirname "$f")")" = "$m" ] && SEL+=("$f")
+        [ "$(basename "$(dirname "$f")")" = "$m" ] && { SEL+=("$f"); _hit=1; }
       done
+      # 选中的模块若无证据目录/脚本（僵尸映射行：有行无目录）→ 显式 ⚠️，不静默：
+      # 否则该实现源变更既不被选测、也不落进下面"未映射"告警 → 静默通过（复评 S3 静默通道）。
+      if [ "$_hit" = "0" ]; then
+        echo "  ⚠️ 映射选中的模块 [$m] 无证据目录/脚本（${VERIFY_DIR}/$m/）→ 本实现源变更未真正选测"
+        echo "     → 跨 PR 中间态（先登记映射、后落脚本）可容忍；长期须补证据脚本或移除僵尸映射行。"
+      fi
     done <<< "$sel_modules"
   fi
   # 未登记映射的证据模块：显式暴露（不静默），--check-map 会判 RED

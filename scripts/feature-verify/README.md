@@ -36,7 +36,7 @@ scripts/feature-verify/
 bash scripts/feature-verify.sh --check-map
 ```
 它做四件事：① 证据库每个模块必须已登记（未映射即 RED）② 探针路径必须真实存在
-（映射过期即 RED）③ 模拟"改该模块实现源"必须真被选中（映射失效即 RED）④ 映射表
+（映射过期即 RED）③ 模拟"改该模块实现源"必须真被选中（映射失效即 RED）
 ④ 僵尸条目（映射行指向暂无证据目录的模块）仅 ⚠️ 警告、**不阻断**——真漏跑方向是
 ①「目录有、映射无」（那才 RED）；跨 PR 并发下"先登记映射、后落脚本"的中间态必须容忍，
 否则后合的 PR 一落 main 就把主线判红。CI 的 `feature-verify gate` 会先跑它再跑 `--changed`。

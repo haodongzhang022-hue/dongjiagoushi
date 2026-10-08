@@ -154,11 +154,14 @@ main:
             echo "==== 功能级校验闸门（feature-verify · Issue #109 / #162） ===="
             echo "S05 延伸：每个 PR 自带 feature-verify 校验脚本，跑不过 = 功能没做完"
             echo "base: ${CNB_PULL_REQUEST_TARGET_BRANCH:-main}  source: ${CNB_PULL_REQUEST_SOURCE_BRANCH:-auto/unknown}"
-            echo ""
             # 映射防退化断言（Issue #162）：证据库模块 100% 被 --changed 覆盖，
             # 未映射/映射失效即 RED——防"未覆盖模块实现源变更静默漏跑"（假绿）。
+            # 锚点说明（Issue #162 复评 S1）：本块刻意**不挂 `echo ""` 之后**——
+            # 该锚点是跨 PR 冲突点（并发 PR 同插一处 → both-added 冲突，两向 rc=1），
+            # 改挂 `echo "base: ..."` 之后，语义/顺序不变（仍先于 --changed），两向 rc=0。
             bash scripts/feature-verify.sh --check-map || exit 1
             echo "  ✅ 映射防退化断言通过（无未映射模块）"
+            echo ""
             # 按变更选测 + 真实跑受影响功能模块的校验脚本
             bash scripts/feature-verify.sh --changed || exit 1
             echo "  ✅ 功能级校验通过（feature_unverified=0，目标功能完成）"

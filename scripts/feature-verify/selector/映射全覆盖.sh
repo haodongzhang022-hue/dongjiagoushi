@@ -185,12 +185,19 @@ fi
 TMPV="$(mktemp -d)"
 mkdir -p "$TMPV/only_dir" "$TMPV/_templates"
 echo '#!/usr/bin/env bash' > "$TMPV/only_dir/x.sh"
+# 关键：临时证据库须带**真实 modules.map**，否则 check_map 在"映射表不存在"就 exit 1
+# （永远红，走不到 ①）→ 空转信号灯（复评 S2）。放入 map 后本灯才真测「目录有、映射无」。
+cp "$MAP" "$TMPV/modules.map"
 # (a) 目录有、映射无 → 必须 RED（真漏跑方向，牙齿不丢）
 if FEATURE_VERIFY_DIR="$TMPV" bash "$FV" --check-map >"$TMP/x1.out" 2>&1; then
   bad "Then-9a: 证据目录有、映射表无 → --check-map 仍绿（漏跑守护失效）"
 else
   ok "Then-9a: 证据目录有、映射表无 → RED（漏跑方向牙齿不丢）"
 fi
+# (a2) 有鉴别力：必须真走到 ①「未登记」判据，而非"映射表不存在"提前 exit（空转）
+grep -q "模块 \[only_dir\] 未在" "$TMP/x1.out" 2>/dev/null \
+  && ok "Then-9a2: 真走到 ①未登记判据（非'映射表不存在'空转红灯）" \
+  || bad "Then-9a2: 未走到 ①（空转红灯，S2 未修）"
 # (b) 映射有、目录无（前置登记）→ 必须绿（容忍跨 PR 中间态）
 #     探针须用真实存在的实现源（探针检查独立于证据目录，不能靠假路径绕过）
 cat > "$TMPV/map_forward.map" <<'MAPEOF'
