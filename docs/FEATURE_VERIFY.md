@@ -68,6 +68,16 @@ CI 的 `feature-verify gate` 先跑它再跑 `--changed`。
 且 `--changed` 命中该模块实现源时**硬失败**（不再「无可选脚本 → 通过」）。
 本 PR 已用 `pending: collab:` 显式预登记，并在 selector 样例
 Then-9/10/11 + `test_feature_verify` T16/T20/T21 双向锁死该行为。
+
+### 合并态假红修复（Issue #162 合并态 · 登记判据 pending 感知）
+跨 PR 两态下「证据库模块是否已登记」的判据必须 **pending 感知**：`^<m>:` 精确匹配会把
+`pending: collab:`（#163 先合、collab 证据目录尚由 #161 落地的中间态）判成"未登记"→
+**合并态假红**；而 `T16d`/`Then-10a` 又要求该 `pending:` 行存在 → 两条断言在合并态互斥。
+收口为 `^(<m>|pending: <m>):`（`map_registered()` / selector `Then-2` 同源），并让
+`T16d`/`Then-10a` **按 `collab/` 目录是否已落地分流**——目录未落地要求 `pending:` 预登记、
+目录已落地要求已登记（去/留前缀皆绿）。四态自洽：`#163-only`、`main+#163`、
+`main+#161+#163`、以及 `#161` 合并后**去前缀的清理态**，皆 🟢；删映射 / 未标记目录缺失仍 RED。
+
 ### 变更范围回退链（防假绿 · Issue #162 复评 R1 + 🟡欠选）
 `--changed` 确定变更范围时按**两级回退链**逐个来源尝试，判据是 **`git diff` 真成功
 （`rc=0`）**，不是"来源存在"：

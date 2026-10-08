@@ -29,6 +29,7 @@
 #   T20 僵尸容忍收窄（Issue #162 复评 T9）：容忍只给显式 `pending:` 标记；未标记的目录缺失
 #       → --check-map RED，且 --changed 命中其实现源 → 硬失败（不再「无可选脚本 → 通过」假绿）
 #   T21 stale pending：目录已落地仍挂 `pending:` → ⚠️ 提示转正式登记（收窄容忍面）
+#   T22 合并态假红回归（Issue #162 合并态修复）：T9 登记判据 pending 感知 + 牙齿
 #
 # 用法：bash tests/test_feature_verify.sh
 # 运行依赖：bash + git（纯逻辑）；python 样例在 python 环境跑（无则优雅跳过）
@@ -39,6 +40,15 @@ PASS=0; FAIL=0; SKIP=0
 ok(){ PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad(){ FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 skip(){ SKIP=$((SKIP+1)); echo "  ⏭️  $1"; }
+
+# 证据库模块是否已在映射表登记（`pending:` 前缀视为已登记 · Issue #162 合并态修复）
+# 背景：T9 循环原用 `^${m}:` 精确匹配，合并态 `pending: collab:` 带前缀 → 漏判假红；
+#   而 T16d 又硬断言 `^pending: collab:` 必须存在 → 两断言在合并态互斥。
+#   `pending:` 是**显式预登记**（#163 先合时 collab/ 证据目录尚未由 #161 落地），
+#   属"已登记"的一种合法形态；单点收口本判据，供 T9 循环与 T22 回归灯共用。
+map_registered() {  # $1=evidence-module  $2=映射表路径
+  grep -qE "^(${1}|pending: ${1}):" "$2"
+}
 
 echo "======================================================"
 echo "feature-verify 模块自测信号灯 (Issue #109)"
@@ -159,7 +169,7 @@ MAP_MISSING=""
 for d in scripts/feature-verify/*/; do
   m="$(basename "$d")"
   [ "$m" = "_templates" ] && continue
-  grep -qE "^(${m}|pending: ${m}):" scripts/feature-verify/modules.map || MAP_MISSING="$MAP_MISSING $m"
+  map_registered "$m" scripts/feature-verify/modules.map || MAP_MISSING="$MAP_MISSING $m"
 done
 if [ -z "$MAP_MISSING" ]; then
   ok "证据库全部模块已在 modules.map 登记（无未映射模块）"
@@ -406,11 +416,19 @@ grep -q "forward_only" "$T16V/f.out" 2>/dev/null \
   && ok "T16c: 前置登记以 ⚠️ 警告显式暴露（不静默）" \
   || bad "T16c: 前置登记未显式暴露"
 rm -rf "$T16V"
-# (c) 本 PR 已真实**显式 pending 预登记** collab（与 #161 证据目录对齐 · 复评 T9 收窄）
-grep -q '^pending: collab:' scripts/feature-verify/modules.map \
-  && ok "T16d: modules.map 已 pending 预登记 collab（合 #161 后不判红）" \
-  || bad "T16d: 未 pending 预登记 collab → 合 #161 后主线 --check-map 判红"
-
+# (c) collab 映射须与「#161 证据目录是否已落地」自洽（跨 PR 两态都绿 · 合并态修复）：
+#     目录未落地（#163 先合）→ 必须 `pending: collab:`，否则 main+#163 --check-map 判红；
+#     目录已落地（#161 已合）→ collab 须已登记（`pending: collab:` 或正式 `collab:` 皆可；
+#       正式登记是清理后的目标态，pending 仅余 stale ⚠️ 非阻断）。
+if [ -d scripts/feature-verify/collab ]; then
+  map_registered collab scripts/feature-verify/modules.map \
+    && ok "T16d: collab 目录已落地且映射已登记（pending 清理前后皆绿）" \
+    || bad "T16d: collab 目录已落地但映射缺失 → --changed 会静默漏跑"
+else
+  grep -q '^pending: collab:' scripts/feature-verify/modules.map \
+    && ok "T16d: collab 目录未落地已 pending 预登记（合 #161 前不判红）" \
+    || bad "T16d: 未 pending 预登记 collab → 合 #163 后主线 --check-map 判红"
+fi
 # ---- T17 脚本可执行位回归（100755）----
 echo ""
 echo "▶ T17 脚本可执行位回归"
@@ -522,6 +540,24 @@ else
 fi
 rm -f local-agent/novel/real.py; rmdir local-agent/novel 2>/dev/null
 rm -rf "$T21V"
+# ---- T22 合并态假红回归（Issue #162 合并态修复）：T9 登记判据的 pending 感知 + 牙齿 ----
+echo ""
+echo "▶ T22 合并态假红回归（T9 登记判据 pending 感知 + 牙齿）"
+T22M="$(mktemp)"
+printf 'collab: local-agent/collab/engine.py: x\n' > "$T22M"
+map_registered collab "$T22M" \
+  && ok "T22a: 正式登记 collab → 判已登记" \
+  || bad "T22a: 正式登记 collab 被漏判"
+printf 'pending: collab: local-agent/collab/engine.py: x\n' > "$T22M"
+map_registered collab "$T22M" \
+  && ok "T22b: pending: collab 预登记 → 判已登记（合并态假红已消除）" \
+  || bad "T22b: pending 预登记被漏判 → 合并态仍假红"
+printf 'other: scripts/x.py: y\n' > "$T22M"
+map_registered collab "$T22M" \
+  && bad "T22c: 未登记却判已登记（牙齿丢失）" \
+  || ok "T22c: 未登记 → 判未登记（牙齿不丢）"
+rm -f "$T22M"
+
 # ---- 汇总 ----
 echo ""
 echo "======================================================"

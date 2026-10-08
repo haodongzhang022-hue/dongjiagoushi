@@ -60,16 +60,18 @@ n_mods="$(printf '%s\n' "$mods" | grep -c .)"
 echo "  (证据库模块 $n_mods 个: $(printf '%s' "$mods" | tr '\n' ' '))"
 
 # ---------- Then-2：删任一模块映射行 → RED（防退化有牙齿） ----------
+# 合并态修复（Issue #162）：登记判据须 pending 感知——否则 `pending: collab:` 因
+#   `^collab:` 不匹配被静默跳过，collab 的"删映射→RED"牙齿在合并态失效。
+#   `mods` 仅含**已落地证据目录**，故 #163-only（collab 目录未落地）本就不含 collab，安全。
 for m in $mods; do
-  grep -q "^${m}:" "$MAP" || continue
-  grep -v "^${m}:" "$MAP" > "$TMP/mut_del_$m.map"
+  grep -qE "^(${m}|pending: ${m}):" "$MAP" || continue
+  grep -vE "^(${m}|pending: ${m}):" "$MAP" > "$TMP/mut_del_$m.map"
   if FEATURE_VERIFY_MAP="$TMP/mut_del_$m.map" bash "$FV" --check-map >"$TMP/del_$m.out" 2>&1; then
     bad "Then-2: 删掉 [$m] 映射行后 --check-map 仍绿 → 防退化断言没牙齿"
   else
     ok "Then-2: 删掉 [$m] 映射行 → RED（rc=1，防退化有牙齿）"
   fi
 done
-
 # ---------- Then-3：探针路径失效 → RED（映射过期即红） ----------
 probe="$(awk -F: '/^[a-z]/{gsub(/ /,"",$1);gsub(/^ +| +$/,"",$2);print $2;exit}' "$MAP")"
 if [ -n "$probe" ]; then
@@ -219,12 +221,18 @@ else
 fi
 rm -rf "$TMPV"
 
-# ---------- Then-10：本 PR 显式 pending 预登记 collab，且 post-#161 合并后仍绿 ----------
-# 复评 T9：预登记须**显式标记**（`pending:`），容忍面才收窄；裸 `collab:` 会因目录缺失 RED。
-if grep -q '^pending: collab:' "$MAP"; then
-  ok "Then-10a: modules.map 已 pending 预登记 collab 映射行（与 PR #161 证据目录对齐）"
+# ---------- Then-10：collab 预登记与 #161 证据目录状态自洽（跨 PR 两态都绿 · 合并态修复） ----------
+# 复评 T9 + 合并态修复（Issue #162）：collab 映射须与「#161 证据目录是否已落地」自洽——
+#   目录未落地（#163 先合）→ 必须显式 `pending: collab:`（否则 main+#163 --check-map 判红）；
+#   目录已落地（#161 已合）→ 须已登记（`pending: collab:` 或正式 `collab:` 皆可；去前缀是清理目标态）。
+if [ -d scripts/feature-verify/collab ]; then
+  grep -qE '^(collab|pending: collab):' "$MAP" \
+    && ok "Then-10a: collab 证据目录已落地且映射已登记（pending 清理前后皆绿）" \
+    || bad "Then-10a: collab 目录已落地但映射缺失 → --changed 静默漏跑"
 else
-  bad "Then-10a: modules.map 未 pending 预登记 collab → 合 #161 后主线 --check-map 判红"
+  grep -q '^pending: collab:' "$MAP" \
+    && ok "Then-10a: collab 目录未落地已 pending 预登记（合 #163 后主线不判红）" \
+    || bad "Then-10a: 未 pending 预登记 collab → 合 #163 后主线 --check-map 判红"
 fi
 # 模拟 #161 已合：证据目录**全部落地**（含 collab）+ 去掉 collab 的 pending 前缀 → 必须绿。
 TMPV2="$(mktemp -d)"
@@ -245,7 +253,10 @@ fi
 grep -q "证据目录已落地" "$TMP/x3.out" 2>/dev/null \
   && bad "Then-10c: 去 pending 后仍报 stale（判据有误）" \
   || ok "Then-10c: 去 pending 后不再报 stale（stale 判据准确）"
-if FEATURE_VERIFY_DIR="$TMPV2" FEATURE_VERIFY_MAP="$MAP" \
+# 10d：hermetic —— 强制 collab 为 pending 形态（全模块保留）配「目录已落地」→ 必须提示 stale；
+#      不依赖仓库真实 map 形态，故合并态去/留 pending 前后都稳定可测（拆 p3 的坑）。
+sed -e 's/^collab:/pending: collab:/' -e 's/^pending: collab:/pending: collab:/' "$MAP" > "$TMPV2/stale.map"
+if FEATURE_VERIFY_DIR="$TMPV2" FEATURE_VERIFY_MAP="$TMPV2/stale.map" \
    bash "$FV" --check-map >"$TMP/x4.out" 2>&1; then
   grep -q "证据目录已落地" "$TMP/x4.out" \
     && ok "Then-10d: 目录已落地但仍挂 pending: → ⚠️ 提示 stale（收窄容忍面）" \
@@ -254,7 +265,6 @@ else
   bad "Then-10d: collab 目录落地 + pending 仍绿失败（OUT=$(cat "$TMP/x4.out"))"
 fi
 rm -rf "$TMPV2"
-
 # ---------- Then-11：T9 核心——未标记 pending 的目录缺失必须 RED（不得静默假绿） ----------
 # 复评 T9：旧行为对"目录缺失"一律 ⚠️ 放过 → 无法区分"跨 PR 中间态"与
 # "证据目录被误删/改名"。收窄后：**未标记**的目录缺失 → --check-map RED，
