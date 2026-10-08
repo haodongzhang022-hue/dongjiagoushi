@@ -53,6 +53,20 @@ bash scripts/feature-verify.sh --check-map   # 未映射 / 映射失效 / 僵尸
 ① 证据库每模块须已登记 ② 探针路径须真实存在 ③ 模拟"改该模块实现源"须真被选中
 ④ 映射表不得有指向不存在模块的僵尸条目。CI 的 `feature-verify gate` 先跑它再跑 `--changed`。
 
+
+### 变更范围回退链（防假绿 · Issue #162 复评 S1）
+`--changed` 确定变更范围时按回退链逐个来源尝试：注入变量 → `CNB_PULL_REQUEST_TARGET_SHA`
+→ `CNB_COMMIT` → `main...HEAD` → `HEAD~1`。**任一来源为空即继续回退**，绝不把"单个来源
+失效"当成"无变更"跳过（旧实现用 `elif` 链，target SHA 不可解析时 `out` 为空 → 误报
+"变更范围为空 → 跳过"→ `exit 0` 假绿）。回退链全部落空（如浅克隆单提交、target SHA
+不可解析且无 `main`/`HEAD~1`）→ 置 `CHANGED_KNOWN=0` → **保守全量回归**（不漏跑优先），
+同样不跳过。回归断言见 `tests/test_feature_verify.sh` T14/T15 + 功能级
+`selector/映射全覆盖.sh` Then-7。
+
+映射表 ERE 读取用**安全 trim**（只去首尾空白、不解释反斜杠）——旧实现用 `xargs` 会吞掉
+ERE 里的 `\.` 转义，把 `scripts/x\.py` 变成 `scripts/x.py`（`.` 变通配，映射失真）。
+回归断言见 `selector/映射全覆盖.sh` Then-8。
+
 ## 目录与命令
 ```
 scripts/feature-verify/

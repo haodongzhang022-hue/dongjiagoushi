@@ -10,10 +10,14 @@
 #   T5 feature-regress.sh 回归诊断能跑出"通过/崩"定位
 #   T6 合并闸门已接入 .cnb.yml（feature-verify gate 阶段）
 #   T7 文档 docs/FEATURE_VERIFY.md + CAPABILITY_INDEX 登记
-#   T8 五要素"功能级 > 断言"自证：缺语义段即判功能没做完（抓0027假完成0027）
+#   T8 五要素"功能级 > 断言"自证：缺语义段即判功能没做完（抓'假完成'）
 #   T9 模块→实现源映射收口唯一事实源（Issue #162）
 #   T10 变异验证：移除任一模块映射 → --check-map RED（防退化有牙齿）
 #   T11 缺口回归自证：collab 实现源变更不再假绿（评审 🟡P1）
+#   T12 变更感知测试选择接线（选择器改动 → 功能级自测）
+#   T13 CI 闸门已前置 --check-map（防退化断言）
+#   T14 target SHA 不可解析 → 保守全量（不假绿跳过 · S1 回归断言）
+#   T15 target SHA 无效但回退源可用 → 回退链继续真选测（不断链）
 #
 # 用法：bash tests/test_feature_verify.sh
 # 运行依赖：bash + git（纯逻辑）；python 样例在 python 环境跑（无则优雅跳过）
@@ -196,6 +200,59 @@ else
   bad "CI 闸门未跑 --check-map → 未映射模块仍可能静默漏跑"
 fi
 
+
+# ---- T14 回归断言：target SHA 不可解析 → 不得假绿跳过（S1 修复防退化）----
+echo ""
+echo "▶ T14 target SHA 不可解析 → 回退链继续/保守全量（不假绿）"
+# 造最小仓库：单提交（无 main、无 HEAD~1）→ 全部 diff 来源落空。
+T14REPO="$(mktemp -d)"
+(
+  cd "$T14REPO" || exit 1
+  git init -q; git config user.email t@t; git config user.name t
+  mkdir -p scripts/feature-verify/foo
+  printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
+  printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
+  cp "$OLDPWD/scripts/feature-verify.sh" scripts/feature-verify.sh
+  git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
+)
+T14OUT="$(cd "$T14REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
+          bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
+if printf '%s\n' "$T14OUT" | grep -q "无法确定变更范围"; then
+  ok "T14a: 全链落空 → 保守全量回归（不跳过，不漏跑）"
+else
+  bad "T14a: 全链落空未走保守全量（OUT=$T14OUT）"
+fi
+if printf '%s\n' "$T14OUT" | grep -q "变更范围为空"; then
+  bad "T14b: 全链落空仍报'变更范围为空' → S1 假绿回归"
+else
+  ok "T14b: 全链落空不再误报'变更范围为空'（S1 假绿已消除）"
+fi
+rm -rf "$T14REPO"
+
+# ---- T15 回归断言：target SHA 无效但回退源可用 → 继续回退真选测（不断链）----
+echo ""
+echo "▶ T15 target SHA 无效但 main 可用 → 回退链继续（不因首个来源失效即跳过）"
+T15REPO="$(mktemp -d)"
+(
+  cd "$T15REPO" || exit 1
+  git init -q; git config user.email t@t; git config user.name t
+  mkdir -p scripts/feature-verify/foo
+  printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
+  printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
+  cp "$OLDPWD/scripts/feature-verify.sh" scripts/feature-verify.sh
+  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+  git branch -f main HEAD
+  printf 'changed\n' > scripts/feature-verify/foo/a.sh
+  git add -A >/dev/null 2>&1; git commit -qm change >/dev/null 2>&1
+)
+T15OUT="$(cd "$T15REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
+          bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
+if printf '%s\n' "$T15OUT" | grep -q "feature-verify/foo/"; then
+  ok "T15: target SHA 无效 → 回退 main 真选测（回退链不断，非假绿跳过）"
+else
+  bad "T15: target SHA 无效后未继续回退选测（OUT=$T15OUT）"
+fi
+rm -rf "$T15REPO"
 # ---- 汇总 ----
 echo ""
 echo "======================================================"

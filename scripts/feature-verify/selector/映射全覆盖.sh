@@ -113,6 +113,47 @@ else
 fi
 
 echo ""
+
+# ---------- Then-7：S1 回归——target SHA 不可解析不得假绿跳过 ----------
+# 造最小仓库（单提交，无 main/HEAD~1）→ 全部 diff 来源落空。
+T7REPO="$(mktemp -d)"
+(
+  cd "$T7REPO" || exit 1
+  git init -q; git config user.email t@t; git config user.name t
+  mkdir -p scripts/feature-verify/foo
+  printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
+  printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
+  cp "$OLDPWD/$FV" scripts/feature-verify.sh
+  git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
+)
+t7out="$(cd "$T7REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
+         bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
+if printf '%s\n' "$t7out" | grep -q "无法确定变更范围" \
+   && ! printf '%s\n' "$t7out" | grep -q "变更范围为空"; then
+  ok "Then-7: target SHA 不可解析 → 保守全量（不假绿跳过，S1 回归）"
+else
+  bad "Then-7: target SHA 不可解析仍走'变更范围为空'跳过 → S1 假绿回归"
+fi
+rm -rf "$T7REPO"
+
+# ---------- Then-8：S2 回归——ERE 反斜杠转义不被吞 ----------
+# 映射表 ERE 含 `\.`；若被 xargs 吞掉，选择器会把 `.` 当通配，可能误命中/失配。
+# 直接验证 map_entries 输出的 ERE 仍保留反斜杠（唯一事实源未被改写）。
+t8pat="$(bash -c '
+  MAP_FILE="scripts/feature-verify/modules.map"
+  trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf "%s" "$s"; }
+  while IFS= read -r line; do
+    case "$line" in ""|\#*) continue ;; esac
+    m="${line%%:*}"; rest="${line#*:}"; p="${rest%%:*}"; pat="${rest#*:}"
+    m="$(trim "$m")"; pat="$(trim "$pat")"
+    [ "$m" = "dashboard" ] && { printf "%s" "$pat"; break; }
+  done < "$MAP_FILE"
+')"
+if printf '%s' "$t8pat" | grep -q 'generate-dashboard\\\.py'; then
+  ok "Then-8: 映射 ERE 反斜杠转义保留（xargs 吞转义已消除，S2 回归）"
+else
+  bad "Then-8: 映射 ERE 反斜杠被吞（pat='${t8pat}'）→ S2 未修复"
+fi
 if [ "$FAIL" -gt 0 ]; then
   echo "🔴 selector/映射全覆盖 未达成 → 功能没做完（PASS=$PASS FAIL=$FAIL）"
   exit 1

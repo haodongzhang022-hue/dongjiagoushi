@@ -81,6 +81,9 @@ evidence_modules() {
 #     格式: <evidence-module>: <探针实现源路径>: <实现源选择 ERE>
 #     输出: TSV（module \t probe \t pattern）
 # ------------------------------------------------------------
+# 安全 trim：只去首尾空白，不解释反斜杠（xargs 会吞掉 ERE 里的 \ 转义）
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
+
 map_entries() {
   [ -f "$MAP_FILE" ] || return 0
   local line m p pat rest
@@ -88,7 +91,7 @@ map_entries() {
     case "$line" in ''|'#'*) continue ;; esac
     m="${line%%:*}"; rest="${line#*:}"
     p="${rest%%:*}"; pat="${rest#*:}"
-    m="$(echo "$m" | xargs)"; p="$(echo "$p" | xargs)"; pat="$(echo "$pat" | xargs)"
+    m="$(trim "$m")"; p="$(trim "$p")"; pat="$(trim "$pat")"
     [ -n "$m" ] || continue
     printf '%s\t%s\t%s\n' "$m" "$p" "$pat"
   done < "$MAP_FILE"
@@ -145,28 +148,43 @@ list_mode() {
 CHANGED_FILES=""
 CHANGED_KNOWN=1
 changed_files() {
-  local out=""
+  local out="" resolved=0
   if [ -n "${FEATURE_VERIFY_CHANGED_FILES:-}" ]; then
     # 测试注入：确定性指定变更文件，跳过 git 探测
     out="$(printf '%s' "$FEATURE_VERIFY_CHANGED_FILES" | tr ',' '\n')"
-  elif [ -n "${CNB_PULL_REQUEST_TARGET_SHA:-}" ]; then
-    out="$(git diff --name-only "$CNB_PULL_REQUEST_TARGET_SHA" "HEAD" 2>/dev/null)"
-  elif [ -n "${CNB_COMMIT:-}" ] && [ "$(git rev-parse HEAD 2>/dev/null)" = "$CNB_COMMIT" ]; then
-    out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
-  elif git rev-parse --verify main >/dev/null 2>&1; then
-    out="$(git diff --name-only "main...HEAD" 2>/dev/null)"
-  elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-    out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
+    resolved=1
   else
-    CHANGED_KNOWN=0
+    # 回退链：逐个来源尝试；任一来源返回空则**继续回退**（不得因单个来源失效即当"无变更"跳过）。
+    # 旧实现用 elif 链，target SHA 不可解析时空 out 被当成"无变更"→ 假绿，故改为独立 if。
+    if [ -n "${CNB_PULL_REQUEST_TARGET_SHA:-}" ] \
+       && git rev-parse --verify --quiet "${CNB_PULL_REQUEST_TARGET_SHA}^{commit}" >/dev/null 2>&1; then
+      out="$(git diff --name-only "$CNB_PULL_REQUEST_TARGET_SHA" "HEAD" 2>/dev/null)"
+      resolved=1
+    fi
+    if [ -z "$out" ] && [ -n "${CNB_COMMIT:-}" ] \
+       && [ "$(git rev-parse HEAD 2>/dev/null)" = "$CNB_COMMIT" ]; then
+      out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
+      resolved=1
+    fi
+    if [ -z "$out" ] && git rev-parse --verify --quiet main >/dev/null 2>&1; then
+      out="$(git diff --name-only "main...HEAD" 2>/dev/null)"
+      resolved=1
+    fi
+    if [ -z "$out" ] && git rev-parse --verify --quiet HEAD~1 >/dev/null 2>&1; then
+      out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
+      resolved=1
+    fi
   fi
-  local work="$(git diff --name-only 2>/dev/null; git diff --cached --name-only 2>/dev/null)"
+  local work; work="$(git diff --name-only 2>/dev/null; git diff --cached --name-only 2>/dev/null)"
   if [ -n "$work" ]; then
     if [ -n "$out" ]; then out="$out
 $work"; else out="$work"; fi
-    CHANGED_KNOWN=1
+    resolved=1
   fi
   CHANGED_FILES="$(printf '%s\n' "$out" | sed '/^$/d')"
+  # 全链落空（无任何可用 diff 来源：target SHA 不可解析且无 main/HEAD~1 等）
+  # → 变更范围不可确定 → CHANGED_KNOWN=0 → 保守全量回归，绝不当"无变更"跳过（假绿）。
+  if [ "$resolved" = "0" ]; then CHANGED_KNOWN=0; fi
 }
 
 # ------------------------------------------------------------
