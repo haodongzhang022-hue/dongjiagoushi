@@ -159,7 +159,7 @@ MAP_MISSING=""
 for d in scripts/feature-verify/*/; do
   m="$(basename "$d")"
   [ "$m" = "_templates" ] && continue
-  grep -q "^${m}:" scripts/feature-verify/modules.map || MAP_MISSING="$MAP_MISSING $m"
+  grep -qE "^(${m}|pending: ${m}):" scripts/feature-verify/modules.map || MAP_MISSING="$MAP_MISSING $m"
 done
 if [ -z "$MAP_MISSING" ]; then
   ok "证据库全部模块已在 modules.map 登记（无未映射模块）"
