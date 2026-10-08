@@ -11,26 +11,36 @@
 #       一 PR 一脚本，跑不过 = 功能没做完 → 合并闸门标 blocked_on: feature_unverified。
 #       脚本留存为功能支撑证据档案库，随模块版本线留痕。
 #
+# 模块→实现源映射（Issue #162）：唯一事实源 = scripts/feature-verify/modules.map，
+#       本脚本只读该表，不再散落硬编码 `case`；未映射即 --check-map 判 RED（防退化）。
+#
 # 用法：
 #   bash scripts/feature-verify.sh --all            # 全量回归（feature-regress 语义）
 #   bash scripts/feature-verify.sh --module dispatch # 只跑某模块的所有 feature-verify
 #   bash scripts/feature-verify.sh --feature dispatch/真实唤醒校验闸门  # 精确跑一个功能
 #   bash scripts/feature-verify.sh --changed        # 按 git 变更自动选测受影响模块
+#   bash scripts/feature-verify.sh --changed --dry-run  # 只打印将跑哪些（不执行）
+#   bash scripts/feature-verify.sh --check-map      # 映射防退化断言（未映射/映射失效即 RED）
 #   bash scripts/feature-verify.sh --list           # 列出全部功能校验脚本（证据库盘点）
 #
 # 环境变量（合并闸门用）：
 #   CNB_PULL_REQUEST_TARGET_SHA   # PR 目标分支 SHA
 #   CNB_COMMIT                     # 本次提交 SHA
+# 环境变量（测试用，确定性注入）：
+#   FEATURE_VERIFY_CHANGED_FILES   # 直接指定变更文件（换行/逗号分隔），跳过 git 探测
+#   FEATURE_VERIFY_MAP             # 指定映射表路径（默认 scripts/feature-verify/modules.map）
 # ============================================================
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 VERIFY_DIR="scripts/feature-verify"
+MAP_FILE="${FEATURE_VERIFY_MAP:-$VERIFY_DIR/modules.map}"
 
 MODE="all"
 MODULE_SEL=""
 FEATURE_SEL=""
+DRY_RUN=0
 prev=""
 for i in "$@"; do
   case "$prev" in
@@ -41,8 +51,10 @@ for i in "$@"; do
     --all) MODE="all" ;;
     --list) MODE="list" ;;
     --changed) MODE="changed" ;;
+    --check-map) MODE="check_map" ;;
     --module) MODE="module" ;;
     --feature) MODE="feature" ;;
+    --dry-run) DRY_RUN=1 ;;
   esac
   prev="$i"
 done
@@ -56,6 +68,52 @@ if [ -d "$VERIFY_DIR" ]; then
     [ -n "$f" ] && ALL_SCRIPTS+=("$f")
   done < <(find "$VERIFY_DIR" -name '*.sh' -not -path '*/_templates/*' | sort)
 fi
+
+# 证据库模块清单（目录名，排除 _templates）
+evidence_modules() {
+  [ -d "$VERIFY_DIR" ] || return 0
+  find "$VERIFY_DIR" -mindepth 1 -maxdepth 1 -type d -not -name '_templates' \
+    | sed 's#.*/##' | sort
+}
+
+# ------------------------------------------------------------
+# 0.1 映射表读取（唯一事实源）
+#     格式: <evidence-module>: <探针实现源路径>: <实现源选择 ERE>
+#     输出: TSV（module \t probe \t pattern）
+# ------------------------------------------------------------
+map_entries() {
+  [ -f "$MAP_FILE" ] || return 0
+  local line m p pat rest
+  while IFS= read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    m="${line%%:*}"; rest="${line#*:}"
+    p="${rest%%:*}"; pat="${rest#*:}"
+    m="$(echo "$m" | xargs)"; p="$(echo "$p" | xargs)"; pat="$(echo "$pat" | xargs)"
+    [ -n "$m" ] || continue
+    printf '%s\t%s\t%s\n' "$m" "$p" "$pat"
+  done < "$MAP_FILE"
+}
+
+map_lookup() {  # $1=module → TSV 行（无则空）
+  map_entries | awk -F'\t' -v m="$1" '$1==m{print; exit}'
+}
+
+# 给定变更文件清单 → 选中的证据模块名（每行一个）
+select_modules_for() {
+  local changed="$1" m p pat
+  while IFS=$'\t' read -r m p pat; do
+    [ -n "$m" ] || continue
+    local match=0
+    # 命中 feature-verify 模块自身（证据库被改）→ 选测该模块防不自知
+    case "$changed" in *"feature-verify/${m}/"*) match=1 ;; esac
+    # 命中该 module 声明的实现源路径（唯一事实源 modules.map）→ 选测
+    if [ "$match" = "0" ] && [ -n "$pat" ]; then
+      if grep -qE "$pat" <<< "$changed"; then match=1; fi
+    fi
+    if [ "$match" = "1" ]; then echo "$m"; fi
+  done < <(map_entries)
+  return 0
+}
 
 list_mode() {
   echo "==== [feature-verify] 功能证据库盘点 ===="
@@ -72,70 +130,171 @@ list_mode() {
     n=$((n+1))
   done
   echo "  共 $n 份功能校验脚本（功能支撑证据档案库）"
+  echo ""
+  echo "  模块→实现源映射（唯一事实源 ${MAP_FILE}）:"
+  while IFS=$'\t' read -r m p pat; do
+    [ -n "$m" ] && echo "    [${m}] ← ${pat}"
+  done < <(map_entries)
   exit 0
 }
 
 # ------------------------------------------------------------
 # 1. 确定变更文件列表（复用 change-aware 的 git diff 思路）
+#    CHANGED_KNOWN=1 表示范围可确定；=0 表示无法确定（保守全量）
 # ------------------------------------------------------------
+CHANGED_FILES=""
+CHANGED_KNOWN=1
 changed_files() {
   local out=""
-  if [ -n "${CNB_PULL_REQUEST_TARGET_SHA:-}" ]; then
+  if [ -n "${FEATURE_VERIFY_CHANGED_FILES:-}" ]; then
+    # 测试注入：确定性指定变更文件，跳过 git 探测
+    out="$(printf '%s' "$FEATURE_VERIFY_CHANGED_FILES" | tr ',' '\n')"
+  elif [ -n "${CNB_PULL_REQUEST_TARGET_SHA:-}" ]; then
     out="$(git diff --name-only "$CNB_PULL_REQUEST_TARGET_SHA" "HEAD" 2>/dev/null)"
   elif [ -n "${CNB_COMMIT:-}" ] && [ "$(git rev-parse HEAD 2>/dev/null)" = "$CNB_COMMIT" ]; then
     out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
-  fi
-  if [ -z "$out" ] && git rev-parse --verify main >/dev/null 2>&1; then
+  elif git rev-parse --verify main >/dev/null 2>&1; then
     out="$(git diff --name-only "main...HEAD" 2>/dev/null)"
-  fi
-  if [ -z "$out" ] && git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+  elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
     out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
+  else
+    CHANGED_KNOWN=0
   fi
   local work="$(git diff --name-only 2>/dev/null; git diff --cached --name-only 2>/dev/null)"
   if [ -n "$work" ]; then
     if [ -n "$out" ]; then out="$out
 $work"; else out="$work"; fi
+    CHANGED_KNOWN=1
   fi
-  CHANGED_FILES="$out"
+  CHANGED_FILES="$(printf '%s\n' "$out" | sed '/^$/d')"
 }
 
 # ------------------------------------------------------------
 # 2. 按变更范围选测受影响 feature-verify 模块（--changed）
-#    feature-verify/<module>/ 负责验对应实现文件的功能语义
+#    feature-verify/<module>/ 负责验对应实现文件的功能语义；
+#    映射来自唯一事实源 modules.map（不再硬编码 case）。
 # ------------------------------------------------------------
 select_by_changes() {
   changed_files
-  if [ -z "$CHANGED_FILES" ]; then
-    echo "  [feature-verify] 无变更文件 → 视为空（无目标功能待验）"
+  if [ "$CHANGED_KNOWN" = "0" ]; then
+    echo "  [feature-verify] 无法确定变更范围 → 保守全量回归（不漏跑优先）"
     return 0
   fi
+  if [ -z "$CHANGED_FILES" ]; then
+    echo "  [feature-verify] 变更范围为空 → 无目标功能待验（跳过，非假绿）"
+    ALL_SCRIPTS=()
+    return 0
+  fi
+  local sel_modules
+  sel_modules="$(select_modules_for "$CHANGED_FILES")"
   declare -a SEL=()
-  for f in "${ALL_SCRIPTS[@]}"; do
-    local modpath="$(dirname "$f")"
-    local srcmod="$(basename "$modpath")"
-    local match=0
-    # 命中 feature-verify 模块自身（证据库被改）→ 选测该模块防不自知
-    if echo "$CHANGED_FILES" | grep -q "feature-verify/${srcmod}/"; then
-      match=1
-    fi
-    # 命中该 module 的实现源路径 → 选测
-    if [ "$match" = "0" ]; then
-      case "$srcmod" in
-        dashboard)
-          if echo "$CHANGED_FILES" | grep -qE "scripts/generate-dashboard\.py|docs/DASHBOARD\.md"; then match=1; fi ;;
-        dispatch)
-          if echo "$CHANGED_FILES" | grep -qE "local-agent/dispatch_engine\.py|local-agent/dispatch/"; then match=1; fi ;;
-        entry-guard)
-          if echo "$CHANGED_FILES" | grep -qE "local-agent/scale/profile.py|local-agent/scale/prescale.py"; then match=1; fi ;;
-      esac
-    fi
-    if [ "$match" = "1" ]; then SEL+=("$f"); fi
-  done
+  if [ -n "$sel_modules" ]; then
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      for f in "${ALL_SCRIPTS[@]}"; do
+        [ "$(basename "$(dirname "$f")")" = "$m" ] && SEL+=("$f")
+      done
+    done <<< "$sel_modules"
+  fi
+  # 未登记映射的证据模块：显式暴露（不静默），--check-map 会判 RED
+  local _em _em_missing=""
+  while IFS= read -r _em; do
+    [ -n "$_em" ] || continue
+    [ -n "$(map_lookup "$_em")" ] || _em_missing="$_em_missing $_em"
+  done < <(evidence_modules)
+  if [ -n "$_em_missing" ]; then
+    echo "  ⚠️ 证据库模块未登记 modules.map:${_em_missing} → 其实现源变更会被静默漏跑"
+    echo "     → 请补 ${MAP_FILE} 映射；CI --check-map 会硬拦（RED）。"
+  fi
+
+  # 未映射的实现源变更：显式暴露（不静默），供 --check-map 收口
+  local unmapped=""
+  while IFS= read -r cf; do
+    case "$cf" in local-agent/*) ;; *) continue ;; esac
+    local hit=0
+    while IFS=$'\t' read -r m p pat; do
+      [ -n "$pat" ] || continue
+      if grep -qE "$pat" <<< "$cf"; then hit=1; break; fi
+    done < <(map_entries)
+    [ "$hit" = "0" ] && unmapped="$unmapped
+    $cf"
+  done <<< "$CHANGED_FILES"
+  if [ -n "$unmapped" ]; then
+    echo "  ⚠️ 以下 local-agent 实现源变更未被任何 feature-verify 模块映射（本次未选测）:$unmapped"
+    echo "     → 若属既有功能，请在 ${MAP_FILE} 登记映射；--check-map 会拦未映射的【模块】。"
+  fi
   if [ "${#SEL[@]}" -gt 0 ]; then
     ALL_SCRIPTS=("${SEL[@]}")
   else
     ALL_SCRIPTS=()
   fi
+}
+
+# ------------------------------------------------------------
+# 2.1 映射防退化断言（--check-map · 有牙齿）
+#     ① 证据库每个模块必须在 modules.map 登记（未映射即 RED）
+#     ② 探针实现源路径必须真实存在（映射过期即 RED）
+#     ③ 模拟「改该模块实现源」→ 选择器必须选中它（映射失效即 RED，防静默漏跑）
+#     ④ 映射表不得有指向不存在模块的僵尸条目
+# ------------------------------------------------------------
+check_map() {
+  local RED=0
+  echo "==== [feature-verify] 模块→实现源映射防退化断言（--check-map）===="
+  if [ ! -f "$MAP_FILE" ]; then
+    echo "  ❌ 映射表不存在: $MAP_FILE（唯一事实源缺失 = 选择器无从映射）"
+    exit 1
+  fi
+  echo "  唯一事实源: $MAP_FILE（$(map_entries | grep -c . ) 条映射）"
+
+  # ① 证据库模块 ↔ 映射表 双向覆盖
+  local mods; mods="$(evidence_modules)"
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    local row pat probe
+    row="$(map_lookup "$m")"
+    if [ -z "$row" ]; then
+      echo "  ❌ 模块 [$m] 未在 ${MAP_FILE} 登记 → --changed 会静默漏跑（RED）"
+      RED=1; continue
+    fi
+    probe="$(printf '%s' "$row" | cut -f2)"
+    pat="$(printf '%s' "$row" | cut -f3)"
+    # ② 探针存在
+    if [ -z "$probe" ] || [ ! -e "$probe" ]; then
+      echo "  ❌ 模块 [$m] 探针实现源不存在: '${probe}'（映射过期，RED）"
+      RED=1
+    fi
+    # ③ 模拟改该模块实现源 → 必须被选中
+    if [ -n "$probe" ]; then
+      local _sel_m; _sel_m="$(select_modules_for "$probe")"
+      if grep -qx "$m" <<< "$_sel_m"; then
+        echo "  ✅ 模块 [$m] 映射有效（改 ${probe} → 选中 [$m]）"
+      else
+        echo "  ❌ 模块 [$m] 映射失效（改 ${probe} 未选中 [$m]）→ 静默漏跑，RED"
+        RED=1
+      fi
+    fi
+    if [ -z "$pat" ]; then
+      echo "  ❌ 模块 [$m] 选择 ERE 为空（RED）"
+      RED=1
+    fi
+  done <<< "$mods"
+
+  # ④ 僵尸条目：映射里的模块在证据库不存在
+  while IFS=$'\t' read -r m p pat; do
+    [ -n "$m" ] || continue
+    if [ ! -d "$VERIFY_DIR/$m" ]; then
+      echo "  ❌ 映射条目 [$m] 指向不存在的证据模块目录 ${VERIFY_DIR}/${m}/（僵尸条目，RED）"
+      RED=1
+    fi
+  done < <(map_entries)
+
+  echo ""
+  if [ "$RED" -gt 0 ]; then
+    echo "🔴 映射防退化断言未通过（未映射/映射失效/僵尸条目）→ blocked_on: feature_unverified"
+    exit 1
+  fi
+  echo "🟢 映射防退化断言通过：证据库模块 100% 被 --changed 覆盖，无僵尸条目"
+  exit 0
 }
 
 # ------------------------------------------------------------
@@ -162,6 +321,11 @@ run_all() {
   echo "==== [feature-verify] 功能级回归诊断（feature-regress）===="
   if [ "${#ALL_SCRIPTS[@]}" -eq 0 ]; then
     echo "  (本范围无可选 feature-verify 脚本) → 通过"
+    exit 0
+  fi
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "  --dry-run：将跑 ${#ALL_SCRIPTS[@]} 份脚本（不执行）"
+    for f in "${ALL_SCRIPTS[@]}"; do echo "    $f"; done
     exit 0
   fi
   local PASS=0 FAIL=0
@@ -196,6 +360,7 @@ run_all() {
 
 case "$MODE" in
   list) list_mode ;;
+  check_map) check_map ;;
   module|feature) filter; run_all ;;
   changed) select_by_changes; run_all ;;
   *) run_all ;;

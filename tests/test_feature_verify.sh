@@ -10,7 +10,10 @@
 #   T5 feature-regress.sh 回归诊断能跑出"通过/崩"定位
 #   T6 合并闸门已接入 .cnb.yml（feature-verify gate 阶段）
 #   T7 文档 docs/FEATURE_VERIFY.md + CAPABILITY_INDEX 登记
-#   T8 五要素"功能级 > 断言"自证：缺语义段即判功能没做完（抓'假完成'）
+#   T8 五要素"功能级 > 断言"自证：缺语义段即判功能没做完（抓0027假完成0027）
+#   T9 模块→实现源映射收口唯一事实源（Issue #162）
+#   T10 变异验证：移除任一模块映射 → --check-map RED（防退化有牙齿）
+#   T11 缺口回归自证：collab 实现源变更不再假绿（评审 🟡P1）
 #
 # 用法：bash tests/test_feature_verify.sh
 # 运行依赖：bash + git（纯逻辑）；python 样例在 python 环境跑（无则优雅跳过）
@@ -123,6 +126,74 @@ if echo "$OUT" | grep -q "FAIL=3"; then
   ok "空壳看板被判缺语义段 → 功能级判据能抓'假完成'（非只看文件在）"
 else
   bad "空壳看板未被判缺语义段（OUT=$OUT）"
+fi
+
+# ---- T9 模块→实现源映射收口唯一事实源（Issue #162）----
+echo ""
+echo "▶ T9 模块→实现源映射唯一事实源（不再散落硬编码 case）"
+[ -f scripts/feature-verify/modules.map ] && ok "modules.map 唯一事实源存在" || bad "缺 scripts/feature-verify/modules.map"
+# 选择器不得再散落硬编码 case "$srcmod" 分支
+if grep -q 'case "\$srcmod"' scripts/feature-verify.sh; then
+  bad "feature-verify.sh 仍残留硬编码 case 分支（未收口唯一事实源）"
+else
+  ok "feature-verify.sh 已无硬编码 case 分支（只读 modules.map）"
+fi
+# 证据库每个模块都必须在映射表登记
+MAP_MISSING=""
+for d in scripts/feature-verify/*/; do
+  m="$(basename "$d")"
+  [ "$m" = "_templates" ] && continue
+  grep -q "^${m}:" scripts/feature-verify/modules.map || MAP_MISSING="$MAP_MISSING $m"
+done
+if [ -z "$MAP_MISSING" ]; then
+  ok "证据库全部模块已在 modules.map 登记（无未映射模块）"
+else
+  bad "证据库模块未登记映射:$MAP_MISSING → --changed 会静默漏跑"
+fi
+if bash scripts/feature-verify.sh --check-map >/dev/null 2>&1; then
+  ok "--check-map 防退化断言通过（基线绿）"
+else
+  bad "--check-map 基线失败"
+fi
+
+# ---- T10 变异验证：移除任一模块映射 → 断言 RED（有牙齿）----
+echo ""
+echo "▶ T10 变异验证（移除映射 → RED）"
+TMPMAP="$(mktemp)"
+grep -v '^dispatch:' scripts/feature-verify/modules.map > "$TMPMAP"
+if FEATURE_VERIFY_MAP="$TMPMAP" bash scripts/feature-verify.sh --check-map >/dev/null 2>&1; then
+  bad "移除 dispatch 映射后 --check-map 仍绿 → 断言没牙齿"
+else
+  ok "移除 dispatch 映射 → --check-map RED（防退化有牙齿）"
+fi
+rm -f "$TMPMAP"
+
+# ---- T11 缺口回归自证：collab 实现源变更不再假绿 ----
+echo ""
+echo "▶ T11 缺口回归自证（评审 🟡P1 漏跑源不再假绿）"
+OUT_CHANGED="$(FEATURE_VERIFY_CHANGED_FILES="local-agent/collab/engine.py" bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
+if printf '%s\n' "$OUT_CHANGED" | grep -q "feature-verify/peer-closure/"; then
+  ok "改 local-agent/collab/engine.py → 选中 peer-closure（假绿消除）"
+else
+  bad "改 local-agent/collab/engine.py 仍无可选脚本（OUT=$OUT_CHANGED）"
+fi
+
+# ---- T12 变更感知测试选择已接线（选择器改动 → 功能级自测）----
+echo ""
+echo "▶ T12 变更感知测试选择接线（Issue #162）"
+if grep -q "scripts/feature-verify|tests/test_feature_verify.sh" scripts/change-aware-test.sh; then
+  ok "change-aware 已将 feature-verify 证据库/选择器变更映射到 test_feature_verify.sh"
+else
+  bad "change-aware 未接线 feature-verify 变更 → 选择器改动无自测守护"
+fi
+
+# ---- T13 CI 闸门已跑 --check-map（防退化断言前置）----
+echo ""
+echo "▶ T13 CI 闸门接线 --check-map"
+if grep -q "feature-verify.sh --check-map" .cnb.yml; then
+  ok "CI feature-verify gate 已前置 --check-map（未映射即 RED）"
+else
+  bad "CI 闸门未跑 --check-map → 未映射模块仍可能静默漏跑"
 fi
 
 # ---- 汇总 ----

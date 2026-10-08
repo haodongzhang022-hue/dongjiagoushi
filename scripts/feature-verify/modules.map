@@ -1,0 +1,43 @@
+# ============================================================
+# feature-verify 模块 → 实现源映射（唯一事实源 · Issue #162）
+# ============================================================
+# 缺口背景：--changed 选择器原先用散落的 `case "$srcmod"` 硬编码，
+#   只覆盖 dashboard / dispatch / entry-guard 3 个模块，而证据库实有 7 个
+#   → 未覆盖模块的实现源变更**静默漏跑**（假绿）。本表是唯一事实源，
+#   选择器只读本表，不再硬编码分支。
+#
+# 格式（每行一条，`:` 分隔三字段；regex 不得含 `:`）：
+#   <evidence-module>: <代表性实现源路径（自测探针用）>: <实现源选择 ERE>
+#
+# 约定：
+#   - evidence-module 必须与 scripts/feature-verify/<module>/ 目录名一致；
+#   - 新增 feature-verify 模块必须在此登记，否则 --check-map 判 RED（防退化）；
+#   - ERE 走 grep -E 语法，可含 `|` 分支；实现源路径变更时同步改本表；
+#   - 同一实现源命中多个模块时全部选测（宁多跑，不漏跑）。
+#
+# 自测：bash scripts/feature-verify.sh --check-map
+# ============================================================
+
+# 看板呈现（生成器 + 产物文档）
+dashboard: scripts/generate-dashboard.py: scripts/generate-dashboard\.py|docs/DASHBOARD\.md
+
+# 开发小组确定性状态机（引擎 + 能力包 + 接线驱动）
+dev-team: local-agent/dev_team.py: local-agent/dev_team\.py|local-agent/dev_team_kit/|local-agent/dev_team_driver\.py
+
+# 分发引擎（真实唤醒校验闸门）
+dispatch: local-agent/dispatch_engine.py: local-agent/dispatch_engine\.py|local-agent/dispatch/
+
+# 统一处置标签（分类器本体）
+disposition: local-agent/collab/disposition.py: local-agent/collab/disposition\.py
+
+# 秘书入口护栏（规模预设/档案层）
+entry-guard: local-agent/scale/profile.py: local-agent/scale/profile\.py|local-agent/scale/prescale\.py
+
+# 同岗会诊收尾闭环（会诊/收尾/人类闸门/决策 + collab 协作核心 engine/store）
+peer-closure: local-agent/collab/closure.py: local-agent/collab/(peer|closure|human_gate|decisions|precursor|engine|store|__init__)\.py
+
+# 评审双轴必走（角色实现）
+review: local-agent/roles/reviewer.py: local-agent/roles/reviewer\.py
+
+# 变更选择器自身（本表 + 主执行器）——证据库自保，改选择器必须跑自身样例
+selector: scripts/feature-verify.sh: scripts/feature-verify\.sh|scripts/feature-verify/modules\.map

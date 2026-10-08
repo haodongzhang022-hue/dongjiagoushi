@@ -33,19 +33,41 @@
 | Evidence | 可核验产物——跑完落到哪个可 grep/可查的语义产物 |
 | Why 功能级 | 说明纯 grep/通畅抓不到、本脚本如何真实判"功能做完" |
 
+## 模块→实现源映射（唯一事实源 · Issue #162）
+`--changed` 按变更选测受影响模块，映射**只在一处维护** = `scripts/feature-verify/modules.map`
+（不再散落 `case "$srcmod"` 硬编码——原缺口：7 个证据模块只覆盖 3 个，未覆盖模块的实现源
+变更**静默漏跑**，`exit 0` 假绿）。
+
+格式（每行一条，`:` 分隔）：
+```
+<evidence-module>: <代表性实现源路径（自测探针）>: <实现源选择 ERE>
+```
+- 新增 feature-verify 模块必须在 `modules.map` 登记，否则 `--check-map` 判 RED；
+- 实现源路径变更须同步改该行 ERE，否则探针失配 → RED；
+- 同一实现源命中多模块时全部选测（宁多跑，不漏跑）。
+
+防退化断言（有牙齿）：
+```bash
+bash scripts/feature-verify.sh --check-map   # 未映射 / 映射失效 / 僵尸条目 → RED
+```
+① 证据库每模块须已登记 ② 探针路径须真实存在 ③ 模拟"改该模块实现源"须真被选中
+④ 映射表不得有指向不存在模块的僵尸条目。CI 的 `feature-verify gate` 先跑它再跑 `--changed`。
+
 ## 目录与命令
 ```
 scripts/feature-verify/
+  modules.map                     # ⭐ 模块→实现源映射（唯一事实源 · Issue #162）
   README.md                       # 使用说明 + 写脚本铁律
   _templates/verify.template.sh   # 新功能骨架（复制改名）
   <module>/<功能名>.sh             # 一处一功能（module=实现域）
-scripts/feature-verify.sh          # 主执行器（all/module/feature/changed/list）
+scripts/feature-verify.sh          # 主执行器（all/module/feature/changed/check-map/list）
 scripts/feature-regress.sh         # 回归诊断（--all 语义别名）
 ```
 ```bash
 bash scripts/feature-verify.sh --all             # 全量回归
 bash scripts/feature-verify.sh --changed         # 按变更自动选测（PR 门禁用）
 bash scripts/feature-verify.sh --list            # 证据库盘点
+bash scripts/feature-verify.sh --check-map       # 映射防退化断言（未映射/失效即 RED）
 bash scripts/feature-regress.sh [--module X]     # 回归诊断定位坏功能
 ```
 
