@@ -15,7 +15,9 @@
   | stats         | 聚合指标快照                   | 进度统计：并发度/队列积压/活跃数等 |
 
 表结构在 SQLite 与 PostgreSQL / MySQL 上保持一致（类型用通用类型，
-SQLite 会宽松兼容），同一套 schema 在不同后端无缝切换。
+SQLite 会宽松兼容），同一套 schema 在接口层共用；**但 PG 写路径端到端尚未闭环**
+（方言 DDL / 参数风格 / 事务内 `db.execute` 连接复用，见 ADR-0013 跟踪项），
+切 PG 前须先收口该跟踪项，勿按「无缝」预期直接上生产。
 
 SQL 方言说明：
   - 自增主键：SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`、PG/MySQL `SERIAL/BIGINT AUTO_INCREMENT`

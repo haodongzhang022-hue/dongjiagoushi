@@ -613,7 +613,7 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 - **可回溯留痕**：协作产出必须写 `archives`，进度变化必须写 `progress`，禁止无痕产出。
 - **消息可回放**：消息管线（`messages`）可重放，供审计复盘，不吞异常。
 - **唯一负责**：数据写入 / 校验 / 统计 / 归档由「架构·数据管理员」统一执行，人类 / 总师只通过 `progress_report` / `task_overview` / `snapshot_stats` 二级信息俯瞰。
-- **后端可伸缩**：默认 SQLite 零依赖；生产 / 2500 级切 PostgreSQL（`DB_BACKEND`），同一套表结构与接口无缝迁移。
+- **后端可伸缩**：默认 SQLite 零依赖；生产 / 2500 级切 PostgreSQL（`DB_BACKEND`），表结构与仓储接口已抽象为同一套，**但 PG 写路径端到端尚未闭环**（见 ADR-0013 跟踪项），勿按「无缝」预期直接上生产。
 
 ## 领域文档 + 追踪问题纪律（Issue #98 · 借鉴 mattpocock/skills · 固定规则）
 

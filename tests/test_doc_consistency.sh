@@ -60,6 +60,16 @@ contains() {
   fi
 }
 
+absent() {
+  local name="$1" haystack="$2" needle="$3"
+  if [[ "$haystack" != *"$needle"* ]]; then
+    PASS=$((PASS+1)); echo "  ✅ $name"
+  else
+    FAIL=$((FAIL+1)); FAILED_ITEMS+=("[$name] 不应再含: $needle")
+    echo "  ❌ $name（不应再含: $needle）"
+  fi
+}
+
 file_exists() {
   local name="$1" file="$2"
   if [ -f "$file" ]; then
@@ -259,6 +269,12 @@ contains "test_data_layer 组10 假绿收口为适配层冒烟" "$(cat local-age
 contains "requirements 声明 sqlalchemy 依赖项（非注释，Then-6 依赖）" "$(grep -E '^sqlalchemy' local-agent/requirements.txt)" "sqlalchemy"
 contains "CI feature-verify 作业显式安装依赖（不静默跳过）" "$(cat .cnb.yml)" 'python3 -c "import sqlalchemy'
 contains "feature-verify Then-6 带环境守卫（无 sqlalchemy 优雅跳过）" "$(cat scripts/feature-verify/collab/写时状态中介.sh)" "Then-6 跳过：未装 sqlalchemy"
+# 🟡 收口：「无缝迁移/切换」残留清零——文档不得再给「零成本切 PG」的假象
+# （db.py / DATA_ARCHITECTURE 已改口，AGENTS.md:616 与 schema.py:18 两处残留一并收）。
+absent "AGENTS.md 不再称「同一套表结构与接口无缝迁移」" "$(cat AGENTS.md)" "同一套表结构与接口无缝迁移"
+absent "schema.py 不再称「同一套 schema 在不同后端无缝切换」" "$(cat local-agent/data/schema.py)" "在不同后端无缝切换"
+contains "AGENTS.md 暴露 PG 写路径未闭环（勿按无缝预期）" "$(cat AGENTS.md)" "但 PG 写路径端到端尚未闭环"
+contains "schema.py 暴露 PG 写路径未闭环（勿按无缝预期）" "$(cat local-agent/data/schema.py)" "但 PG 写路径端到端尚未闭环"
 contains "AGENTS.md 登记阶段链门控规则" "$(cat AGENTS.md)" "阶段链门控"
 file_exists "阶段链门控引擎存在" "local-agent/review_cycle/gate.py"
 file_exists "阶段链唯一事实源存在" "local-agent/review_cycle/stage_spec.py"
