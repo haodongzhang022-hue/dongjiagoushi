@@ -13,6 +13,11 @@
       主线写 vno 时撞唯一键 → 老库永久坏。迁移把旧冲突行搬到负数编号空间。
 
 设计：**幂等 + 可重放**——重复执行不产生副作用；用 `schema_migrations` 记录已应用版本。
+
+热路径纪律：`migrate()` 被 `schema.init_schema()` 调用，而后者在 webui（每请求）/
+gid（每操作）等热路径上高频执行。**待迁移项检查必须只读、不取写锁**：
+只有确有 pending 时才开事务（sqlite 最外层 `BEGIN IMMEDIATE` 会取写锁，无 pending
+也取锁会把只读语义的热路径串行化甚至打挂）。
 """
 import threading
 
@@ -32,6 +37,22 @@ M2 = "2026-10-08-02_conflict_vno_to_negative"
 # `migrate()`（迁移已下沉到 init_schema）。靠本标记挡掉内层重入，避免无限递归。
 _state = threading.local()
 _LAST = {}
+
+
+class MigrationError(RuntimeError):
+    """迁移无法安全进行（可读、可定位，替代底层 sqlite 的 no such column 冒泡）。"""
+
+
+# 目标表列 → 老库缺列时的兜底表达式（NULL/默认值），避免「更旧的库」直接崩。
+_COLUMN_DEFAULTS = {
+    "payload": "'{}'",
+    "author": "''",
+    "branch": "'main'",
+    "parent_vno": "0",
+    "status": "'open'",
+    "created_at": "NULL",
+}
+_REQUIRED_COLUMNS = ("entity_loc", "vno")
 
 
 def last_result():
@@ -70,6 +91,25 @@ def _table_exists(name):
     return schema.table_exists(name)
 
 
+def _columns(table):
+    """取某表现有列名集合（老库可能缺列，迁移要按实际列拼 SELECT）。"""
+    return {r["name"] for r in db.query("PRAGMA table_info(%s)" % table)}
+
+
+def pending():
+    """待应用的迁移版本清单（**只读**，不取写锁）。
+
+    供 `migrate --dry-run` / 诊断用；热路径的快路径判据在 `_run_migrations()` 里
+    用 `_applied_versions()`（一次查询，比逐条探测便宜）。
+    """
+    if db.is_remote():
+        return []
+    if not _table_exists("schema_migrations"):
+        # 标记表都没有：无法判断已应用哪些，按「都要跑」保守返回（首次迁移）。
+        return [M1, M2]
+    return [v for v in (M1, M2) if not _applied(v)]
+
+
 def _unique_cols(table):
     """按 PRAGMA 取该表的全部唯一索引列组合（sqlite）。
 
@@ -92,32 +132,61 @@ def needs_m1():
     return ("entity_loc", "branch", "vno") not in _unique_cols("versions")
 
 
+def ensure_versions_upgraded():
+    """在建表 DDL 之前，先把结构过旧的 `versions` 表升到位（幂等，返回是否动了）。
+
+    `init_schema()` 的索引 DDL（`idx_versions_branch` / `idx_versions_status`）
+    引用 branch / status 列，**旧库没有该列时建索引直接抛 `no such column`**，
+    在建表阶段就崩——迁移根本没机会跑。所以必须在 DDL 循环前先重建该表。
+    """
+    if db.is_remote() or not _table_exists("versions"):
+        return False
+    cols = _columns("versions")
+    if not needs_m1() and not ({"branch", "status"} - cols):
+        return False
+    migrate_m1_unique_branch()
+    return True
+
+
 def migrate_m1_unique_branch():
-    """versions 唯一键补 branch 维度（幂等）。"""
+    """versions 唯一键补 branch 维度（幂等）。
+
+    建表语句引用 `schema.VERSIONS_TABLE_DDL` 常量，不再靠 DDL 字符串匹配：
+    以前 `"CREATE TABLE IF NOT EXISTS versions " in ddl` 一旦 DDL 改格式
+    （换行/多空格）就静默失配，`ALTER` 已换名后建表落空 → `no such table: versions`。
+    """
     if not needs_m1():
         return {"migration": M1, "status": "skip"}
     from . import schema
+    cols = _columns("versions")
+    missing = [c for c in _REQUIRED_COLUMNS if c not in cols]
+    if missing:
+        # 可读错误，不让底层 `no such column` 冒到 Web 面板 / gid 入口
+        raise MigrationError(
+            "versions 表缺少必需列 %s，无法自动迁移（结构非本仓库所建？）；"
+            "请人工核对后重跑 data-cli migrate。" % ", ".join(missing))
+    # 目标列 → 源表达式：老库缺列时用默认值兜底（更旧的库没有 branch 也能升上来）
+    targets = [c for c in ("id", "entity_loc", "vno", "payload", "author", "branch",
+                           "parent_vno", "status", "created_at") if c in cols or c in _COLUMN_DEFAULTS]
+    exprs = []
+    for c in targets:
+        if c in cols:
+            exprs.append("COALESCE(branch, 'main')" if c == "branch" else c)
+        else:
+            exprs.append("%s AS %s" % (_COLUMN_DEFAULTS[c], c))
     # 整段包一个事务：中途失败不留 versions_old_mig 残表
     with db.transaction():
+        db.execute("DROP TABLE IF EXISTS versions_old_mig")
         db.execute("ALTER TABLE versions RENAME TO versions_old_mig")
-        for ddl in schema.SCHEMA_DDL:
-            if "CREATE TABLE IF NOT EXISTS versions " in ddl:
-                db.execute(ddl)
-                break
+        db.execute(schema.VERSIONS_TABLE_DDL)
         db.execute(
-            """
-            INSERT INTO versions (id, entity_loc, vno, payload, author, branch,
-                                  parent_vno, status, created_at)
-            SELECT id, entity_loc, vno, payload, author, COALESCE(branch, 'main'),
-                   parent_vno, status, created_at
-            FROM versions_old_mig
-            """
+            "INSERT INTO versions (%s) SELECT %s FROM versions_old_mig"
+            % (", ".join(targets), ", ".join(exprs))
         )
         db.execute("DROP TABLE versions_old_mig")
         # 换表会连索引一起丢，重建（DROP 之后名字才空出来，顺序不能反）
-        for ddl in schema.SCHEMA_DDL:
-            if " ON versions(" in ddl:
-                db.execute(ddl)
+        for ddl in schema.VERSIONS_INDEX_DDL:
+            db.execute(ddl)
     return {"migration": M1, "status": "applied"}
 
 
@@ -160,9 +229,12 @@ def _run_migrations():
     if not _table_exists("versions"):
         from . import schema
         schema.init_schema()   # 内层 migrate() 由重入守卫挡掉
-    db.execute(SCHEMA_MIGRATIONS_DDL)
+    if not _table_exists("schema_migrations"):
+        db.execute(SCHEMA_MIGRATIONS_DDL)   # 仅首次建标记表（唯一一次额外写）
+
     results = []
-    # 迁移步骤与 `_mark` 必须在同一事务：否则中途失败会留下「已标记但未生效」。
+    # 确有 pending 才开事务；迁移步骤与 `_mark` 必须同事务，否则中途失败会留下
+    # 「已标记但未生效」。
     with db.transaction():
         if not _applied(M1):
             results.append(migrate_m1_unique_branch())
@@ -177,10 +249,15 @@ def _run_migrations():
     return {"backend": db.backend(), "results": results}
 
 
-def migrate():
-    """执行全部迁移（幂等，可重复调用）。"""
+def migrate(dry_run=False):
+    """执行全部迁移（幂等，可重复调用）。
+
+    `dry_run=True` 只报告待迁移项，不落任何写（对应 ADR-0013 的 `migrate --dry-run`）。
+    """
     if db.is_remote():
         return {"backend": db.backend(), "status": "skipped-remote"}
+    if dry_run:
+        return {"backend": db.backend(), "dry_run": True, "pending": pending()}
     if getattr(_state, "active", False):
         return {"backend": db.backend(), "status": "reentrant-skip"}
     _state.active = True

@@ -158,7 +158,20 @@ with db.transaction():
                    "'{}','x','x')")
 assert db.query("SELECT loc FROM entities WHERE loc='loc://t.n/nested'"), "嵌套提交失效"
 assert getattr(db._thread_local, "tx_depth", 0) == 0
-print("  ✅ 事务底座 tx_depth 归零 + 回滚/嵌套提交 通过")
+
+# 嵌套事务里的显式 rollback() 无法作用于已提交的外层，必须显式抛错
+# （旧行为是静默吞掉 → 调用方以为回滚了、其实数据已落库）。
+try:
+    with db.transaction():
+        inner = db.transaction()
+        db.execute("INSERT INTO entities (etype,namespace,entity_id,loc,payload,"
+                   "created_at,updated_at) VALUES ('t','n','sw','loc://t.n/sw','{}','x','x')")
+        inner.rollback()
+    raise AssertionError("嵌套显式 rollback 未抛错（陷阱仍在）")
+except RuntimeError as e:
+    assert "嵌套事务" in str(e), e
+assert getattr(db._thread_local, "tx_depth", 0) == 0
+print("  ✅ 事务底座 tx_depth 归零 + 回滚/嵌套提交 + 嵌套显式 rollback 抛错 通过")
 EOF
 
 echo "===== [collab] 全部通过 ✅ ====="

@@ -198,7 +198,7 @@ assert all(x["status"] in ("already", "skip") for x in second), second
 print("  ✅ 迁移幂等可重放:", [x["status"] for x in second])
 EOF
 
-echo "===== [data] 9. 读热路径 · 健康库 init_schema 不抢写锁 ====="
+echo "===== [data] 9. 读热路径 · 健康库 init_schema / gid 不抢写锁 ====="
 $PY - <<'EOF'
 import os, sqlite3, sys, tempfile, threading, time
 
@@ -236,6 +236,62 @@ finally:
 r = migrate.migrate()["results"]
 assert all(x["status"] == "already" for x in r), r
 print("  ✅ 健康库 migrate 走 already 快路径:", [x["status"] for x in r])
+
+# init_schema() 本身在持写锁期间也必须立即返回（不阻塞）
+ready2 = threading.Event()
+def holder2():
+    c = sqlite3.connect(p, timeout=10); c.isolation_level = None
+    c.execute("BEGIN IMMEDIATE")
+    c.execute("INSERT INTO agents(agent_id,role,group_id,status,spec,updated_at) "
+              "VALUES ('locker2','x','g','active','{}','now')")
+    ready2.set(); time.sleep(1.5); c.execute("COMMIT"); c.close()
+t2 = threading.Thread(target=holder2); t2.start(); ready2.wait(5); time.sleep(0.1)
+t0 = time.time()
+schema.init_schema()
+dt = time.time() - t0
+t2.join()
+assert dt < 0.5, "init_schema() 被写锁阻塞 %.2fs（热路径不可用）" % dt
+print("  ✅ 持写锁下 init_schema() 不阻塞 (%.3fs)" % dt)
+
+# dry-run：只报待迁移项、不落写（ADR-0013 承诺的口径，此前文档有实现无）
+d = migrate.migrate(dry_run=True)
+assert d.get("dry_run") is True and d.get("pending") == [], d
+print("  ✅ migrate --dry-run 只报告不落写:", d)
+EOF
+
+echo ""
+echo "===== [data] 10. sqlalchemy 事务适配（pg 分支 · _SQLA_Tx）====="
+$PY - <<'EOF'
+import os, tempfile
+try:
+    import sqlalchemy  # noqa: F401
+except ImportError:
+    print("  ⏭️  未装 sqlalchemy，pg 分支样例跳过（CI 全量环境跑）")
+    raise SystemExit(0)
+# 用 sqlalchemy 引擎跑通 _SQLA_Tx：Engine.begin() 返回 _GeneratorContextManager，
+# 自身没有 commit/rollback（提交落在 __enter__ 的 Connection 上）。此前 _SQLA_Tx
+# 直接调 ctx.commit() → AttributeError，pg 写路径整条挂。
+os.environ["DB_BACKEND"] = "postgresql"
+os.environ["DB_URL"] = "sqlite:///" + os.path.join(tempfile.mkdtemp(), "sqla.db")
+from data import db
+import importlib
+importlib.reload(db)
+db.execute("CREATE TABLE IF NOT EXISTS t (a int)")
+tx = db.transaction(); tx.execute("INSERT INTO t (a) VALUES (1)"); tx.commit()
+assert db.query("SELECT * FROM t") == [{"a": 1}]
+tx2 = db.transaction(); tx2.execute("INSERT INTO t (a) VALUES (2)"); tx2.rollback()
+assert db.query("SELECT * FROM t") == [{"a": 1}], "显式 rollback 失效"
+with db.transaction() as t3:
+    t3.execute("INSERT INTO t (a) VALUES (3)")
+assert len(db.query("SELECT * FROM t")) == 2
+try:
+    with db.transaction() as t4:
+        t4.execute("INSERT INTO t (a) VALUES (4)")
+        raise RuntimeError("boom")
+except RuntimeError:
+    pass
+assert len(db.query("SELECT * FROM t")) == 2, "异常未回滚"
+print("  ✅ _SQLA_Tx 显式 commit/rollback + with 提交/异常回滚 全可用")
 EOF
 
 echo "===== 全部 data 层测试通过 ====="

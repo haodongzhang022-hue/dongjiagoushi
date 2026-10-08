@@ -12,6 +12,7 @@
 #           ② 旧库唯一键升级为 (entity_loc, branch, vno)、主线可写、旧冲突仍留在队列
 #           ③ 空库直接跑 `data-cli migrate` 不崩、不留「已标记但未建表」的半写
 #           ④ transaction() 非 with 用法的 commit/rollback 后 tx_depth 归零
+#           ⑤ 他人持写锁期间 init_schema()（webui 每请求 / gid 每操作的热路径）不阻塞
 #   Evidence 本脚本内断言（真跑并发 + 真造旧库）+ 主线 vno / conflicts() 返回值
 # 为什么是「功能级」：纯 grep 只能看到 `db.transaction()` 字样，抓不到
 #   「并发下真的只有一个赢家、冲突提案真的不污染主线、旧库真的经入口被升级」。
@@ -29,7 +30,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 export PYTHONPATH="local-agent${PYTHONPATH:+:$PYTHONPATH}"
 python3 - <<'PYEOF2'
-import os, sqlite3, subprocess, sys, tempfile, threading
+import os, sqlite3, subprocess, sys, tempfile, threading, time
 
 TMP = tempfile.mkdtemp()
 os.environ["DB_PATH"] = os.path.join(TMP, "fv.db")
@@ -134,6 +135,45 @@ if d1 == 0 and d2 == 0:
     ok("Then-4: transaction().commit()/rollback() 后 tx_depth 归零（无泄漏）")
 else:
     bad("Then-4: tx_depth 泄漏 commit后=%d rollback后=%d" % (d1, d2))
+
+# ---- Then-5: 热路径可用性——他人持写锁时 init_schema() 不得阻塞/抛锁错 ----
+# 🔴5 就是从这个缝里漏出去的：迁移下沉后 init_schema() 无条件 BEGIN IMMEDIATE，
+# webui 每请求 / gid 每操作都被写锁串行化。这里锁死「只读检查不取写锁」。
+p4 = os.path.join(TMP, "hot.db")
+os.environ["DB_PATH"] = p4
+db3 = importlib.reload(db)
+importlib.reload(schema)
+schema.init_schema()
+
+def _hold(sec, ev):
+    cc = sqlite3.connect(p4, timeout=30); cc.isolation_level = None
+    cc.execute("BEGIN IMMEDIATE")
+    cc.execute("INSERT INTO stats (metric,value,ts) VALUES ('x',1,'t')")
+    ev.set(); time.sleep(sec); cc.commit(); cc.close()
+
+def _timed(fn, sec=2.0):
+    ev = threading.Event()
+    th = threading.Thread(target=_hold, args=(sec, ev)); th.start(); ev.wait()
+    t = time.time()
+    try:
+        fn(); r, err = "OK", None
+    except Exception as e:
+        r, err = type(e).__name__ + ": " + str(e), e
+    dt = time.time() - t
+    th.join()
+    return r, err, dt
+
+r5, err5, dt5 = _timed(schema.init_schema)
+if err5 is None and dt5 < 0.5:
+    ok("Then-5: 他人持写锁 2s 时 init_schema() 不阻塞（%.3fs，热路径不被写锁串行化）" % dt5)
+else:
+    bad("Then-5: init_schema() 被写锁阻塞/打挂：%s %.2fs" % (r5, dt5))
+
+r5b, err5b, dt5b = _timed(lambda: __import__("data.migrate", fromlist=["migrate"]).migrate())
+if err5b is None and dt5b < 0.5:
+    ok("Then-5b: migrate()（无 pending 时）同样只读不取锁（%.3fs）" % dt5b)
+else:
+    bad("Then-5b: migrate() 无 pending 仍取写锁：%s %.2fs" % (r5b, dt5b))
 
 print()
 sys.exit(1 if FAIL else 0)

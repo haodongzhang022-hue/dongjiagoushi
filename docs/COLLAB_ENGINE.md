@@ -206,9 +206,14 @@ CREATE TABLE versions (
 并**下沉到 `schema.init_schema()`**：全仓入口只要走建表就都会升级既有库，
 不依赖各自记得先调 `admin.init()`（详见 ADR-0013）。
 
-> 迁移下沉的**代价护栏**：`init_schema()` 是读热路径必经点，故迁移带**健康库快路径**——
-> 迁移已全部应用时**不开写事务、不跑 DDL**，避免一次纯读也抢写锁（并发长写事务下
-> 会被阻塞到 `busy_timeout` 抛 `database is locked`）。由 `test_data_layer.sh` 第 9 组锁死。
+**热路径纪律（复评 🔴5）**：`init_schema()` 是读热路径的必经点（webui 每请求 /
+gid 每操作 / sentinel / dispatcher…），**迁移检查必须只读**：
+`_run_migrations()` 带**健康库快路径**——M1/M2 标记均已应用即直接返回，
+**不开写事务、不跑 DDL**；只在确有 pending 时才开 `db.transaction()` 取写锁。
+否则已迁移完的库也会每次抢 `BEGIN IMMEDIATE`，把只读语义的操作串行化、
+他人持写锁时被阻塞到 `busy_timeout` 抛 `database is locked`。
+`data-cli migrate --dry-run` 只报告待迁移项、不落写。
+由 `test_data_layer.sh` 第 9 组 + feature-verify `collab/写时状态中介` Then-5 双处锁死。
 
 ### commits 小组整合提交
 
@@ -343,7 +348,7 @@ conflicts()                           # 待处理冲突清单
 | 不破坏既有六表数据层 | test_data_layer.sh + 新 collab 测试 | ✅ 全绿 |
 | 并发写不产生重复 vno（写时状态中介） | 16 线程同基提交 + feature-verify `collab/写时状态中介` | ✅ ok=1 / conflict=15 / err=0，主线 vno 无重复 |
 | 旧库经任意建表入口自动升级 | 造旧库（旧唯一键+冲突占正数）→ 只走 `schema.init_schema()` | ✅ 约束升级 / 主线可写 / 冲突不丢 |
-| 健康库读热路径不被写锁阻塞 | 另连接持写锁 → 纯读 gid（走 `init_schema`）| ✅ 成功（快路径不开写事务，`test_data_layer.sh` 第 9 组）|
+| 健康库读热路径不被写锁阻塞 | 另连接持写锁 → 纯读 gid / `init_schema()` / `migrate()` | ✅ 0.00s 返回（快路径不开写事务） |
 
 **测试信号灯**：新增 `local-agent/tests/test_collab.sh`，未通过即红灯阻塞不放行。
 

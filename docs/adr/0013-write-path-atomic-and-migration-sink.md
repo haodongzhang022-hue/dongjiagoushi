@@ -43,7 +43,17 @@
    判据用 `schema_migrations` 标记（与迁移步骤同事务，标记在即表在），不用建表探测。
 6. **事务收尾路径唯一**：`_SQLite_Tx.commit()/rollback()/__exit__` 共用 `_finish()`，
    `tx_depth` 只在最外层归零才真正提交——非 `with` 用法不再泄漏计数、
-   不再让后续事务静默失去原子性。
+   不再让后续事务静默失去原子性。嵌套事务里的**显式** `commit()/rollback()` 直接抛错
+   （sqlite 无真嵌套，静默吞掉会让人以为回滚了、其实落库）。
+7. **热路径只读纪律**：`migrate()` 先**只读**探测 pending（`pending()`），
+   **只在确有 pending 时才开事务**。`init_schema()` 在 webui（每请求）/ gid（每操作）
+   等热路径高频调用，无条件 `BEGIN IMMEDIATE` 会把只读语义的操作串行化，
+   他人持写锁时直接抛 `database is locked`（复评 🔴5）。
+8. **旧表先升再建索引**：`init_schema()` 在建表 DDL 之前调 `migrate.ensure_versions_upgraded()`
+   ——索引 DDL 引用 `branch`/`status` 列，旧库没这列时建索引会先崩、迁移根本没机会跑。
+9. **迁移建表引用常量**：`migrate_m1_unique_branch()` 引用 `schema.VERSIONS_TABLE_DDL` /
+   `VERSIONS_INDEX_DDL`，不再靠 DDL 字符串匹配（DDL 一改格式就静默失配）。
+10. **`--dry-run`**：`data-cli migrate --dry-run` 只报告待迁移项、不落写（大库先看代价）。
 
 备选方案（未选）：
 - 只加唯一约束兜底、不改事务 → 把竞态变成**报错**而非**判冲突**，调用方拿不到 conflict 语义，不做；
@@ -53,9 +63,10 @@
 ## 后果（权衡）
 - 好处：并发写从「撞键 / 锁死」变为确定性判冲突；冲突不再污染主线、不再静默丢失；
   旧库经任意入口自动升级；事务 API 自洽（`tx_depth` 无泄漏）。
-  已由 `test_collab.sh` 第 7 组、`test_data_layer.sh` 第 8/9 组、
-  feature-verify `collab/写时状态中介` 三处锁死。第 9 组专门锁「健康库 `init_schema`
-  不取写锁」：另一连接持写锁时纯读 gid 必须成功，去掉快路径即转红。
+  已由 `test_collab.sh` 第 7 组、`test_data_layer.sh` 第 8/9/10 组、
+  feature-verify `collab/写时状态中介`（Then-1~5）锁死。第 9 组 / Then-5 专门锁
+  「健康库读热路径不取写锁」：另一连接持写锁时纯读 gid / `init_schema()` 必须成功，
+  去掉快路径即转红。
 - 代价：写路径串行化（`BEGIN IMMEDIATE`），高并发下冲突方要重试/rebase——
-  这是「一致性优先」的自觉取舍；迁移需要一次建表/拷数据（大库有成本，可 `migrate --dry-run` 观察，见后续项）。
+  这是「一致性优先」的自觉取舍；迁移需要一次建表/拷数据（大库有成本，先 `data-cli migrate --dry-run` 看代价）。
 - 难反转：一旦依赖负数编号语义与 branch 维度唯一键，回退会让既有冲突提案与分支版本错位。

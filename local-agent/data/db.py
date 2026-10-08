@@ -100,6 +100,11 @@ def is_remote():
     return DB_BACKEND in ("postgresql", "mysql")
 
 
+def _depth():
+    """当前线程的事务嵌套深度（0 = 不在事务中）。"""
+    return getattr(_thread_local, "tx_depth", 0)
+
+
 def execute(sql, params=()):
     """执行一条写语句（insert/update/delete），返回受影响行数。"""
     if DB_BACKEND in ("postgresql", "mysql"):
@@ -111,7 +116,7 @@ def execute(sql, params=()):
             return res.rowcount if res.rowcount is not None else 0
     conn = connect()
     cur = conn.execute(sql, params)
-    if getattr(_thread_local, "tx_depth", 0) <= 0:
+    if _depth() <= 0:
         conn.commit()
     return cur.rowcount
 
@@ -140,15 +145,13 @@ def transaction():
     """返回一个上下文管理器，包裹一批写操作（原子提交/回滚）。"""
     if DB_BACKEND in ("postgresql", "mysql"):
         eng = connect()
-        ctx = eng.begin()
-        ctx.__enter__()
-        return _SQLA_Tx(ctx)
+        return _SQLA_Tx(eng.begin())
     conn = connect()
-    depth = getattr(_thread_local, "tx_depth", 0)
+    depth = _depth()
     if depth == 0:
         conn.execute("BEGIN IMMEDIATE")  # 立即取写锁，读-改-写期间不被他人插入
     _thread_local.tx_depth = depth + 1
-    return _SQLite_Tx(conn)
+    return _SQLite_Tx(conn, depth + 1)
 
 
 class _SQLite_Tx:
@@ -159,24 +162,35 @@ class _SQLite_Tx:
     用法（`tx = db.transaction(); tx.commit()`）会把 depth 永久留在 1，
     之后 `db.execute` 不再自动提交、`BEGIN IMMEDIATE` 不再取写锁，
     事务静默失去原子性（正是 M1 要消灭的「假原子性」）。
+
+    **嵌套语义**：sqlite 无真正嵌套事务，内层 `with` 退出只是不提交（交给最外层），
+    异常会冒泡到最外层统一回滚。内层**显式** `commit()/rollback()` 无法作用于
+    已提交的外层，故直接抛错——不静默吞掉「以为回滚了、其实落库了」的陷阱。
     """
 
-    def __init__(self, conn):
+    def __init__(self, conn, depth=1):
         self._conn = conn
+        self._depth = depth          # 本层事务的嵌套深度（1 = 最外层）
         self._closed = False
 
     def commit(self):
-        self._finish("commit")
+        self._finish("commit", explicit=True)
 
     def rollback(self):
-        self._finish("rollback")
+        self._finish("rollback", explicit=True)
 
-    def _finish(self, action):
+    def _finish(self, action, explicit=False):
         """收尾：depth 递减；最外层才落 commit/rollback。幂等，重复调用无副作用。"""
         if self._closed:
             return
+        if explicit and self._depth > 1:
+            raise RuntimeError(
+                "嵌套事务不支持显式 %s()：只有最外层事务能提交/回滚。"
+                "内层请直接退出 with（异常会冒泡到最外层回滚）。" % action)
         self._closed = True
-        depth = max(0, getattr(_thread_local, "tx_depth", 1) - 1)
+        # 按本层深度收敛（不用「当前深度-1」：内层显式调用抛错时不会走 __exit__，
+        # 用「当前深度-1」会让计数永久留 1，之后事务静默失去原子性）。
+        depth = self._depth - 1
         _thread_local.tx_depth = depth
         if depth == 0:
             getattr(self._conn, action)()
@@ -190,7 +204,7 @@ class _SQLite_Tx:
     def __exit__(self, exc_type, exc, tb):
         if self._closed:
             return False
-        depth = max(0, getattr(_thread_local, "tx_depth", 1) - 1)
+        depth = self._depth - 1
         _thread_local.tx_depth = depth
         self._closed = True
         if depth > 0:
@@ -203,31 +217,35 @@ class _SQLite_Tx:
 
 
 class _SQLA_Tx:
-    """sqlalchemy 事务适配（复用 sqlalchemy 的上下文连接）。"""
+    """sqlalchemy 事务适配。
+
+    `Engine.begin()` 返回的是 `_GeneratorContextManager`，**自身没有 commit/rollback**
+    （提交/回滚落在 `__enter__` 返回的 `Connection` 上）。因此这里保存
+    `__enter__` 拿到的连接，显式 commit/rollback 走连接——否则调用
+    `tx.commit()` 直接 `AttributeError`（pg 写路径实测挂在这）。
+    """
 
     def __init__(self, ctx):
         self._ctx = ctx
+        self._conn = ctx.__enter__()
 
     def commit(self):
-        self._ctx.commit()
+        self._conn.commit()
 
     def rollback(self):
-        self._ctx.rollback()
+        self._conn.rollback()
 
     def execute(self, sql, params=()):
         from sqlalchemy import text
 
-        return self._ctx.connection.execute(text(sql), params)
+        return self._conn.execute(text(sql), params)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if exc_type is None:
-            self._ctx.commit()
-        else:
-            self._ctx.rollback()
-        return False
+        # 交给 _GeneratorContextManager 收尾（正常提交 / 异常回滚）
+        return self._ctx.__exit__(exc_type, exc, tb)
 
 
 def now_iso():

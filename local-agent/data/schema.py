@@ -25,6 +25,31 @@ SQL 方言说明：
 """
 from . import db
 
+# versions 表 DDL 单独导出：迁移要「建新表 → 拷数据 → 换名」，需要能精确引用
+# 这张表的建表/建索引语句。此前靠 `"CREATE TABLE IF NOT EXISTS versions " in ddl`
+# 之类字符串匹配，DDL 一改格式（换行/多空格）就静默失配（迁移抛 no such table）。
+VERSIONS_TABLE_DDL = """
+    CREATE TABLE IF NOT EXISTS versions (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_loc    TEXT NOT NULL,
+        vno           INTEGER NOT NULL,         -- 主线 1..n；冲突提案用负数编号（-1,-2,…），不推进主线
+        payload       TEXT DEFAULT '{}',
+        author        TEXT DEFAULT '',
+        branch        TEXT DEFAULT 'main',
+        parent_vno    INTEGER DEFAULT 0,        -- 基于哪一版（冲突检测关键）
+        status        TEXT DEFAULT 'open',      -- open/merged/conflict/discarded
+        created_at    TEXT,
+        UNIQUE(entity_loc, branch, vno)
+    )
+    """
+
+VERSIONS_INDEX_DDL = [
+    "CREATE INDEX IF NOT EXISTS idx_versions_loc ON versions(entity_loc)",
+    "CREATE INDEX IF NOT EXISTS idx_versions_branch ON versions(branch)",
+    # 冲突清单按 status 直查（受理闸门高频消费），全量扫描在大库上会拖慢
+    "CREATE INDEX IF NOT EXISTS idx_versions_status ON versions(status)",
+]
+
 # 通用 DDL（SQLite 方言，PG/MySQL 在 init_schema 内做最小改写）
 SCHEMA_DDL = [
     # ---- 1. agent 档案（内容存档 / 信息互通定位）----
@@ -161,24 +186,8 @@ SCHEMA_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_acl_principal ON acl(principal)",
     "CREATE INDEX IF NOT EXISTS idx_acl_pattern ON acl(loc_pattern)",
     # ---- 10. 版本实体（协作运作机制 · ④ 版本整合，冲突检测）----
-    """
-    CREATE TABLE IF NOT EXISTS versions (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        entity_loc    TEXT NOT NULL,
-        vno           INTEGER NOT NULL,         -- 主线 1..n；冲突提案用负数编号（-1,-2,…），不推进主线
-        payload       TEXT DEFAULT '{}',
-        author        TEXT DEFAULT '',
-        branch        TEXT DEFAULT 'main',
-        parent_vno    INTEGER DEFAULT 0,        -- 基于哪一版（冲突检测关键）
-        status        TEXT DEFAULT 'open',      -- open/merged/conflict/discarded
-        created_at    TEXT,
-        UNIQUE(entity_loc, branch, vno)
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_versions_loc ON versions(entity_loc)",
-    "CREATE INDEX IF NOT EXISTS idx_versions_branch ON versions(branch)",
-    # 冲突清单按 status 直查（受理闸门高频消费），全量扫描在大库上会拖慢
-    "CREATE INDEX IF NOT EXISTS idx_versions_status ON versions(status)",
+    VERSIONS_TABLE_DDL,
+    *VERSIONS_INDEX_DDL,
     # ---- 11. 小组整合提交（协作运作机制 · ⑤ 小组提交）----
     """
     CREATE TABLE IF NOT EXISTS commits (
@@ -584,10 +593,12 @@ def init_schema():
     不再依赖各自记得先调 `admin.init()`——否则旧库经 dispatcher 等入口写入
     仍会撞旧唯一键（差距 H 未修）。
     """
-    for ddl in SCHEMA_DDL:
-        db.execute(ddl)
     # 延迟导入：migrate 依赖 schema（建表/探测），模块级互相 import 会成环
     from . import migrate
+    # 旧 versions 表先升到位：否则下面 idx_versions_branch 会撞 no such column
+    migrate.ensure_versions_upgraded()
+    for ddl in SCHEMA_DDL:
+        db.execute(ddl)
     migrate.migrate()
     return list_tables()
 

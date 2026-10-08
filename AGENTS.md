@@ -598,6 +598,8 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
   一次冲突不得把实体永久卡死；`conflicts()` 按 `status` 直查，不走 `vno DESC` 窗口（防主线 ≥50 后冲突静默丢失）。
   旧库迁移下沉到 `schema.init_schema()`（全仓入口建表即升级，不依赖各自记得调 `admin.init()`），
   迁移与 `schema_migrations` 标记**同事务**（不留「已标记未建表」半写）。
+  **热路径只读**：`migrate()` 先只读探测 pending，**只在确有 pending 时才开事务**——
+  `init_schema()` 在 webui（每请求）/ gid（每操作）高频调用，无条件取写锁会把只读操作串行化/打挂。
   信号灯：`local-agent/tests/test_collab.sh` 第 7 组 + `test_data_layer.sh` 第 8 组 +
   feature-verify `collab/写时状态中介`（真跑 16 线程并发 + 真造旧库）。
 
