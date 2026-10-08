@@ -152,7 +152,9 @@ c = sqlite3.connect(p)
 tables = {x[0] for x in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 assert "versions" in tables, "空库 migrate 后 versions 仍未建"
 assert "schema_migrations" in tables
-assert not (tables - {"versions", "schema_migrations"}) or True
+# 真实断言：迁移不得留下残表（旧表换名后必须被 DROP 干净）
+assert "versions_old_mig" not in tables, "迁移残留 versions_old_mig 残表"
+assert {"versions", "schema_migrations"} <= tables, "迁移后缺 versions/schema_migrations"
 c.close()
 print("  ✅ 空库 migrate：不崩、versions 已建、无半写标记")
 
@@ -194,6 +196,46 @@ first = migrate.migrate()["results"]
 second = migrate.migrate()["results"]
 assert all(x["status"] in ("already", "skip") for x in second), second
 print("  ✅ 迁移幂等可重放:", [x["status"] for x in second])
+EOF
+
+echo "===== [data] 9. 读热路径 · 健康库 init_schema 不抢写锁 ====="
+$PY - <<'EOF'
+import os, sqlite3, sys, tempfile, threading, time
+
+# 本组独立进程：DB_PATH 必须在 import data 之前设好
+p = os.path.join(tempfile.mkdtemp(), "hot.db")
+os.environ["DB_PATH"] = p
+
+from data import db, schema, migrate
+import gid
+
+schema.init_schema()                                   # 健康库（迁移已全部应用）
+assert migrate._applied(migrate.M1) and migrate._applied(migrate.M2)
+
+# 另一连接持写锁 1.5s；本线程纯读 gid（走 init_schema→migrate）必须成功
+ready = threading.Event()
+def holder():
+    c = sqlite3.connect(p, timeout=10); c.isolation_level = None
+    c.execute("BEGIN IMMEDIATE")
+    c.execute("INSERT INTO agents(agent_id,role,group_id,status,spec,updated_at) "
+              "VALUES ('locker','x','g','active','{}','now')")
+    ready.set(); time.sleep(1.5); c.execute("COMMIT"); c.close()
+t = threading.Thread(target=holder); t.start(); ready.wait(5); time.sleep(0.1)
+
+db.connect().execute("PRAGMA busy_timeout=800")        # 远短于持锁时间
+t0 = time.time()
+try:
+    v = gid.gid_for("agent", "hot-key")
+    print("  ✅ 持写锁下纯读成功 gid=%s (%.2fs)" % (v, time.time() - t0))
+except Exception as e:
+    raise AssertionError("健康库读热路径被写锁阻塞：%s: %s" % (type(e).__name__, e))
+finally:
+    t.join()
+
+# 快路径不改迁移语义：已应用库 migrate() 返回 already 且不开写事务
+r = migrate.migrate()["results"]
+assert all(x["status"] == "already" for x in r), r
+print("  ✅ 健康库 migrate 走 already 快路径:", [x["status"] for x in r])
 EOF
 
 echo "===== 全部 data 层测试通过 ====="

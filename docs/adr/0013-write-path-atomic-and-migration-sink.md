@@ -35,6 +35,12 @@
    并把 `migrate()` 挂到建表函数末尾——全仓 11 处入口只要建表就会升级既有库，
    **不依赖各自记得先调 `admin.init()`**（此前 dispatcher 等 9 处入口绕过迁移，旧库仍写坏）。
 5. **迁移与标记同事务**：`_mark()` 与迁移步骤同一事务，杜绝「已记 applied 但表不存在」半写。
+5b. **健康库快路径（复评 🔴1 返工）**：`_run_migrations()` 先查已应用标记，**M1/M2 均已应用
+   即直接返回、不开写事务、不跑任何 DDL**。原因：迁移下沉后 `init_schema()` 成了读热路径的
+   必经点（gid / sentinel / dispatcher / webui），若无条件 `BEGIN IMMEDIATE`，一次纯读也要
+   抢写锁，并发长写事务下被阻塞到 `busy_timeout` 抛 `database is locked`（读路径本不该受写锁
+   影响）；同理已建表时 `CREATE TABLE IF NOT EXISTS` 也会取写锁，必须一并跳过。
+   判据用 `schema_migrations` 标记（与迁移步骤同事务，标记在即表在），不用建表探测。
 6. **事务收尾路径唯一**：`_SQLite_Tx.commit()/rollback()/__exit__` 共用 `_finish()`，
    `tx_depth` 只在最外层归零才真正提交——非 `with` 用法不再泄漏计数、
    不再让后续事务静默失去原子性。
@@ -47,8 +53,9 @@
 ## 后果（权衡）
 - 好处：并发写从「撞键 / 锁死」变为确定性判冲突；冲突不再污染主线、不再静默丢失；
   旧库经任意入口自动升级；事务 API 自洽（`tx_depth` 无泄漏）。
-  已由 `test_collab.sh` 第 7 组、`test_data_layer.sh` 第 8 组、
-  feature-verify `collab/写时状态中介` 三处锁死。
+  已由 `test_collab.sh` 第 7 组、`test_data_layer.sh` 第 8/9 组、
+  feature-verify `collab/写时状态中介` 三处锁死。第 9 组专门锁「健康库 `init_schema`
+  不取写锁」：另一连接持写锁时纯读 gid 必须成功，去掉快路径即转红。
 - 代价：写路径串行化（`BEGIN IMMEDIATE`），高并发下冲突方要重试/rebase——
   这是「一致性优先」的自觉取舍；迁移需要一次建表/拷数据（大库有成本，可 `migrate --dry-run` 观察，见后续项）。
 - 难反转：一旦依赖负数编号语义与 branch 维度唯一键，回退会让既有冲突提案与分支版本错位。

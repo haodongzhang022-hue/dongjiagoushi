@@ -44,6 +44,19 @@ def _applied(version):
     return row is not None
 
 
+def _applied_versions():
+    """已应用迁移版本集合（一次查询；表不存在返回空集，不吞其他异常）。
+
+    供 `_run_migrations` 快路径用：比逐条 `_applied()` + `_table_exists()` 便宜，
+    且 `migrate()` 只跑 sqlite 分支（远程后端在入口即 skip），故只捕 OperationalError。
+    """
+    import sqlite3
+    try:
+        return {r["version"] for r in db.query("SELECT version FROM schema_migrations")}
+    except sqlite3.OperationalError:   # 表未建 = 尚未迁移
+        return set()
+
+
 def _mark(version):
     db.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
@@ -130,8 +143,20 @@ def migrate_m2_conflict_to_negative():
 
 def _run_migrations():
     """实际迁移流程（调用方已持重入守卫）。"""
-    # 缺表先建：空库直接跑 `data-cli migrate` 不再崩，也不会留下
-    # 「已记 M1 applied 但 versions 不存在」的半写标记。
+    # 快路径优先：迁移已全部应用（健康库的常态）→ 直接返回，
+    # **不开写事务、不跑任何 DDL、不建表探测**（只一次索引查询）。
+    # `init_schema()` 是读热路径的必经点（gid / sentinel / dispatcher / webui…）：
+    # 无条件开 `BEGIN IMMEDIATE` 会让一次纯读也抢写锁，并发长写事务下被阻塞到
+    # `busy_timeout` 抛 `database is locked`；同理 `CREATE TABLE IF NOT EXISTS`
+    # 在表已存在时也会取写锁（实测），必须一并跳过。读路径本不该受写锁影响。
+    # 判据用标记而非建表探测：`_mark` 与迁移步骤同事务，标记在即表在。
+    applied = _applied_versions()
+    if M1 in applied and M2 in applied:
+        return {"backend": db.backend(),
+                "results": [{"migration": M1, "status": "already"},
+                            {"migration": M2, "status": "already"}]}
+    # 慢路径：缺表先建——空库直接跑 `data-cli migrate` 不再崩，
+    # 也不会留下「已记 M1 applied 但 versions 不存在」的半写标记。
     if not _table_exists("versions"):
         from . import schema
         schema.init_schema()   # 内层 migrate() 由重入守卫挡掉
