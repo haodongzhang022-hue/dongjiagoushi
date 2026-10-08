@@ -126,10 +126,17 @@ def _unique_cols(table):
 
 
 def needs_m1():
-    """唯一键是否还缺 branch 维度（缺则需迁移；无 versions 表则无需迁移）。"""
+    """versions 是否需要重建（唯一键缺 branch **或**缺 branch/status 列）。
+
+    两条判据必须合并成一个——否则「唯一键已含 branch、但缺 status 列」的库
+    （手工改库/第三方库形态）会被判「无需迁移」跳过，而 `init_schema()` 的
+    `idx_versions_status` 建索引照样撞 `no such column` 崩在入口。
+    """
     if not _table_exists("versions"):
         return False
-    return ("entity_loc", "branch", "vno") not in _unique_cols("versions")
+    if ("entity_loc", "branch", "vno") not in _unique_cols("versions"):
+        return True
+    return bool({"branch", "status"} - _columns("versions"))
 
 
 def ensure_versions_upgraded():
@@ -141,8 +148,7 @@ def ensure_versions_upgraded():
     """
     if db.is_remote() or not _table_exists("versions"):
         return False
-    cols = _columns("versions")
-    if not needs_m1() and not ({"branch", "status"} - cols):
+    if not needs_m1():
         return False
     migrate_m1_unique_branch()
     return True

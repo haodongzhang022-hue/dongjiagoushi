@@ -196,6 +196,30 @@ first = migrate.migrate()["results"]
 second = migrate.migrate()["results"]
 assert all(x["status"] in ("already", "skip") for x in second), second
 print("  ✅ 迁移幂等可重放:", [x["status"] for x in second])
+
+# (4) 更旧的库（连 branch/status 列都没有）→ ensure_versions_upgraded 必须先重建
+#     否则 init_schema 的 idx_versions_branch 直接撞 no such column。
+#     本断言有牙齿：把 ensure_versions_upgraded() 改成 return False，此处即 RED
+#     （no such column: branch），不再出现「三套件全绿却漏掉建表前升表」的假绿。
+p3 = os.path.join(tempfile.mkdtemp(), "older.db")
+os.environ["DB_PATH"] = p3
+importlib.reload(db)
+c = sqlite3.connect(p3)
+c.executescript("""
+CREATE TABLE versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_loc TEXT NOT NULL, vno INTEGER NOT NULL, payload TEXT DEFAULT '{}',
+    author TEXT DEFAULT '', parent_vno INTEGER DEFAULT 0, created_at TEXT,
+    UNIQUE(entity_loc, vno)
+);
+INSERT INTO versions (entity_loc, vno, payload) VALUES ('loc://task.h/h', 1, '{}');
+""")
+c.commit(); c.close()
+assert migrate.needs_m1(), "更旧的库（缺 branch/status 列）应判需迁移"
+schema.init_schema()   # 缺列库若没先升表，这里就撞 no such column: branch
+assert ("entity_loc", "branch", "vno") in migrate._unique_cols("versions")
+assert not ({"branch", "status"} - migrate._columns("versions")), "缺列未补齐"
+print("  ✅ 更旧的库（缺 branch/status 列）经 init_schema 先升表再建索引，不崩")
 EOF
 
 echo "===== [data] 9. 读热路径 · 健康库 init_schema / gid 不抢写锁 ====="
@@ -260,22 +284,30 @@ print("  ✅ migrate --dry-run 只报告不落写:", d)
 EOF
 
 echo ""
-echo "===== [data] 10. sqlalchemy 事务适配（pg 分支 · _SQLA_Tx）====="
+echo "===== [data] 10. sqlalchemy 适配层冒烟（sqlite 方言 · PG 语义未验证）====="
 $PY - <<'EOF'
 import os, tempfile
 try:
     import sqlalchemy  # noqa: F401
 except ImportError:
-    print("  ⏭️  未装 sqlalchemy，pg 分支样例跳过（CI 全量环境跑）")
+    print("  ⏭️  未装 sqlalchemy，适配层样例跳过（CI 全量环境跑）")
     raise SystemExit(0)
-# 用 sqlalchemy 引擎跑通 _SQLA_Tx：Engine.begin() 返回 _GeneratorContextManager，
-# 自身没有 commit/rollback（提交落在 __enter__ 的 Connection 上）。此前 _SQLA_Tx
-# 直接调 ctx.commit() → AttributeError，pg 写路径整条挂。
+# ⚠️ 本组**只**冒烟 sqlalchemy 适配层（_SQLA_Tx）的 API 形状：Engine.begin() 返回
+# _GeneratorContextManager（自身没有 commit/rollback，提交落在 __enter__ 的
+# Connection 上）。此前 _SQLA_Tx 直接调 ctx.commit() → AttributeError。
+# **但这里 DB_URL 是 sqlite://**，真实方言 = sqlite，**并未验证任何 PG 语义**
+# （方言 DDL/`?` 参数/连接复用仍不通，见 ADR-0013 跟踪项）。故本组改名收口为
+# 「适配层冒烟」，不再以 "pg 分支" 背书。
 os.environ["DB_BACKEND"] = "postgresql"
 os.environ["DB_URL"] = "sqlite:///" + os.path.join(tempfile.mkdtemp(), "sqla.db")
 from data import db
 import importlib
 importlib.reload(db)
+eng = db.connect()
+# 显式断言真实方言：名为 pg 分支、实跑 sqlite —— 把「假绿」暴露在测试里而非藏起来
+assert eng.dialect.name == "sqlite", (
+    "本组只冒烟 sqlalchemy 适配层（sqlite 方言）；真 PG 语义未验证，"
+    "需要真 PG 请另开跟踪项（ADR-0013）")
 db.execute("CREATE TABLE IF NOT EXISTS t (a int)")
 tx = db.transaction(); tx.execute("INSERT INTO t (a) VALUES (1)"); tx.commit()
 assert db.query("SELECT * FROM t") == [{"a": 1}]
@@ -291,7 +323,24 @@ try:
 except RuntimeError:
     pass
 assert len(db.query("SELECT * FROM t")) == 2, "异常未回滚"
-print("  ✅ _SQLA_Tx 显式 commit/rollback + with 提交/异常回滚 全可用")
+# fail-loud：远程后端事务内 db.execute 必须在独立连接另开事务 → 显式拒绝，不静默半工作
+try:
+    with db.transaction():
+        db.execute("INSERT INTO t (a) VALUES (99)")
+    raise AssertionError("事务内 db.execute 未 fail-loud（静默失去原子性）")
+except RuntimeError as e:
+    assert "事务内" in str(e), e
+assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
+# 远程不支持嵌套事务（会取新连接另开事务）→ 显式拒绝
+try:
+    with db.transaction():
+        with db.transaction():
+            pass
+    raise AssertionError("远程嵌套事务未 fail-loud")
+except RuntimeError as e:
+    assert "嵌套" in str(e), e
+assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
+print("  ✅ sqlalchemy 适配层冒烟（sqlite 方言）+ 事务内 db.execute/嵌套 fail-loud 全通过")
 EOF
 
 echo "===== 全部 data 层测试通过 ====="

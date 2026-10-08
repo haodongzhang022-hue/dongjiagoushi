@@ -30,7 +30,7 @@
 | **全员** | @ 定位能力（HandleAbility）| 跨仓库/@ 格式/权限 | `local-agent/handle/` | docs/HANDLE_ABILITY.md | 通用 |
 | **全员** | 标签能力（LabelAbility）| 打标/进度/优先级/标签 | `local-agent/label/` | docs/LABEL_AUTOMATION.md | Issue #51 |
 | **全员** | 开发规范能力（StandardAbility）| 合规/规范/检查/标准 | `local-agent/dev-standard/` | docs/DEV_STANDARD.md | Issue #83 |
-| **协作** | 写时状态中介（写路径原子化）| 并发写/重复vno/写时冲突/事务包裹/冲突提案/旧库迁移/写坏了 | `local-agent/collab/engine.py` + `local-agent/data/migrate.py` | docs/COLLAB_ENGINE.md §六 | module collab v0.3.0 · ADR-0013 |
+| **协作** | 写时状态中介（写路径原子化）| 并发写/重复vno/写时冲突/事务包裹/冲突提案/旧库迁移/写坏了/PG写路径 | `local-agent/collab/engine.py` + `local-agent/data/migrate.py` | docs/COLLAB_ENGINE.md §六 | module collab v0.3.1 · ADR-0013（含 PG 写路径闭环跟踪项）|
 | **协作** | 同岗协作（PeerCollab）| 会诊/编队/补位/同岗 | `local-agent/collab/` | docs/PEER_COLLAB.md | Issue #47 |
 | **协作** | 同岗收尾闭环 | 会诊未收敛/收尾 | `local-agent/collab/closure.py` | docs/PEER_COLLAB_CLOSURE.md | Issue #47 |
 | **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote/blocked | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 · #150 |

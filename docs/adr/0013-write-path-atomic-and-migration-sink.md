@@ -54,6 +54,22 @@
 9. **迁移建表引用常量**：`migrate_m1_unique_branch()` 引用 `schema.VERSIONS_TABLE_DDL` /
    `VERSIONS_INDEX_DDL`，不再靠 DDL 字符串匹配（DDL 一改格式就静默失配）。
 10. **`--dry-run`**：`data-cli migrate --dry-run` 只报告待迁移项、不落写（大库先看代价）。
+11. **远程后端事务内 `db.execute` fail-loud（复评 🔴 返工·择「显式收口」而非「实现完整 PG」）**：
+    `db.execute()` 在 PG/MySQL 下每次都在新连接上 `eng.begin()` 另开事务，**无法复用当前
+    `db.transaction()` 的连接**——真 PG 17.11 实测：`with db.transaction(): db.execute(INSERT); raise`
+    **残留 1 行**（静默失去原子性），而 `tx.execute()` 路径回滚干净。本轮**不实现完整 PG 写路径**
+    （非默认后端、CI 全走 sqlite、基线更差），而是**显式收口**：远程后端在事务内调用
+    `db.execute()` / 嵌套 `db.transaction()` **直接抛 `RuntimeError`**（fail-loud，拒绝静默半工作），
+    事务内一律走 `tx.execute()`；同时修正 `db.py` 模块 docstring 与 `DATA_ARCHITECTURE.md`
+    的「无缝切换」表述为「接口层已抽象，**写路径闭环为跟踪项**」。
+12. **组 10 假绿收口（复评 🔴 返工）**：`test_data_layer.sh` 第 10 组名为「pg 分支」却用
+    `DB_URL=sqlite://`（真实方言 = sqlite），从未验证 PG 语义。收口为
+    「**sqlalchemy 适配层冒烟（sqlite 方言 · PG 语义未验证）**」+ 组内**显式断言
+    `eng.dialect.name == 'sqlite'`**（把假绿暴露在测试里），并补事务内 `db.execute`/嵌套的
+    fail-loud 断言。
+13. **`needs_m1()` 合并判据（复评 🟡2 一行硬化）**：唯一键缺 branch **或** 缺 `branch`/`status`
+    列，任一成立即需重建。否则「唯一键已含 branch、但缺 status 列」的库（手工改库/第三方库形态）
+    会被判「无需迁移」跳过，`idx_versions_status` 照样撞 `no such column` 崩在入口。
 
 备选方案（未选）：
 - 只加唯一约束兜底、不改事务 → 把竞态变成**报错**而非**判冲突**，调用方拿不到 conflict 语义，不做；
@@ -70,3 +86,10 @@
 - 代价：写路径串行化（`BEGIN IMMEDIATE`），高并发下冲突方要重试/rebase——
   这是「一致性优先」的自觉取舍；迁移需要一次建表/拷数据（大库有成本，先 `data-cli migrate --dry-run` 看代价）。
 - 难反转：一旦依赖负数编号语义与 branch 维度唯一键，回退会让既有冲突提案与分支版本错位。
+
+## 跟踪项（本 PR 不实现 · 另开 Issue）
+- **真 PG 写路径端到端闭环**：① `db.execute` 在远程后端复用当前事务连接（真闭环）；
+  ② PG 方言 DDL（`SERIAL`/`BIGINT`，替换 `AUTOINCREMENT`）；③ 参数风格（`?` → `%(name)s`/`:name`）。
+  现状：`init_schema()` 在真 PG 17.11 上直接 `SyntaxError: AUTOINCREMENT`，`db.query("... ?", ...)`
+  抛 `ArgumentError`——**PG 端到端不可用**（非静默损坏，是直接失败）。本 PR 只保证
+  **不再让假象留白**（fail-loud + 文档显式暴露），不承诺 PG 可用。

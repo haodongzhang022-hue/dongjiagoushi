@@ -248,6 +248,12 @@ contains "COLLAB_ENGINE 记录唯一键含 branch" "$(cat docs/COLLAB_ENGINE.md)
 contains "COLLAB_ENGINE 记录负数冲突编号语义" "$(cat docs/COLLAB_ENGINE.md)" "冲突提案用负数编号"
 file_exists "迁移模块存在" "local-agent/data/migrate.py"
 file_exists "写时状态中介 feature-verify 存在" "scripts/feature-verify/collab/写时状态中介.sh"
+# 复评返工：远程写路径显式收口（fail-loud）+ 假绿收口 + PG 闭环跟踪项
+contains "ADR-0013 记录 PG 写路径闭环为跟踪项" "$(cat docs/adr/0013-write-path-atomic-and-migration-sink.md)" "跟踪项"
+contains "db.py 修正无缝切换表述（写路径闭环为跟踪项）" "$(cat local-agent/data/db.py)" "跟踪项"
+contains "db.py 远程事务内 db.execute fail-loud" "$(cat local-agent/data/db.py)" "远程后端的事务内不支持 db.execute()"
+contains "DATA_ARCHITECTURE 暴露 PG 写路径未闭环" "$(cat docs/DATA_ARCHITECTURE.md)" "PG 写路径端到端尚未闭环"
+contains "test_data_layer 组10 假绿收口为适配层冒烟" "$(cat local-agent/tests/test_data_layer.sh)" "适配层冒烟（sqlite 方言"
 contains "AGENTS.md 登记阶段链门控规则" "$(cat AGENTS.md)" "阶段链门控"
 file_exists "阶段链门控引擎存在" "local-agent/review_cycle/gate.py"
 file_exists "阶段链唯一事实源存在" "local-agent/review_cycle/stage_spec.py"

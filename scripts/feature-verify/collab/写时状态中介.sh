@@ -175,6 +175,51 @@ if err5b is None and dt5b < 0.5:
 else:
     bad("Then-5b: migrate() 无 pending 仍取写锁：%s %.2fs" % (r5b, dt5b))
 
+# ---- Then-2b: 更旧的库（连 branch/status 列都没有）→ 建表前必须先升表 ----
+# 复评 🟡2：唯一键缺 branch 或 缺列，任一成立都要重建；否则 idx_versions_* 撞 no such column。
+p5 = os.path.join(TMP, "older.db")
+os.environ["DB_PATH"] = p5
+db4 = importlib.reload(db)
+importlib.reload(schema)
+c5 = sqlite3.connect(p5)
+c5.executescript("""
+CREATE TABLE versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_loc TEXT NOT NULL, vno INTEGER NOT NULL, payload TEXT DEFAULT '{}',
+    author TEXT DEFAULT '', parent_vno INTEGER DEFAULT 0, created_at TEXT,
+    UNIQUE(entity_loc, vno)
+);
+INSERT INTO versions (entity_loc, vno, payload) VALUES ('loc://task.h/h', 1, '{}');
+""")
+c5.commit(); c5.close()
+try:
+    schema.init_schema()
+    cols = migrate._columns("versions")
+    if ("entity_loc", "branch", "vno") in migrate._unique_cols("versions") and not ({"branch", "status"} - cols):
+        ok("Then-2b: 更旧的库（缺 branch/status 列）经 init_schema 先升表再建索引，不崩")
+    else:
+        bad("Then-2b: 缺列未补齐（cols=%s）" % sorted(cols))
+except Exception as e:
+    bad("Then-2b: 缺列库建表崩（%s: %s）" % (type(e).__name__, str(e)[:80]))
+
+# ---- Then-6: 远程后端写路径显式收口（fail-loud，不留假象）----
+# 复评 🔴：db.execute 在远程每次另开事务，无法复用当前事务连接 → 必须显式拒绝，不静默半工作。
+os.environ["DB_BACKEND"] = "postgresql"
+os.environ["DB_URL"] = "sqlite:///" + os.path.join(TMP, "sqla.db")
+db5 = importlib.reload(db)
+try:
+    with db5.transaction():
+        db5.execute("CREATE TABLE IF NOT EXISTS t_fv (a int)")
+    bad("Then-6: 远程事务内 db.execute 未 fail-loud（静默失去原子性）")
+except RuntimeError as e:
+    if "事务内" in str(e) and getattr(db5._thread_local, "tx_depth", 0) == 0:
+        ok("Then-6: 远程事务内 db.execute() fail-loud（拒绝静默半工作）+ tx_depth 归零")
+    else:
+        bad("Then-6: 抛错但语义/计数不对：%s depth=%s" % (str(e)[:50], getattr(db5._thread_local, "tx_depth", 0)))
+except Exception as e:
+    bad("Then-6: 抛了非 RuntimeError：%s: %s" % (type(e).__name__, str(e)[:60]))
+os.environ.pop("DB_BACKEND", None); os.environ.pop("DB_URL", None)
+
 print()
 sys.exit(1 if FAIL else 0)
 PYEOF2

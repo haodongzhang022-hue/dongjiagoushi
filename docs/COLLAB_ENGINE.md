@@ -215,6 +215,13 @@ gid 每操作 / sentinel / dispatcher…），**迁移检查必须只读**：
 `data-cli migrate --dry-run` 只报告待迁移项、不落写。
 由 `test_data_layer.sh` 第 9 组 + feature-verify `collab/写时状态中介` Then-5 双处锁死。
 
+**远程后端（PG/MySQL）写路径收口（复评 🔴 返工）**：`db.execute()` 在远程后端每次都在
+新连接上另开事务，**无法复用当前事务连接**（真 PG 17.11 实测：事务内 `db.execute(INSERT)`
++ raise → 残留 1 行）。本轮**不实现完整 PG 写路径**（非默认后端、CI 全走 sqlite），
+而是**显式收口**——远程后端在事务内调 `db.execute()` / 嵌套 `db.transaction()` **直接
+fail-loud 抛错**（拒绝静默半工作），事务内一律走 `tx.execute()`；文档「无缝切换」表述
+一并修正为「接口层已抽象、**写路径闭环为跟踪项**」（ADR-0013 跟踪项）。
+
 ### commits 小组整合提交
 
 小组内部/跨小组的修改统一**以小组为单位向上整合交付**：
