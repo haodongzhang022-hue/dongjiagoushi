@@ -25,7 +25,10 @@
 #   T17 脚本可执行位回归：feature-verify.sh / change-aware / 自测 / selector 样例 保持 100755
 #   T18 空转灯回归（Issue #162 复评 S2）：T16a/Then-9a 须带真实 modules.map，
 #       真走到 ①「未登记」判据（而非"映射表不存在"提前 exit 永远红）
-#   T19 静默通道回归（Issue #162 复评 S3）：僵尸映射行命中实现源变更时须发 ⚠️，不静默通过
+#   T19 静默通道回归（Issue #162 复评 S3）：僵尸映射行命中实现源变更时须显式暴露，不静默通过
+#   T20 僵尸容忍收窄（Issue #162 复评 T9）：容忍只给显式 `pending:` 标记；未标记的目录缺失
+#       → --check-map RED，且 --changed 命中其实现源 → 硬失败（不再「无可选脚本 → 通过」假绿）
+#   T21 stale pending：目录已落地仍挂 `pending:` → ⚠️ 提示转正式登记（收窄容忍面）
 #
 # 用法：bash tests/test_feature_verify.sh
 # 运行依赖：bash + git（纯逻辑）；python 样例在 python 环境跑（无则优雅跳过）
@@ -332,10 +335,11 @@ fi
 grep -q "模块 \[only_dir\] 未在" "$T16V/a.out" 2>/dev/null \
   && ok "T16a2: 真走到 ①未登记判据（非'映射表不存在'空转红灯）" \
   || bad "T16a2: 未走到 ①（空转红灯，S2 未修）"
-# (b) 映射有、目录无（前置登记）→ 绿（容忍跨 PR 中间态）
+# (b) **显式 pending 标记**的待落地前置登记（目录后落地）→ 绿（容忍跨 PR 中间态）
+#     复评 T9：容忍必须**显式标记**（pending:），否则"目录缺失"一律放过 = 重开假绿。
 cat > "$T16V/m_forward.map" <<'MAPEOF'
 only_dir: local-agent/collab/engine.py: local-agent/collab/engine\.py
-forward_only: local-agent/collab/engine.py: local-agent/collab/engine\.py
+pending: forward_only: local-agent/collab/engine.py: local-agent/collab/engine\.py
 MAPEOF
 if FEATURE_VERIFY_DIR="$T16V" FEATURE_VERIFY_MAP="$T16V/m_forward.map" \
    bash scripts/feature-verify.sh --check-map >"$T16V/f.out" 2>&1; then
@@ -347,10 +351,10 @@ grep -q "forward_only" "$T16V/f.out" 2>/dev/null \
   && ok "T16c: 前置登记以 ⚠️ 警告显式暴露（不静默）" \
   || bad "T16c: 前置登记未显式暴露"
 rm -rf "$T16V"
-# (c) 本 PR 已真实预登记 collab（与 #161 证据目录对齐）
-grep -q '^collab:' scripts/feature-verify/modules.map \
-  && ok "T16d: modules.map 已预登记 collab（合 #161 后不判红）" \
-  || bad "T16d: 未预登记 collab → 合 #161 后主线 --check-map 判红"
+# (c) 本 PR 已真实**显式 pending 预登记** collab（与 #161 证据目录对齐 · 复评 T9 收窄）
+grep -q '^pending: collab:' scripts/feature-verify/modules.map \
+  && ok "T16d: modules.map 已 pending 预登记 collab（合 #161 后不判红）" \
+  || bad "T16d: 未 pending 预登记 collab → 合 #161 后主线 --check-map 判红"
 
 # ---- T17 脚本可执行位回归（100755）----
 echo ""
@@ -383,9 +387,9 @@ grep -q "模块 \[only_dir\] 未在" "$T18V/withmap.out" \
   || bad "T18b: 带真实 map 仍未走到 ①（S2 未修）"
 rm -rf "$T18V"
 
-# ---- T19 静默通道回归：僵尸映射行命中实现源 → 须发 ⚠️（复评 S3）----
+# ---- T19 静默通道回归：僵尸映射行命中实现源 → 须显式暴露（复评 S3）----
 echo ""
-echo "▶ T19 静默通道回归（僵尸行不得吞掉未映射 ⚠️）"
+echo "▶ T19 静默通道回归（僵尸行不得吞掉未映射告警）"
 T19V="$(mktemp -d)"; mkdir -p "$T19V/other"
 echo '#!/usr/bin/env bash' > "$T19V/other/x.sh"
 cat > "$T19V/m.map" <<'MAPEOF'
@@ -396,11 +400,73 @@ T19OUT="$(FEATURE_VERIFY_DIR="$T19V" FEATURE_VERIFY_MAP="$T19V/m.map" \
           FEATURE_VERIFY_CHANGED_FILES="local-agent/novel/core.py" \
           bash scripts/feature-verify.sh --changed 2>&1)"
 if printf '%s\n' "$T19OUT" | grep -q "映射选中的模块 \[zombie\] 无证据目录/脚本"; then
-  ok "T19: 僵尸行命中实现源变更 → 显式 ⚠️（静默通道已堵）"
+  ok "T19: 僵尸行命中实现源变更 → 显式暴露（静默通道已堵）"
 else
   bad "T19: 僵尸行命中仍静默通过（S3 未修，OUT=$T19OUT）"
 fi
 rm -rf "$T19V"
+
+# ---- T20 僵尸容忍收窄（复评 T9）：未标记目录缺失 RED / pending 标记才容忍 ----
+echo ""
+echo "▶ T20 僵尸容忍收窄（T9）：容忍只给显式 pending: 标记"
+T20V="$(mktemp -d)"
+# 正式模块目录 + 未标记僵尸行 + 显式 pending 行
+mkdir -p "$T20V/real" "$T20V/_templates"
+echo '#!/usr/bin/env bash' > "$T20V/real/x.sh"
+cat > "$T20V/m.map" <<'MAPEOF'
+real: local-agent/novel/real.py: local-agent/novel/real\.py
+deleted: local-agent/novel/deleted.py: local-agent/novel/deleted\.py
+pending: waiting: local-agent/novel/waiting.py: local-agent/novel/waiting\.py
+MAPEOF
+# 探针须真实存在（探针检查独立于证据目录）
+mkdir -p local-agent/novel && : > local-agent/novel/real.py && : > local-agent/novel/deleted.py && : > local-agent/novel/waiting.py
+# (a) 未标记的目录缺失（deleted）→ 必须 RED
+if FEATURE_VERIFY_DIR="$T20V" FEATURE_VERIFY_MAP="$T20V/m.map" \
+   bash scripts/feature-verify.sh --check-map >"$T20V/a.out" 2>&1; then
+  bad "T20a: 未标记目录缺失 → --check-map 仍绿（T9 未收窄，重开假绿）"
+else
+  grep -q "正式登记的模块证据目录缺失.*deleted" "$T20V/a.out" \
+    && ok "T20a: 未标记目录缺失 → RED（T9 收窄生效）" \
+    || bad "T20a: RED 但未指明 deleted（OUT=$(cat "$T20V/a.out"))"
+fi
+# (b) 显式 pending 的目录缺失（waiting）→ 不判 RED（跨 PR 中间态容忍）
+if grep -q "正式登记的模块证据目录缺失.*waiting" "$T20V/a.out"; then
+  bad "T20b: 显式 pending 的目录缺失被当正式缺失判 RED（容忍面过窄）"
+else
+  grep -q "显式待落地前置登记（pending:）暂无证据目录.*waiting" "$T20V/a.out" \
+    && ok "T20b: 显式 pending 的目录缺失 → ⚠️ 容忍（跨 PR 中间态）" \
+    || bad "T20b: pending 行未显式暴露（OUT=$(cat "$T20V/a.out"))"
+fi
+# (c) --changed 命中未标记目录缺失模块 → 硬失败（不再「无可选脚本 → 通过」假绿）
+T20OUT="$(FEATURE_VERIFY_DIR="$T20V" FEATURE_VERIFY_MAP="$T20V/m.map" \
+          FEATURE_VERIFY_CHANGED_FILES="local-agent/novel/deleted.py" \
+          bash scripts/feature-verify.sh --changed 2>&1)"; T20RC=$?
+[ "$T20RC" -ne 0 ] \
+  && ok "T20c: 未标记目录缺失 + 命中实现源 → --changed 硬失败（不假绿）" \
+  || bad "T20c: 未标记目录缺失仍 --changed exit 0（T9 未收窄，OUT=$T20OUT）"
+rm -f local-agent/novel/real.py local-agent/novel/deleted.py local-agent/novel/waiting.py
+rmdir local-agent/novel 2>/dev/null
+rm -rf "$T20V"
+
+# ---- T21 stale pending：目录已落地仍挂 pending: → ⚠️ 提示（容忍面不得无声扩大）----
+echo ""
+echo "▶ T21 stale pending（目录已落地须提示转正式登记）"
+T21V="$(mktemp -d)"; mkdir -p "$T21V/landed" "$T21V/_templates"
+echo '#!/usr/bin/env bash' > "$T21V/landed/x.sh"
+cat > "$T21V/m.map" <<'MAPEOF'
+pending: landed: local-agent/novel/real.py: local-agent/novel/real\.py
+MAPEOF
+mkdir -p local-agent/novel && : > local-agent/novel/real.py
+if FEATURE_VERIFY_DIR="$T21V" FEATURE_VERIFY_MAP="$T21V/m.map" \
+   bash scripts/feature-verify.sh --check-map >"$T21V/a.out" 2>&1; then
+  grep -q "证据目录已落地.*landed" "$T21V/a.out" \
+    && ok "T21: 目录已落地仍挂 pending: → ⚠️ 提示 stale（收窄容忍面）" \
+    || bad "T21: 目录已落地仍挂 pending: 未提示 stale"
+else
+  bad "T21: 目录已落地 + pending 仍绿失败（OUT=$(cat "$T21V/a.out"))"
+fi
+rm -f local-agent/novel/real.py; rmdir local-agent/novel 2>/dev/null
+rm -rf "$T21V"
 # ---- 汇总 ----
 echo ""
 echo "======================================================"

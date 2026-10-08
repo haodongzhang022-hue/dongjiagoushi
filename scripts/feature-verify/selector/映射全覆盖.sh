@@ -198,11 +198,12 @@ fi
 grep -q "模块 \[only_dir\] 未在" "$TMP/x1.out" 2>/dev/null \
   && ok "Then-9a2: 真走到 ①未登记判据（非'映射表不存在'空转红灯）" \
   || bad "Then-9a2: 未走到 ①（空转红灯，S2 未修）"
-# (b) 映射有、目录无（前置登记）→ 必须绿（容忍跨 PR 中间态）
+# (b) **显式 pending 标记**的待落地前置登记（目录后落地）→ 必须绿（容忍跨 PR 中间态）
+#     复评 T9：容忍收窄到显式标记；未标记的目录缺失仍 RED（见 Then-11）。
 #     探针须用真实存在的实现源（探针检查独立于证据目录，不能靠假路径绕过）
 cat > "$TMPV/map_forward.map" <<'MAPEOF'
 only_dir: local-agent/collab/engine.py: local-agent/collab/engine\.py
-forward_only: local-agent/collab/engine.py: local-agent/collab/engine\.py
+pending: forward_only: local-agent/collab/engine.py: local-agent/collab/engine\.py
 MAPEOF
 if FEATURE_VERIFY_DIR="$TMPV" FEATURE_VERIFY_MAP="$TMPV/map_forward.map" \
    bash "$FV" --check-map >"$TMP/x2.out" 2>&1; then
@@ -218,25 +219,70 @@ else
 fi
 rm -rf "$TMPV"
 
-# ---------- Then-10：本 PR 真实预登记 collab，且 post-#161 合并后仍绿 ----------
-if grep -q '^collab:' "$MAP"; then
-  ok "Then-10a: modules.map 已预登记 collab 映射行（与 PR #161 证据目录对齐）"
+# ---------- Then-10：本 PR 显式 pending 预登记 collab，且 post-#161 合并后仍绿 ----------
+# 复评 T9：预登记须**显式标记**（`pending:`），容忍面才收窄；裸 `collab:` 会因目录缺失 RED。
+if grep -q '^pending: collab:' "$MAP"; then
+  ok "Then-10a: modules.map 已 pending 预登记 collab 映射行（与 PR #161 证据目录对齐）"
 else
-  bad "Then-10a: modules.map 未预登记 collab → 合 #161 后主线 --check-map 判红"
+  bad "Then-10a: modules.map 未 pending 预登记 collab → 合 #161 后主线 --check-map 判红"
 fi
-# 模拟 #161 已合（collab 证据目录落地）→ 仍须绿
+# 模拟 #161 已合：证据目录**全部落地**（含 collab）+ 去掉 collab 的 pending 前缀 → 必须绿。
 TMPV2="$(mktemp -d)"
-mkdir -p "$TMPV2/collab" "$TMPV2/selector"
+# 把真实证据库整体镜像过去（含全部正式模块目录），再补 collab 目录
+cp -r "$(dirname "$MAP")"/. "$TMPV2/" 2>/dev/null
+mkdir -p "$TMPV2/collab"
 echo '#!/usr/bin/env bash' > "$TMPV2/collab/写时状态中介.sh"
-echo '#!/usr/bin/env bash' > "$TMPV2/selector/映射全覆盖.sh"
-if FEATURE_VERIFY_DIR="$TMPV2" FEATURE_VERIFY_MAP="$MAP" \
+# 去掉 collab 的 pending 前缀 = 脚本已落地转正式登记
+sed 's/^pending: collab:/collab:/' "$MAP" > "$TMPV2/post161.map"
+if FEATURE_VERIFY_DIR="$TMPV2" FEATURE_VERIFY_MAP="$TMPV2/post161.map" \
    bash "$FV" --check-map >"$TMP/x3.out" 2>&1; then
-  ok "Then-10b: 模拟 #161 已合（collab 目录落地）→ --check-map 绿"
+  ok "Then-10b: 模拟 #161 已合（collab 目录落地 + 去 pending）→ --check-map 绿"
 else
   bad "Then-10b: 模拟 #161 已合后 --check-map 红（跨 PR 雷仍在）"
   sed 's/^/      /' "$TMP/x3.out"
 fi
+# 10c：目录落地但**忘记去掉 pending:** → 必须 ⚠️ 提示 stale（容忍面不得无声扩大）
+grep -q "证据目录已落地" "$TMP/x3.out" 2>/dev/null \
+  && bad "Then-10c: 去 pending 后仍报 stale（判据有误）" \
+  || ok "Then-10c: 去 pending 后不再报 stale（stale 判据准确）"
+if FEATURE_VERIFY_DIR="$TMPV2" FEATURE_VERIFY_MAP="$MAP" \
+   bash "$FV" --check-map >"$TMP/x4.out" 2>&1; then
+  grep -q "证据目录已落地" "$TMP/x4.out" \
+    && ok "Then-10d: 目录已落地但仍挂 pending: → ⚠️ 提示 stale（收窄容忍面）" \
+    || bad "Then-10d: 目录已落地仍挂 pending: 未提示 stale"
+else
+  bad "Then-10d: collab 目录落地 + pending 仍绿失败（OUT=$(cat "$TMP/x4.out"))"
+fi
 rm -rf "$TMPV2"
+
+# ---------- Then-11：T9 核心——未标记 pending 的目录缺失必须 RED（不得静默假绿） ----------
+# 复评 T9：旧行为对"目录缺失"一律 ⚠️ 放过 → 无法区分"跨 PR 中间态"与
+# "证据目录被误删/改名"。收窄后：**未标记**的目录缺失 → --check-map RED，
+# 且 --changed 命中该模块实现源 → 硬失败（不再「无可选脚本 → 通过」）。
+TMPV3="$(mktemp -d)"
+cp -r "$(dirname "$MAP")"/. "$TMPV3/" 2>/dev/null
+rm -rf "$TMPV3/disposition"          # 目录被误删，映射行**未标记** pending
+if FEATURE_VERIFY_DIR="$TMPV3" FEATURE_VERIFY_MAP="$MAP" \
+   bash "$FV" --check-map >"$TMP/x5.out" 2>&1; then
+  bad "Then-11a: 未标记的目录缺失 → --check-map 仍绿（重开 T9 假绿）"
+else
+  grep -q "正式登记的模块证据目录缺失.*disposition" "$TMP/x5.out" \
+    && ok "Then-11a: 未标记的目录缺失 → RED（静默假绿已堵，T9 收窄）" \
+    || bad "Then-11a: RED 但未指明缺失模块（OUT=$(cat "$TMP/x5.out"))"
+fi
+# 11b：--changed 命中该实现源 → 硬失败（旧行为是 ⚠️ + 「无可选脚本 → 通过」exit 0）
+TMPV3_OUT="$(FEATURE_VERIFY_DIR="$TMPV3" FEATURE_VERIFY_MAP="$MAP" \
+             FEATURE_VERIFY_CHANGED_FILES="local-agent/collab/disposition.py" \
+             bash "$FV" --changed 2>&1)"; TMPV3_RC=$?
+if [ "$TMPV3_RC" -ne 0 ]; then
+  ok "Then-11b: 未标记目录缺失 + 命中实现源 → --changed 硬失败（不再假绿通过）"
+else
+  bad "Then-11b: 未标记目录缺失仍 --changed exit 0（静默假绿，T9 未收窄）"
+fi
+printf '%s\n' "$TMPV3_OUT" | grep -q "未标记 pending" \
+  && ok "Then-11c: 硬失败原因显式（未标记 pending）" \
+  || bad "Then-11c: 硬失败未显式说明原因"
+rm -rf "$TMPV3"
 
 if [ "$FAIL" -gt 0 ]; then
   echo "🔴 selector/映射全覆盖 未达成 → 功能没做完（PASS=$PASS FAIL=$FAIL）"

@@ -7,7 +7,9 @@
 #   选择器只读本表，不再硬编码分支。
 #
 # 格式（每行一条，`:` 分隔三字段；regex 不得含 `:`）：
-#   <evidence-module>: <代表性实现源路径（自测探针用）>: <实现源选择 ERE>
+#   [pending: ]<evidence-module>: <代表性实现源路径（自测探针用）>: <实现源选择 ERE>
+#   `pending:` 前缀 = 显式「待落地前置登记」（证据目录暂由外部 PR 落地），
+#     目录缺失只 ⚠️ 不 RED；未标记的目录缺失一律 RED（复评 T9 收窄）。
 #
 # 约定：
 #   - evidence-module 必须与 scripts/feature-verify/<module>/ 目录名一致；
@@ -43,7 +45,9 @@ review: local-agent/roles/reviewer.py: local-agent/roles/reviewer\.py
 selector: scripts/feature-verify.sh: scripts/feature-verify\.sh|scripts/feature-verify/modules\.map
 
 # 协作运作引擎写路径（证据模块 scripts/feature-verify/collab/ 由 PR #161 引入）
-# 跨 PR 前置登记：本表与 PR #161 各自 base=main、互不冲突；若先合本 PR 后合 #161，
-# 中间态"有映射行、暂无证据目录"仅 ⚠️ 警告（不再 RED）——否则合 #161 后主线
-# --check-map 会因 collab 未映射直接判红（跨 PR 雷，Issue #162 收口）。
-collab: local-agent/collab/engine.py: local-agent/collab/(engine|store)\.py
+# 跨 PR 显式待落地前置登记（复评 T9 收窄）：`pending:` 前缀 = 本行**显式声明**证据目录
+# 暂由外部 PR 落地（#161），故目录缺失只 ⚠️ 不 RED（跨 PR 中间态容忍）。
+# 容忍是**显式标记**的，不是"目录缺失一律放过"——未标记的目录缺失仍 RED
+# （否则"证据目录被误删/改名"会被静默放过，重开 #162 要消灭的假绿形状）。
+# 脚本随 #161 落地后，请去掉 `pending:` 前缀转正式登记（否则 --check-map 会提示 stale）。
+pending: collab: local-agent/collab/engine.py: local-agent/collab/(engine|store)\.py

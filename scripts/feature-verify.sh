@@ -89,14 +89,19 @@ trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]
 
 map_entries() {
   [ -f "$MAP_FILE" ] || return 0
-  local line m p pat rest
+  local line m p pat rest pending
   while IFS= read -r line; do
     case "$line" in ''|'#'*) continue ;; esac
+    # `pending:` 前缀 = 显式标记的「待落地前置登记」：其证据目录允许暂缺
+    # （跨 PR 中间态：A PR 先登记映射、B PR 后落脚本）；**未标记的目录缺失一律 RED**
+    # （Issue #162 复评 T9：容忍必须收窄到显式标记，否则"证据目录被误删/改名"被静默放过）。
+    pending=0
+    case "$line" in pending:*) pending=1; line="${line#pending:}" ;; esac
     m="${line%%:*}"; rest="${line#*:}"
     p="${rest%%:*}"; pat="${rest#*:}"
     m="$(trim "$m")"; p="$(trim "$p")"; pat="$(trim "$pat")"
     [ -n "$m" ] || continue
-    printf '%s\t%s\t%s\n' "$m" "$p" "$pat"
+    printf '%s\t%s\t%s\t%s\n' "$m" "$p" "$pat" "$pending"
   done < "$MAP_FILE"
 }
 
@@ -104,10 +109,14 @@ map_lookup() {  # $1=module → TSV 行（无则空）
   map_entries | awk -F'\t' -v m="$1" '$1==m{print; exit}'
 }
 
+map_pending() {  # $1=module → 1=显式 pending 待落地前置登记，0/空=正式登记
+  map_entries | awk -F'\t' -v m="$1" '$1==m{print $4; exit}'
+}
+
 # 给定变更文件清单 → 选中的证据模块名（每行一个）
 select_modules_for() {
   local changed="$1" m p pat
-  while IFS=$'\t' read -r m p pat; do
+  while IFS=$'\t' read -r m p pat _pd; do
     [ -n "$m" ] || continue
     local match=0
     # 命中 feature-verify 模块自身（证据库被改）→ 选测该模块防不自知
@@ -138,7 +147,7 @@ list_mode() {
   echo "  共 $n 份功能校验脚本（功能支撑证据档案库）"
   echo ""
   echo "  模块→实现源映射（唯一事实源 ${MAP_FILE}）:"
-  while IFS=$'\t' read -r m p pat; do
+  while IFS=$'\t' read -r m p pat _pd; do
     [ -n "$m" ] && echo "    [${m}] ← ${pat}"
   done < <(map_entries)
   exit 0
@@ -159,6 +168,8 @@ list_mode() {
 CHANGED_FILES=""
 CHANGED_KNOWN=1
 CHANGED_NARROWED=0
+# 选测阶段命中"未标记的目录缺失"（静默假绿）→ 置 1，run_all 据此硬失败（复评 T9）。
+SELECT_HARD_FAIL=0
 changed_files() {
   local out="" resolved=0 settled=0 narrowed=0
   if [ -n "${FEATURE_VERIFY_CHANGED_FILES:-}" ]; then
@@ -233,11 +244,18 @@ select_by_changes() {
       for f in "${ALL_SCRIPTS[@]}"; do
         [ "$(basename "$(dirname "$f")")" = "$m" ] && { SEL+=("$f"); _hit=1; }
       done
-      # 选中的模块若无证据目录/脚本（僵尸映射行：有行无目录）→ 显式 ⚠️，不静默：
-      # 否则该实现源变更既不被选测、也不落进下面"未映射"告警 → 静默通过（复评 S3 静默通道）。
+      # 选中的模块若无证据目录/脚本 → 按是否显式 pending 标记分流（复评 T9）：
+      #   pending: 显式待落地前置登记 → ⚠️ 容忍（跨 PR 中间态，脚本随后落地）；
+      #   未标记 → ❌ 硬失败：该实现源变更没被真正选测，正是 #162 要消灭的"静默假绿"形状。
       if [ "$_hit" = "0" ]; then
-        echo "  ⚠️ 映射选中的模块 [$m] 无证据目录/脚本（${VERIFY_DIR}/$m/）→ 本实现源变更未真正选测"
-        echo "     → 跨 PR 中间态（先登记映射、后落脚本）可容忍；长期须补证据脚本或移除僵尸映射行。"
+        if [ "$(map_pending "$m")" = "1" ]; then
+          echo "  ⚠️ 映射选中的模块 [$m] 为显式待落地前置登记（pending:），暂无证据目录/脚本（${VERIFY_DIR}/$m/）"
+          echo "     → 跨 PR 中间态容忍；脚本落地后请去掉 pending: 前缀。"
+        else
+          echo "  ❌ 映射选中的模块 [$m] 无证据目录/脚本（${VERIFY_DIR}/$m/）且未标记 pending:"
+          echo "     → 本实现源变更未被真正选测（静默假绿）→ blocked_on: feature_unverified"
+          SELECT_HARD_FAIL=1
+        fi
       fi
     done <<< "$sel_modules"
   fi
@@ -257,7 +275,7 @@ select_by_changes() {
   while IFS= read -r cf; do
     case "$cf" in local-agent/*) ;; *) continue ;; esac
     local hit=0
-    while IFS=$'\t' read -r m p pat; do
+    while IFS=$'\t' read -r m p pat _pd; do
       [ -n "$pat" ] || continue
       if grep -qE "$pat" <<< "$cf"; then hit=1; break; fi
     done < <(map_entries)
@@ -280,9 +298,10 @@ select_by_changes() {
 #     ① 证据库每个模块必须在 modules.map 登记（未映射即 RED）
 #     ② 探针实现源路径必须真实存在（映射过期即 RED）
 #     ③ 模拟「改该模块实现源」→ 选择器必须选中它（映射失效即 RED，防静默漏跑）
-#     ④ 僵尸条目（映射行指向暂无证据目录的模块）→ 仅 ⚠️ 警告，不阻断：
-#        真漏跑方向是 ①「目录有、映射无」；且跨 PR 并发（A 先登记映射 / B 后落脚本）
-#        必须容忍，否则后合的 PR 一落 main 就把主线判红（跨 PR 雷 · Issue #162 收口）
+#     ④ 映射行指向暂无证据目录的模块 → **按是否显式 pending 标记分流**（复评 T9）：
+#        `pending:` 前缀（显式待落地前置登记）→ ⚠️ 不阻断（跨 PR 并发容忍）；
+#        未标记的目录缺失（误删/改名/残留僵尸）→ ❌ RED（不得静默放过）。
+#     ⑤ stale pending：标记 pending 但目录已落地 → ⚠️ 提示转正式登记（收窄容忍面）。
 # ------------------------------------------------------------
 check_map() {
   local RED=0
@@ -326,26 +345,47 @@ check_map() {
     fi
   done <<< "$mods"
 
-  # ④ 僵尸条目（映射行指向暂无证据目录的模块）→ ⚠️ 警告，**不阻断**：
-  #    - 真漏跑方向是 ①「目录有、映射无」（那才 RED）；僵尸行选中的模块无脚本
-  #      = 无贡献，不造成静默漏跑；
-  #    - 跨 PR 并发下必须容忍：A PR 先登记映射、B PR 后落证据脚本（或反之），
-  #      中间态"有行无目录"属正常顺序，不该把主线判红（Issue #162 跨 PR 雷）。
-  local zombie=""
-  while IFS=$'\t' read -r m p pat; do
+  # ④ 映射行指向暂无证据目录的模块 —— 按**是否显式 pending 标记**分流（Issue #162 复评 T9）：
+  #    - `pending:` 前缀 = 显式「待落地前置登记」（跨 PR 中间态：A 先登记映射 / B 后落脚本）
+  #      → ⚠️ 警告，不阻断（否则后合的 PR 一落 main 就把主线判红，跨 PR 雷）；
+  #    - **未标记**的目录缺失 = 正式登记的模块目录没了（误删/改名/映射残留）
+  #      → ❌ RED，阻断——否则与 #162 要消灭的"静默假绿"同形（旧行为对两者一律 ⚠️ 放过）。
+  local zombie_pending="" zombie_missing=""
+  while IFS=$'\t' read -r m p pat _pd; do
     [ -n "$m" ] || continue
     if [ ! -d "$VERIFY_DIR/$m" ]; then
-      zombie="$zombie $m"
+      if [ "$_pd" = "1" ]; then
+        zombie_pending="$zombie_pending $m"
+      else
+        zombie_missing="$zombie_missing $m"
+      fi
     fi
   done < <(map_entries)
-  if [ -n "$zombie" ]; then
-    echo "  ⚠️ 映射条目指向暂无证据目录的模块:${zombie}"
-    echo "     （非阻断：跨 PR 并发中间态 / 待落脚本；不影响 ① 的漏跑守护）"
+  if [ -n "$zombie_pending" ]; then
+    echo "  ⚠️ 显式待落地前置登记（pending:）暂无证据目录:${zombie_pending}"
+    echo "     （非阻断：跨 PR 中间态；脚本落地后请去掉 pending: 前缀）"
+  fi
+  if [ -n "$zombie_missing" ]; then
+    echo "  ❌ 正式登记的模块证据目录缺失:${zombie_missing}"
+    echo "     （RED：目录被误删/改名，或映射行是未标记的残留僵尸条目）"
+    RED=1
+  fi
+  # stale pending：显式 pending 标记的模块目录**已落地** → 提示转正式登记（否则容忍面越拖越大）
+  local stale_pending=""
+  while IFS=$'\t' read -r m p pat _pd; do
+    [ -n "$m" ] || continue
+    if [ "$_pd" = "1" ] && [ -d "$VERIFY_DIR/$m" ]; then
+      stale_pending="$stale_pending $m"
+    fi
+  done < <(map_entries)
+  if [ -n "$stale_pending" ]; then
+    echo "  ⚠️ 显式待落地前置登记（pending:）证据目录已落地:${stale_pending}"
+    echo "     → 请去掉 pending: 前缀转正式登记（收窄容忍面）"
   fi
 
   echo ""
   if [ "$RED" -gt 0 ]; then
-    echo "🔴 映射防退化断言未通过（未映射/映射失效）→ blocked_on: feature_unverified"
+    echo "🔴 映射防退化断言未通过（未映射/映射失效/正式登记目录缺失）→ blocked_on: feature_unverified"
     exit 1
   fi
   echo "🟢 映射防退化断言通过：证据库模块 100% 被 --changed 覆盖"
@@ -374,6 +414,12 @@ filter() {
 # ------------------------------------------------------------
 run_all() {
   echo "==== [feature-verify] 功能级回归诊断（feature-regress）===="
+  # 选测阶段已判定"未标记的目录缺失 = 静默假绿" → 硬失败，不得以"无可选脚本 → 通过"放行（复评 T9）。
+  if [ "${SELECT_HARD_FAIL:-0}" = "1" ]; then
+    echo "  ❌ 存在未标记 pending 的映射模块目录缺失（本实现源变更未被真正选测）"
+    echo "  blocked_on: feature_unverified（选测静默假绿，禁止合并）"
+    exit 1
+  fi
   if [ "${#ALL_SCRIPTS[@]}" -eq 0 ]; then
     echo "  (本范围无可选 feature-verify 脚本) → 通过"
     exit 0
