@@ -694,6 +694,7 @@
       "covers": [
         "scripts/feature-verify.sh",
         "scripts/feature-verify/modules.map",
+        "local-agent/hybrid/selector.py",
         "scripts/feature-regress.sh",
         "scripts/change-aware-test.sh",
         "docs/FEATURE_VERIFY.md",
@@ -701,7 +702,7 @@
       ],
       "depends_on": [],
       "cpu_cost_est": 1.2,
-      "time_est": 4.0,
+      "time_est": 7.0,
       "kind": "cpu-dense"
     }
   }

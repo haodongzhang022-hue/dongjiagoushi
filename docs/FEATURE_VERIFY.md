@@ -135,13 +135,28 @@ bash scripts/feature-regress.sh [--module X]     # 回归诊断定位坏功能
 - 与 change-aware 按变更选测需协调复用 → `feature-verify.sh --changed` 复用既有
   change-aware 思路（git diff 定变更范围 → 按模块映射选测）。
 
-## 云端真跑本自测（复评 🟡3 / 测试残留 B 收口）
-`tests/test_feature_verify.sh` 已登记 `local-agent/hybrid/registry.json`（covers
-`scripts/feature-verify.sh` + `modules.map` + `feature-regress.sh` + `change-aware-test.sh`
-+ 本 PR 文档/CI 文件）。云端 CI 的变更感知链路是 `.cnb.yml` → `IncrementalSelector`
-（`local-agent/hybrid/selector.py`，读 `registry.json`）——改选择器/映射即**真实选中本自测**，
-不再只是"源码里有字"。
+## 云端真跑本自测（复评 🟡3 / 残留 B · 🔴必修 1 已清零）
+`tests/test_feature_verify.sh` 已登记 `local-agent/hybrid/registry.json`。云端 CI 的变更感知
+链路是 `.cnb.yml` → `IncrementalSelector`（`local-agent/hybrid/selector.py`，读 `registry.json`）。
 
-- 断言：T12a/T12b（registry 登记 + covers 结构可达）；T12c 有 python3 时**真实跑**
-  `IncrementalSelector.select([...])` 断言选中本自测，无 python3 则显式标注跳过（不假装通过）。
+**承重 covers（逐条真验，删任一条 → T12b 必红）**：
+
+| 变更文件 | 含义 |
+|---|---|
+| `scripts/feature-verify.sh` | 闸门本体 |
+| `scripts/feature-verify/modules.map` | 模块→实现源映射 |
+| `local-agent/hybrid/selector.py` | 选择器本体 |
+| `scripts/feature-regress.sh` | 回归诊断 |
+| `scripts/change-aware-test.sh` | 变更感知手工入口 |
+| `docs/FEATURE_VERIFY.md` | 模块文档 |
+| `.cnb.yml` | CI 接线 |
+
+**选择器过滤口径（🔴必修 1）**：`selector.py` 原先 `not f.endswith(".sh")` 把所有 `.sh` 变更
+一并过滤，导致 `covers: ["scripts/xxx.sh"]` 成为永不命中的**死条目**——改闸门本体在云端不选中本自测。
+已收窄为**只过滤测试脚本自身**（`tests/` / `local-agent/tests/` 前缀），`scripts/*.sh` 作为源码按
+covers 真触发；"改测试脚本自身不触发其他测试"的原有语义保留。
+
+- 断言：T12a（registry 登记）；T12b **逐条真验**——期望承重 covers 钉死在测试里，每条单独喂
+  `IncrementalSelector.select([cf])` 断言命中本自测，**删任一条 → 必红**；无 python3 则计
+  **SKIP**（不计入 PASS/FAIL），显式暴露"本机未验链路"，不假装通过。
 - `scripts/change-aware-test.sh` 的手工入口映射保留，供本地/手动执行，**不再作为唯一判据**。
