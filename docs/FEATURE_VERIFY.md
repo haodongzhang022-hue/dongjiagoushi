@@ -60,20 +60,35 @@ CI 的 `feature-verify gate` 先跑它再跑 `--changed`。
 "有行无目录"属正常顺序。若把僵尸行判 RED，先合"登记映射"的 PR、再合"落脚本"的 PR，
 后合那个一落 main 就会让 `--check-map` 判红（主线变红）——本 PR 已预登记
 `collab:`（证据脚本由 PR #161 落地）并在 selector 样例中双向锁死该行为。
+### 变更范围回退链（防假绿 · Issue #162 复评 R1 + 🟡欠选）
+`--changed` 确定变更范围时按**两级回退链**逐个来源尝试，判据是 **`git diff` 真成功
+（`rc=0`）**，不是"来源存在"：
 
+- **可靠来源**（给出**真实 PR 范围**）：注入变量 `FEATURE_VERIFY_CHANGED_FILES` →
+  `CNB_PULL_REQUEST_TARGET_SHA` → `main...HEAD`。diff 成功即采信（成功且为空 = 权威
+  "确无变更"）。
+- **收窄来源**（只覆盖**最后一个提交**）：`HEAD~1..HEAD` → 多提交 PR 会欠选（漏跑），
+  故**不静默收窄**，标记 `CHANGED_NARROWED=1` 转保守全量。
 
-### 变更范围回退链（防假绿 · Issue #162 复评 S1）
-`--changed` 确定变更范围时按回退链逐个来源尝试：注入变量 → `CNB_PULL_REQUEST_TARGET_SHA`
-→ `CNB_COMMIT` → `main...HEAD` → `HEAD~1`。**任一来源为空即继续回退**，绝不把"单个来源
-失效"当成"无变更"跳过（旧实现用 `elif` 链，target SHA 不可解析时 `out` 为空 → 误报
-"变更范围为空 → 跳过"→ `exit 0` 假绿）。回退链全部落空（如浅克隆单提交、target SHA
-不可解析且无 `main`/`HEAD~1`）→ 置 `CHANGED_KNOWN=0` → **保守全量回归**（不漏跑优先），
-同样不跳过。回归断言见 `tests/test_feature_verify.sh` T14/T15 + 功能级
-`selector/映射全覆盖.sh` Then-7。
+**为什么以 `rc=0` 为准**：旧实现只要来源被尝试就 `resolved=1`（"尝试"当"成功"），
+于是「diff 失败但来源存在」→ `resolved=1` → 报「变更范围为空 → 跳过」→ `exit 0`
+**假绿**。真实 CI feature-verify gate 必设 `CNB_COMMIT`，旧实现在此路径恒假绿
+（`CNB_COMMIT` 分支条件 `HEAD = CNB_COMMIT` 在 CI 恒成立，随后 `HEAD~1..HEAD` 在浅
+克隆/单提交下失败、`out` 为空，但 `resolved=1` 已无条件写入）。
+
+**保守全量触发**：回退链全部落空（浅克隆单提交、target SHA 不可解析且无 `main`）**或**
+仅剩收窄来源（可能欠选）→ 置 `CHANGED_KNOWN=0` → **保守全量回归**（不漏跑优先），
+绝不跳过。回归断言见 `tests/test_feature_verify.sh` T14（含**带 `CNB_COMMIT`** 场景
+T14c/T14d）+ T14e（收窄不欠选）+ T15（回退链不断）+ 功能级
+`selector/映射全覆盖.sh` Then-7a/7b（含 `CNB_COMMIT` 场景）。
 
 映射表 ERE 读取用**安全 trim**（只去首尾空白、不解释反斜杠）——旧实现用 `xargs` 会吞掉
 ERE 里的 `\.` 转义，把 `scripts/x\.py` 变成 `scripts/x.py`（`.` 变通配，映射失真）。
 回归断言见 `selector/映射全覆盖.sh` Then-8。
+
+**测试前提钉死（复评 R2）**：T14/T14e/T15/Then-7 的 fixture 用 `git init -q -b work`
+**显式指定非 `main` 分支名**，不依赖环境 `init.defaultBranch`——默认 `main` 的环境
+（git ≥2.28 常见配置）下 fixture 会自带可解析 `main`，前提失效、测的不是目标路径。
 
 ## 目录与命令
 ```

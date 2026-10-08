@@ -16,8 +16,10 @@
 #   T11 缺口回归自证：collab 实现源变更不再假绿（评审 🟡P1）
 #   T12 变更感知测试选择接线（选择器改动 → 功能级自测）
 #   T13 CI 闸门已前置 --check-map（防退化断言）
-#   T14 target SHA 不可解析 → 保守全量（不假绿跳过 · S1 回归断言）
-#   T15 target SHA 无效但回退源可用 → 回退链继续真选测（不断链）
+#   T14 target SHA 不可解析 → 保守全量（不假绿跳过 · 复评 R1：含 **带 CNB_COMMIT**
+#       真实 CI 场景断言 T14c/T14d，否则测不到真实环境假绿）
+#   T14e 收窄来源（HEAD~1..HEAD）不得静默欠选（复评 🟡S：多提交 PR 漏跑）
+#   T15 target SHA 无效但 main 可用 → 回退链继续真选测（不断链）
 #   T16 跨 PR 雷回归（Issue #162 收口）：映射前置登记（目录后落地）不得判 RED，
 #       但"目录有、映射无"仍须 RED——两方向同时锁死，防合 #161 后主线变红
 #   T17 脚本可执行位回归：feature-verify.sh / change-aware / 自测 / selector 样例 保持 100755
@@ -202,22 +204,24 @@ if grep -q "feature-verify.sh --check-map" .cnb.yml; then
 else
   bad "CI 闸门未跑 --check-map → 未映射模块仍可能静默漏跑"
 fi
-
-
 # ---- T14 回归断言：target SHA 不可解析 → 不得假绿跳过（S1 修复防退化）----
 echo ""
 echo "▶ T14 target SHA 不可解析 → 回退链继续/保守全量（不假绿）"
 # 造最小仓库：单提交（无 main、无 HEAD~1）→ 全部 diff 来源落空。
+# ⚠️ 用 `git init -q -b work` **显式钉死非 main 分支名**：若依赖环境默认分支名
+#    （init.defaultBranch=main 的环境 git ≥2.28 常见配置），fixture 会自带可解析
+#    main，前提失效、测的不是目标路径（Issue #162 复评 R2）。
 T14REPO="$(mktemp -d)"
 (
   cd "$T14REPO" || exit 1
-  git init -q; git config user.email t@t; git config user.name t
+  git init -q -b work; git config user.email t@t; git config user.name t
   mkdir -p scripts/feature-verify/foo
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
   printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
   cp "$OLDPWD/scripts/feature-verify.sh" scripts/feature-verify.sh
   git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
 )
+# ① 不带 CNB_COMMIT：全部来源落空 → 保守全量
 T14OUT="$(cd "$T14REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
           bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
 if printf '%s\n' "$T14OUT" | grep -q "无法确定变更范围"; then
@@ -230,7 +234,58 @@ if printf '%s\n' "$T14OUT" | grep -q "变更范围为空"; then
 else
   ok "T14b: 全链落空不再误报'变更范围为空'（S1 假绿已消除）"
 fi
+# ② **带 CNB_COMMIT（真实 CI feature-verify gate 必设此变量）**：旧实现此路径
+#    「来源存在即 resolved=1」→ 报「变更范围为空 → 跳过」exit 0 假绿（S1 残留根因）。
+#    必须以「diff 真成功」为准 → 走保守全量。这是复评 R1 的核心回归断言。
+T14COUT="$(cd "$T14REPO" && CNB_COMMIT="$(git -C "$T14REPO" rev-parse HEAD)" \
+           CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
+           bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
+if printf '%s\n' "$T14COUT" | grep -q "无法确定变更范围"; then
+  ok "T14c: 带 CNB_COMMIT（真实 CI 变量）→ 保守全量（S1 假绿已消除）"
+else
+  bad "T14c: 带 CNB_COMMIT 仍走'变更范围为空'跳过 → S1 假绿未清零（R1）"
+fi
+if printf '%s\n' "$T14COUT" | grep -q "变更范围为空"; then
+  bad "T14d: 带 CNB_COMMIT 报'变更范围为空' → R1 假绿残留"
+else
+  ok "T14d: 带 CNB_COMMIT 不再误报'变更范围为空'（R1 已修）"
+fi
 rm -rf "$T14REPO"
+
+# ---- T14e 收窄来源不得静默欠选（🟡S 复评：多提交 PR 漏跑）----
+echo ""
+echo "▶ T14e 仅剩 HEAD~1..HEAD 收窄来源 → 保守全量（不静默欠选）"
+# 造 2 提交仓库、无 main、target SHA 不可解析 → 只剩 HEAD~1..HEAD。
+# 旧实现会静默收窄到单提交（多提交 PR 漏跑）；现须偏保守走全量。
+T14BREPO="$(mktemp -d)"
+(
+  cd "$T14BREPO" || exit 1
+  git init -q -b work; git config user.email t@t; git config user.name t
+  mkdir -p scripts/feature-verify/foo scripts/feature-verify/bar
+  printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
+  printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/bar/b.sh
+  printf 'foo: scripts/x.py: scripts/x\\.py\nbar: scripts/y.py: scripts/y\\.py\n' \
+    > scripts/feature-verify/modules.map
+  cp "$OLDPWD/scripts/feature-verify.sh" scripts/feature-verify.sh
+  git add -A >/dev/null 2>&1; git commit -qm c1 >/dev/null 2>&1
+  printf 'changed\n' >> scripts/feature-verify/foo/a.sh
+  git add -A >/dev/null 2>&1; git commit -qm c2 >/dev/null 2>&1
+)
+T14BOUT="$(cd "$T14BREPO" && CNB_COMMIT="$(git -C "$T14BREPO" rev-parse HEAD)" \
+           CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
+           bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
+if printf '%s\n' "$T14BOUT" | grep -q "收窄来源"; then
+  ok "T14e-1: 仅剩收窄来源 → 显式暴露（不静默）"
+else
+  bad "T14e-1: 收窄来源未显式暴露（OUT=$T14BOUT）"
+fi
+if printf '%s\n' "$T14BOUT" | grep -q "feature-verify/bar/"; then
+  ok "T14e-2: 收窄场景走保守全量（bar 未漏跑，🟡欠选已处理）"
+else
+  bad "T14e-2: 收窄场景欠选（bar 静默漏跑，🟡未处理）"
+fi
+rm -rf "$T14BREPO"
+
 
 # ---- T15 回归断言：target SHA 无效但回退源可用 → 继续回退真选测（不断链）----
 echo ""
@@ -238,7 +293,7 @@ echo "▶ T15 target SHA 无效但 main 可用 → 回退链继续（不因首�
 T15REPO="$(mktemp -d)"
 (
   cd "$T15REPO" || exit 1
-  git init -q; git config user.email t@t; git config user.name t
+  git init -q -b work; git config user.email t@t; git config user.name t
   mkdir -p scripts/feature-verify/foo
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
   printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map

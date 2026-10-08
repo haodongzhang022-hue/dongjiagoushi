@@ -24,8 +24,9 @@
 #   bash scripts/feature-verify.sh --list           # 列出全部功能校验脚本（证据库盘点）
 #
 # 环境变量（合并闸门用）：
-#   CNB_PULL_REQUEST_TARGET_SHA   # PR 目标分支 SHA
-#   CNB_COMMIT                     # 本次提交 SHA
+#   CNB_PULL_REQUEST_TARGET_SHA   # PR 目标分支 SHA（可靠来源：真 PR 范围）
+#   CNB_COMMIT                     # 本次提交 SHA（**不再单独用作回退来源**：
+#                                  #   只覆盖最后一个提交，多提交 PR 会欠选 → 走保守全量）
 # 环境变量（测试用，确定性注入）：
 #   FEATURE_VERIFY_CHANGED_FILES   # 直接指定变更文件（换行/逗号分隔），跳过 git 探测
 #   FEATURE_VERIFY_MAP             # 指定映射表路径（默认 scripts/feature-verify/modules.map）
@@ -145,48 +146,61 @@ list_mode() {
 # ------------------------------------------------------------
 # 1. 确定变更文件列表（复用 change-aware 的 git diff 思路）
 #    CHANGED_KNOWN=1 表示范围可确定；=0 表示无法确定（保守全量）
+#
+#    回退链分两级（Issue #162 复评 R1 + 🟡欠选）：
+#      可靠来源（给出**真实 PR 范围**）：注入变量 / PR 目标 SHA / main...HEAD
+#      收窄来源（只覆盖**最后一个提交**）：HEAD~1..HEAD → 多提交 PR 会欠选，
+#        故不静默收窄，改判「范围不可确定」走保守全量（宁可多跑，绝不漏跑）。
+#    判据：**以 git diff 真成功（rc=0）为准**，不以「来源存在」为准——
+#      旧实现只要来源被尝试就 resolved=1，导致「diff 失败但来源在」→
+#      resolved=1 → 报「变更范围为空 → 跳过」→ exit 0 假绿（S1 残留）。
 # ------------------------------------------------------------
 CHANGED_FILES=""
 CHANGED_KNOWN=1
+CHANGED_NARROWED=0
 changed_files() {
-  local out="" resolved=0
+  local out="" resolved=0 settled=0 narrowed=0
   if [ -n "${FEATURE_VERIFY_CHANGED_FILES:-}" ]; then
     # 测试注入：确定性指定变更文件，跳过 git 探测
     out="$(printf '%s' "$FEATURE_VERIFY_CHANGED_FILES" | tr ',' '\n')"
-    resolved=1
+    resolved=1; settled=1
   else
-    # 回退链：逐个来源尝试；任一来源返回空则**继续回退**（不得因单个来源失效即当"无变更"跳过）。
-    # 旧实现用 elif 链，target SHA 不可解析时空 out 被当成"无变更"→ 假绿，故改为独立 if。
-    if [ -n "${CNB_PULL_REQUEST_TARGET_SHA:-}" ] \
+    # 可靠来源 ①：PR 目标 SHA（真 PR 范围）——diff 真成功（rc=0）才算数；
+    #   rc=0 且为空 = 权威「确无变更」，settled 后不再回退。
+    if [ "$settled" = 0 ] && [ -n "${CNB_PULL_REQUEST_TARGET_SHA:-}" ] \
        && git rev-parse --verify --quiet "${CNB_PULL_REQUEST_TARGET_SHA}^{commit}" >/dev/null 2>&1; then
-      out="$(git diff --name-only "$CNB_PULL_REQUEST_TARGET_SHA" "HEAD" 2>/dev/null)"
-      resolved=1
+      if out="$(git diff --name-only "$CNB_PULL_REQUEST_TARGET_SHA" "HEAD" 2>/dev/null)"; then
+        resolved=1; settled=1
+      fi
     fi
-    if [ -z "$out" ] && [ -n "${CNB_COMMIT:-}" ] \
-       && [ "$(git rev-parse HEAD 2>/dev/null)" = "$CNB_COMMIT" ]; then
-      out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
-      resolved=1
+    # 可靠来源 ②：main...HEAD（本分支相对 main 的真 PR 范围）——有 merge base 才成功；
+    #   main 可解析 ≠ main...HEAD 可 diff（无共同祖先时 git 报错 rc≠0）→ 继续回退。
+    if [ "$settled" = 0 ] && git rev-parse --verify --quiet main >/dev/null 2>&1; then
+      if out="$(git diff --name-only "main...HEAD" 2>/dev/null)"; then
+        resolved=1; settled=1
+      fi
     fi
-    if [ -z "$out" ] && git rev-parse --verify --quiet main >/dev/null 2>&1; then
-      out="$(git diff --name-only "main...HEAD" 2>/dev/null)"
-      resolved=1
-    fi
-    if [ -z "$out" ] && git rev-parse --verify --quiet HEAD~1 >/dev/null 2>&1; then
-      out="$(git diff --name-only "HEAD~1" "HEAD" 2>/dev/null)"
-      resolved=1
+    # 收窄来源：HEAD~1..HEAD 只覆盖最后一个提交，多提交 PR 静默欠选（漏跑）→
+    #   不静默收窄，仅标记 narrowed，交 CHANGED_KNOWN=0 走保守全量。
+    if [ "$settled" = 0 ] && git rev-parse --verify --quiet HEAD~1 >/dev/null 2>&1; then
+      narrowed=1
     fi
   fi
   local work; work="$(git diff --name-only 2>/dev/null; git diff --cached --name-only 2>/dev/null)"
   if [ -n "$work" ]; then
     if [ -n "$out" ]; then out="$out
 $work"; else out="$work"; fi
-    resolved=1
+    resolved=1; settled=1
   fi
   CHANGED_FILES="$(printf '%s\n' "$out" | sed '/^$/d')"
-  # 全链落空（无任何可用 diff 来源：target SHA 不可解析且无 main/HEAD~1 等）
+  # 全链落空（无任何可靠 diff 来源）或仅剩收窄来源（可能欠选）
   # → 变更范围不可确定 → CHANGED_KNOWN=0 → 保守全量回归，绝不当"无变更"跳过（假绿）。
-  if [ "$resolved" = "0" ]; then CHANGED_KNOWN=0; fi
+  if [ "$resolved" = "0" ] || [ "$narrowed" = "1" ]; then
+    CHANGED_KNOWN=0
+    [ "$narrowed" = "1" ] && CHANGED_NARROWED=1
+  fi
 }
+
 
 # ------------------------------------------------------------
 # 2. 按变更范围选测受影响 feature-verify 模块（--changed）
@@ -196,7 +210,11 @@ $work"; else out="$work"; fi
 select_by_changes() {
   changed_files
   if [ "$CHANGED_KNOWN" = "0" ]; then
-    echo "  [feature-verify] 无法确定变更范围 → 保守全量回归（不漏跑优先）"
+    if [ "$CHANGED_NARROWED" = "1" ]; then
+      echo "  [feature-verify] 仅剩 HEAD~1..HEAD 收窄来源（可能欠选整个 PR 范围）→ 保守全量回归（不漏跑优先）"
+    else
+      echo "  [feature-verify] 无法确定变更范围 → 保守全量回归（不漏跑优先）"
+    fi
     return 0
   fi
   if [ -z "$CHANGED_FILES" ]; then

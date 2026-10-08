@@ -6,7 +6,7 @@
 # feature:  --changed 覆盖证据库全部模块；映射单一事实源；未映射/映射失效即 RED
 # 五要素:
 #   Given   scripts/feature-verify/modules.map（唯一事实源）+ scripts/feature-verify/<module>/
-#           证据库目录（现有 7 个功能模块 + selector 自身）
+#           证据库目录（现有 8 个功能模块，含 selector 自身）
 #   When    真实跑 `scripts/feature-verify.sh --check-map`（基线），再对映射表做三种
 #           **变异**：① 删掉任一模块的映射行 ② 把某模块探针路径改成不存在的路径
 #           ③ 用 FEATURE_VERIFY_CHANGED_FILES 注入「仅改某模块实现源」跑 --changed --dry-run
@@ -19,7 +19,11 @@
 #           3) 探针路径失效 → rc=1（映射过期即 RED）；
 #           4) 改 local-agent/collab/closure.py（此前静默漏跑的模块）→ --changed 必须
 #              选中 peer-closure（不再假绿「无可选脚本 → 通过」）；
-#           5) 改 scripts/feature-verify.sh（选择器自身）→ 选中 selector（自保）。
+#           5) 改 scripts/feature-verify.sh（选择器自身）→ 选中 selector（自保）；
+#           6) S1/R1 回归（Issue #162 复评）：target SHA 不可解析时**不带 / 带 CNB_COMMIT**
+#              两种场景都必须保守全量（不得报"变更范围为空"跳过假绿）；
+#           7) 收窄来源（仅 HEAD~1..HEAD）不得静默欠选 → 保守全量。
+#           fixture 一律 `git init -q -b work` 钉死非 main 分支名，不依赖环境默认分支。
 #   Evidence --check-map 的 rc + 输出行；--changed --dry-run 的选定脚本清单（可 grep）
 # 为什么是"功能级"：纯 grep 只能证明"映射表里有这行字"，抓不出"选择器真的按它选、
 #   少一行真的会 RED"。必须真实跑选择器 + 真实变异映射表，看它在缺口存在时是否诚实报红
@@ -120,23 +124,37 @@ echo ""
 
 # ---------- Then-7：S1 回归——target SHA 不可解析不得假绿跳过 ----------
 # 造最小仓库（单提交，无 main/HEAD~1）→ 全部 diff 来源落空。
+# ⚠️ `git init -q -b work` 显式钉死非 main 分支名：否则 init.defaultBranch=main
+#    的环境自带可解析 main，前提失效（Issue #162 复评 R2）。
 T7REPO="$(mktemp -d)"
 (
   cd "$T7REPO" || exit 1
-  git init -q; git config user.email t@t; git config user.name t
+  git init -q -b work; git config user.email t@t; git config user.name t
   mkdir -p scripts/feature-verify/foo
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
   printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
   cp "$OLDPWD/$FV" scripts/feature-verify.sh
   git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
 )
+# ① 不带 CNB_COMMIT
 t7out="$(cd "$T7REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
          bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
 if printf '%s\n' "$t7out" | grep -q "无法确定变更范围" \
    && ! printf '%s\n' "$t7out" | grep -q "变更范围为空"; then
-  ok "Then-7: target SHA 不可解析 → 保守全量（不假绿跳过，S1 回归）"
+  ok "Then-7a: target SHA 不可解析 → 保守全量（不假绿跳过，S1 回归）"
 else
-  bad "Then-7: target SHA 不可解析仍走'变更范围为空'跳过 → S1 假绿回归"
+  bad "Then-7a: target SHA 不可解析仍走'变更范围为空'跳过 → S1 假绿回归"
+fi
+# ② 带 CNB_COMMIT（真实 CI feature-verify gate 必设此变量）——复评 R1 核心场景：
+#    旧实现「来源存在即 resolved=1」在此路径报「变更范围为空 → 跳过」exit 0 假绿。
+t7cout="$(cd "$T7REPO" && CNB_COMMIT="$(git -C "$T7REPO" rev-parse HEAD)" \
+          CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
+          bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
+if printf '%s\n' "$t7cout" | grep -q "无法确定变更范围" \
+   && ! printf '%s\n' "$t7cout" | grep -q "变更范围为空"; then
+  ok "Then-7b: 带 CNB_COMMIT（真实 CI 变量）→ 保守全量（R1 假绿已清零）"
+else
+  bad "Then-7b: 带 CNB_COMMIT 仍假绿跳过 → R1 未清零（假绿残留）"
 fi
 rm -rf "$T7REPO"
 
