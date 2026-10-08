@@ -30,6 +30,7 @@
 | **全员** | @ 定位能力（HandleAbility）| 跨仓库/@ 格式/权限 | `local-agent/handle/` | docs/HANDLE_ABILITY.md | 通用 |
 | **全员** | 标签能力（LabelAbility）| 打标/进度/优先级/标签 | `local-agent/label/` | docs/LABEL_AUTOMATION.md | Issue #51 |
 | **全员** | 开发规范能力（StandardAbility）| 合规/规范/检查/标准 | `local-agent/dev-standard/` | docs/DEV_STANDARD.md | Issue #83 |
+| **协作** | 写时状态中介（写路径原子化）| 并发写/重复vno/写时冲突/事务包裹/冲突提案/旧库迁移/写坏了 | `local-agent/collab/engine.py` + `local-agent/data/migrate.py` | docs/COLLAB_ENGINE.md §六 | module collab v0.3.0 · ADR-0013 |
 | **协作** | 同岗协作（PeerCollab）| 会诊/编队/补位/同岗 | `local-agent/collab/` | docs/PEER_COLLAB.md | Issue #47 |
 | **协作** | 同岗收尾闭环 | 会诊未收敛/收尾 | `local-agent/collab/closure.py` | docs/PEER_COLLAB_CLOSURE.md | Issue #47 |
 | **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote/blocked | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 · #150 |
@@ -114,6 +115,7 @@
 | 评审每轮都要我复述整个大项目 | 评审增量上下文（review-context：冻结骨架摘要 + 本轮变化）|
 | 评审/开发反复触发、CPU 构建损耗大 | 评审段调度器（review-cycle：攒批 + 同指纹不重复触发 + 一次构建摊全批）|
 | 开发还没完就跑测试/评审、链条乱了/进度失衡 | 阶段链门控（stage-gate：开发→评审→测试，上游未收口不抢跑 + 同阶段不重复触发，驳回即零构建 + 非放行 `blocked`）|
+| 两个 agent 同时改同一个东西、版本号撞了/冲突丢了/旧库升级后写不进去 | 写时状态中介（写路径事务包裹 + 冲突提案负数编号 + 迁移下沉建表入口；`bash scripts/feature-verify.sh --feature "collab/写时状态中介"`）|
 
 ## 四、维护纪律
 

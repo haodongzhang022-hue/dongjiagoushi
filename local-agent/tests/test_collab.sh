@@ -123,4 +123,42 @@ assert engine.read_memory("ctx1", "shared", principal="agent_b")["kind"] == "dec
 print("  ✅ 需求/skill/记忆 一等实体 通过")
 EOF
 
+echo "===== [collab] 7. 事务底座 · tx_depth 归零（非 with 用法不漏计数） ====="
+$PY - <<'EOF'
+from data import admin, db
+from collab import engine
+admin.init()
+loc = engine.register_entity("task", "g1", "t_tx", {"v": 0}, owner="agent_a")
+engine.grant("agent_a", "agent", "loc://task.g1/*", "rw")
+
+# 非 with 用法：commit()/rollback() 必须把 tx_depth 收回到 0
+# 否则 depth 永久留 1 → db.execute 不再自动提交、BEGIN IMMEDIATE 不再取锁，
+# 事务静默失去原子性（「假原子性」）。
+tx = db.transaction(); tx.commit()
+assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
+tx = db.transaction(); tx.rollback()
+assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
+
+# 泄漏过一次后，with 事务抛错必须能回滚（脏数据不落库）
+try:
+    with db.transaction():
+        db.execute("INSERT INTO entities (etype,namespace,entity_id,loc,payload,"
+                   "created_at,updated_at) VALUES ('t','n','dirty','loc://t.n/dirty',"
+                   "'{}','x','x')")
+        raise RuntimeError("boom")
+except RuntimeError:
+    pass
+assert db.query("SELECT loc FROM entities WHERE loc='loc://t.n/dirty'") == [], "回滚失效"
+
+# 嵌套事务仍只由最外层提交
+with db.transaction():
+    with db.transaction():
+        db.execute("INSERT INTO entities (etype,namespace,entity_id,loc,payload,"
+                   "created_at,updated_at) VALUES ('t','n','nested','loc://t.n/nested',"
+                   "'{}','x','x')")
+assert db.query("SELECT loc FROM entities WHERE loc='loc://t.n/nested'"), "嵌套提交失效"
+assert getattr(db._thread_local, "tx_depth", 0) == 0
+print("  ✅ 事务底座 tx_depth 归零 + 回滚/嵌套提交 通过")
+EOF
+
 echo "===== [collab] 全部通过 ✅ ====="

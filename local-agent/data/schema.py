@@ -165,18 +165,20 @@ SCHEMA_DDL = [
     CREATE TABLE IF NOT EXISTS versions (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         entity_loc    TEXT NOT NULL,
-        vno           INTEGER NOT NULL,         -- 1..n
+        vno           INTEGER NOT NULL,         -- 主线 1..n；冲突提案用负数编号（-1,-2,…），不推进主线
         payload       TEXT DEFAULT '{}',
         author        TEXT DEFAULT '',
         branch        TEXT DEFAULT 'main',
         parent_vno    INTEGER DEFAULT 0,        -- 基于哪一版（冲突检测关键）
         status        TEXT DEFAULT 'open',      -- open/merged/conflict/discarded
         created_at    TEXT,
-        UNIQUE(entity_loc, vno)
+        UNIQUE(entity_loc, branch, vno)
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_versions_loc ON versions(entity_loc)",
     "CREATE INDEX IF NOT EXISTS idx_versions_branch ON versions(branch)",
+    # 冲突清单按 status 直查（受理闸门高频消费），全量扫描在大库上会拖慢
+    "CREATE INDEX IF NOT EXISTS idx_versions_status ON versions(status)",
     # ---- 11. 小组整合提交（协作运作机制 · ⑤ 小组提交）----
     """
     CREATE TABLE IF NOT EXISTS commits (
@@ -575,9 +577,18 @@ SCHEMA_DDL = [
 
 
 def init_schema():
-    """初始化全部数据表（幂等，可重复调用）。"""
+    """初始化全部数据表（幂等，可重复调用）。
+
+    建表后**自动跑迁移**：迁移下沉到本函数，全仓 11 处入口（dispatcher×5 /
+    gid / sentinel / dev_team / admin）只要走 `init_schema()` 就都会升级既有库，
+    不再依赖各自记得先调 `admin.init()`——否则旧库经 dispatcher 等入口写入
+    仍会撞旧唯一键（差距 H 未修）。
+    """
     for ddl in SCHEMA_DDL:
         db.execute(ddl)
+    # 延迟导入：migrate 依赖 schema（建表/探测），模块级互相 import 会成环
+    from . import migrate
+    migrate.migrate()
     return list_tables()
 
 

@@ -57,6 +57,7 @@ def _connect_sqlite():
     conn = getattr(_thread_local, "conn", None)
     if conn is None:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.isolation_level = None  # 显式事务控制（BEGIN IMMEDIATE / COMMIT）
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")     # 写并发友好
         conn.execute("PRAGMA synchronous=NORMAL")   # 平衡持久性与性能
@@ -110,7 +111,8 @@ def execute(sql, params=()):
             return res.rowcount if res.rowcount is not None else 0
     conn = connect()
     cur = conn.execute(sql, params)
-    conn.commit()
+    if getattr(_thread_local, "tx_depth", 0) <= 0:
+        conn.commit()
     return cur.rowcount
 
 
@@ -142,21 +144,42 @@ def transaction():
         ctx.__enter__()
         return _SQLA_Tx(ctx)
     conn = connect()
-    conn.execute("BEGIN")
+    depth = getattr(_thread_local, "tx_depth", 0)
+    if depth == 0:
+        conn.execute("BEGIN IMMEDIATE")  # 立即取写锁，读-改-写期间不被他人插入
+    _thread_local.tx_depth = depth + 1
     return _SQLite_Tx(conn)
 
 
 class _SQLite_Tx:
-    """sqlite 事务上下文（延迟提交/回滚）。"""
+    """sqlite 事务上下文（延迟提交/回滚）。
+
+    `tx_depth` 是事务嵌套计数：只有最外层（depth 归零）才真正 commit/rollback。
+    **commit()/rollback() 与 __exit__ 共用同一条收尾路径**——否则非 `with`
+    用法（`tx = db.transaction(); tx.commit()`）会把 depth 永久留在 1，
+    之后 `db.execute` 不再自动提交、`BEGIN IMMEDIATE` 不再取写锁，
+    事务静默失去原子性（正是 M1 要消灭的「假原子性」）。
+    """
 
     def __init__(self, conn):
         self._conn = conn
+        self._closed = False
 
     def commit(self):
-        self._conn.commit()
+        self._finish("commit")
 
     def rollback(self):
-        self._conn.rollback()
+        self._finish("rollback")
+
+    def _finish(self, action):
+        """收尾：depth 递减；最外层才落 commit/rollback。幂等，重复调用无副作用。"""
+        if self._closed:
+            return
+        self._closed = True
+        depth = max(0, getattr(_thread_local, "tx_depth", 1) - 1)
+        _thread_local.tx_depth = depth
+        if depth == 0:
+            getattr(self._conn, action)()
 
     def execute(self, sql, params=()):
         return self._conn.execute(sql, params)
@@ -165,6 +188,13 @@ class _SQLite_Tx:
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if self._closed:
+            return False
+        depth = max(0, getattr(_thread_local, "tx_depth", 1) - 1)
+        _thread_local.tx_depth = depth
+        self._closed = True
+        if depth > 0:
+            return False  # 内层不提交，交给最外层
         if exc_type is None:
             self._conn.commit()
         else:

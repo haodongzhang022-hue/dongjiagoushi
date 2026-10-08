@@ -592,6 +592,14 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 - **层级空间**：`spaces` 父子树（根→小组→子小组→…）+ 共享空间归属。
 - **权限空间（ACL）**：声明「哪个 AI 可访问哪个任务位置/哪个记忆位置」（`r|w|rw|none`），未授权拒绝读写。
 - **版本整合 + 小组提交**：`versions` 版本实体 + 基于父版本的冲突检测；`commits` 以**小组为单位**按**最小模块粒度**统一向上整合交付，避免多 agent 改同一对象冲突、Issue 合并不失效。
+- **写路径原子化（写时状态中介 · ADR-0013）**：「读 latest → 写新版本」必须**整体在一个事务内**
+  （sqlite 最外层 `BEGIN IMMEDIATE`），否则并发写是「撞键报错」而非「确定性判冲突」；
+  冲突提案写**负数 vno**、`latest_version()` 只认主线（`vno>0 AND status!='conflict'`）——
+  一次冲突不得把实体永久卡死；`conflicts()` 按 `status` 直查，不走 `vno DESC` 窗口（防主线 ≥50 后冲突静默丢失）。
+  旧库迁移下沉到 `schema.init_schema()`（全仓入口建表即升级，不依赖各自记得调 `admin.init()`），
+  迁移与 `schema_migrations` 标记**同事务**（不留「已标记未建表」半写）。
+  信号灯：`local-agent/tests/test_collab.sh` 第 7 组 + `test_data_layer.sh` 第 8 组 +
+  feature-verify `collab/写时状态中介`（真跑 16 线程并发 + 真造旧库）。
 
 - **数据先行**：每个 agent / 任务 / 消息在进入业务前，先由数据管理员登记入库。
 - **统一口径**：所有指标统计以 `stats` / `progress` 为准，禁止各 agent 自造口径。

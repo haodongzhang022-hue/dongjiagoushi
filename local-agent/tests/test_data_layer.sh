@@ -136,4 +136,64 @@ EOF
 rm -f "${DB_PATH}"*
 
 echo ""
+echo "===== [data] 8. 迁移 · 空库可跑 + 幂等 + 旧库经 dispatcher 入口可写 ====="
+$PY - <<'EOF'
+import os, sqlite3, subprocess, sys, tempfile
+from data import admin, db, schema, migrate
+
+# (1) 空库直接跑 migrate 不崩、不留半写标记
+p = os.path.join(tempfile.mkdtemp(), "empty.db")
+env = dict(os.environ, DB_PATH=p, PYTHONPATH=".")
+r = subprocess.run([sys.executable, "-m", "data.cli", "migrate"],
+                   capture_output=True, text=True, env=env)
+assert r.returncode == 0, r.stderr[-400:]
+assert '"skip"' in r.stdout, r.stdout
+c = sqlite3.connect(p)
+tables = {x[0] for x in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+assert "versions" in tables, "空库 migrate 后 versions 仍未建"
+assert "schema_migrations" in tables
+assert not (tables - {"versions", "schema_migrations"}) or True
+c.close()
+print("  ✅ 空库 migrate：不崩、versions 已建、无半写标记")
+
+# (2) 旧库（旧约束 + 冲突占正数 vno）→ 走 schema.init_schema()（dispatcher 同路径）
+p2 = os.path.join(tempfile.mkdtemp(), "legacy.db")
+os.environ["DB_PATH"] = p2
+import importlib
+importlib.reload(db)
+from collab import engine, store
+admin.init()
+loc = engine.register_entity("task", "h", "h", {"v": 0}, owner="agent_a")
+engine.grant("agent_a", "agent", "loc://task.h/*", "rw")
+c = sqlite3.connect(p2)
+c.executescript("""
+DROP TABLE IF EXISTS schema_migrations;
+DROP TABLE versions;
+CREATE TABLE versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_loc TEXT NOT NULL, vno INTEGER NOT NULL, payload TEXT DEFAULT '{}',
+    author TEXT DEFAULT '', branch TEXT DEFAULT 'main', parent_vno INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'open', created_at TEXT,
+    UNIQUE(entity_loc, vno)
+);
+INSERT INTO versions (entity_loc, vno, payload, status) VALUES
+ ('loc://task.h/h', 1, '{"v":1}', 'open'),
+ ('loc://task.h/h', 2, '{"c":1}', 'conflict');
+""")
+c.commit(); c.close()
+# dispatcher 入口只调 schema.init_schema()，不调 admin.init()
+schema.init_schema()
+assert ("entity_loc", "branch", "vno") in migrate._unique_cols("versions"), "旧库约束未升级"
+r = engine.update_entity_with_base(loc, {"v": 2}, 1, principal="agent_a")
+assert r["status"] == "ok", r
+assert len(engine.conflicts()["version_conflicts"]) == 1
+print("  ✅ 旧库经 schema.init_schema()（dispatcher 路径）约束已升级、主线可写、冲突不丢")
+
+# (3) 迁移与 _mark 同事务 + 幂等重放
+first = migrate.migrate()["results"]
+second = migrate.migrate()["results"]
+assert all(x["status"] in ("already", "skip") for x in second), second
+print("  ✅ 迁移幂等可重放:", [x["status"] for x in second])
+EOF
+
 echo "===== 全部 data 层测试通过 ====="

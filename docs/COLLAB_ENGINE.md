@@ -172,14 +172,14 @@ CREATE TABLE acl (
 CREATE TABLE versions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_loc TEXT NOT NULL,          -- 被版本的实体 loc
-    vno        INTEGER NOT NULL,       -- 版本号（1..n）
+    vno        INTEGER NOT NULL,       -- 主线 1..n；冲突提案用负数编号（-1,-2,…），不推进主线
     payload    TEXT DEFAULT '{}',      -- 该版本快照内容
     author     TEXT DEFAULT '',        -- 谁提交的这版
     branch     TEXT DEFAULT 'main',    -- 分支（多 agent 并行修改用小组分支）
     parent_vno INTEGER DEFAULT 0,      -- 基于哪一版（冲突检测关键）
     status     TEXT DEFAULT 'open',    -- open/merged/conflict/discarded
     created_at TEXT,
-    UNIQUE(entity_loc, vno)
+    UNIQUE(entity_loc, branch, vno)    -- 含 branch：不同分支各自的 vno 空间互不挤占
 );
 ```
 
@@ -188,6 +188,23 @@ CREATE TABLE versions (
 2. 各自在自己的小组 **branch** 上写新版本（`parent_vno = 所基于版本`）；
 3. 提交时**冲突检测**：若 `parent_vno != 主干最新版本` → 判定 `conflict`，提示基于最新版 rebase，不盲目覆盖；
 4. `commits` 负责把多个小组分支**整合**成主线（见下）。
+
+#### 写路径原子性（写时状态中介 · 差距 D 修复）
+
+冲突检测的**有效性**依赖「读 latest → 写新版本」是一个原子步骤——否则两个 agent 都读到
+`latest=3`、都写 `vno=4`，冲突检测形同虚设。落地三件套：
+
+1. **事务包裹**：`update_entity_with_base()` / `update_entity()` 的读-改-写整体进
+   `db.transaction()`（sqlite 下最外层用 `BEGIN IMMEDIATE` 立即取写锁）；
+2. **冲突提案独立编号**：冲突版本写**负数 vno**（`add_conflict_version`），
+   `latest_version()` 只认 `vno>0 AND status!='conflict'` 的主线——
+   **一次冲突不会把该实体永久卡死**，也不抬高主线基准；
+3. **受理闸门直查**：`conflicts()` 按 `status='conflict'` 直查（带 `idx_versions_status`），
+   不走 `versions_of` 的 `vno DESC LIMIT 50` 窗口——主线版本 ≥50 后负数提案不会被截掉而静默丢失。
+
+旧库（旧唯一键 `(entity_loc, vno)`、冲突占正数 vno）由 `data/migrate.py` 幂等迁移，
+并**下沉到 `schema.init_schema()`**：全仓入口只要走建表就都会升级既有库，
+不依赖各自记得先调 `admin.init()`（详见 ADR-0013）。
 
 ### commits 小组整合提交
 
@@ -298,7 +315,8 @@ revoke(principal, loc_pattern, by)
 
 # ④ 版本
 checkout(loc, principal)              # 返回当前版本 + 基线 vno
-update_entity(loc, payload, principal, branch='main')  # 写新版本（冲突检测）
+update_entity(loc, payload, principal, branch='main')  # 写新版本（冲突检测，事务内）
+update_entity_with_base(loc, payload, base_vno, ...)  # 带基线写入（并发冲突检测核心）
 versions_of(loc)                      # 版本历史
 
 # ⑤ 小组提交
@@ -319,6 +337,8 @@ conflicts()                           # 待处理冲突清单
 | 多 agent 并发修改冲突检测 | 基于旧版本提交 → 标 conflict | ✅ 通过 |
 | 小组提交整合 + 最小模块粒度 | commit + merge_commit | ✅ 通过 |
 | 不破坏既有六表数据层 | test_data_layer.sh + 新 collab 测试 | ✅ 全绿 |
+| 并发写不产生重复 vno（写时状态中介） | 16 线程同基提交 + feature-verify `collab/写时状态中介` | ✅ ok=1 / conflict=15 / err=0，主线 vno 无重复 |
+| 旧库经任意建表入口自动升级 | 造旧库（旧唯一键+冲突占正数）→ 只走 `schema.init_schema()` | ✅ 约束升级 / 主线可写 / 冲突不丢 |
 
 **测试信号灯**：新增 `local-agent/tests/test_collab.sh`，未通过即红灯阻塞不放行。
 
