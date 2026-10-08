@@ -204,21 +204,32 @@ except Exception as e:
 
 # ---- Then-6: 远程后端写路径显式收口（fail-loud，不留假象）----
 # 复评 🔴：db.execute 在远程每次另开事务，无法复用当前事务连接 → 必须显式拒绝，不静默半工作。
-os.environ["DB_BACKEND"] = "postgresql"
-os.environ["DB_URL"] = "sqlite:///" + os.path.join(TMP, "sqla.db")
-db5 = importlib.reload(db)
+# 环境守卫：本项依赖 sqlalchemy（远程后端适配层）。未装则优雅跳过，对齐 README
+# 「环境守卫优雅跳过」约定（与 test_data_layer.sh 第10组同口径）；CI feature-verify
+# 作业显式安装 sqlalchemy，故 CI 上是真跑、不是跳过。
 try:
-    with db5.transaction():
-        db5.execute("CREATE TABLE IF NOT EXISTS t_fv (a int)")
-    bad("Then-6: 远程事务内 db.execute 未 fail-loud（静默失去原子性）")
-except RuntimeError as e:
-    if "事务内" in str(e) and getattr(db5._thread_local, "tx_depth", 0) == 0:
-        ok("Then-6: 远程事务内 db.execute() fail-loud（拒绝静默半工作）+ tx_depth 归零")
-    else:
-        bad("Then-6: 抛错但语义/计数不对：%s depth=%s" % (str(e)[:50], getattr(db5._thread_local, "tx_depth", 0)))
-except Exception as e:
-    bad("Then-6: 抛了非 RuntimeError：%s: %s" % (type(e).__name__, str(e)[:60]))
-os.environ.pop("DB_BACKEND", None); os.environ.pop("DB_URL", None)
+    import sqlalchemy  # noqa: F401
+    _HAS_SQLA = True
+except ImportError:
+    _HAS_SQLA = False
+if not _HAS_SQLA:
+    print("  ⏭️  Then-6 跳过：未装 sqlalchemy（远程后端适配层；CI feature-verify 作业已装 → 真跑）")
+else:
+    os.environ["DB_BACKEND"] = "postgresql"
+    os.environ["DB_URL"] = "sqlite:///" + os.path.join(TMP, "sqla.db")
+    db5 = importlib.reload(db)
+    try:
+        with db5.transaction():
+            db5.execute("CREATE TABLE IF NOT EXISTS t_fv (a int)")
+        bad("Then-6: 远程事务内 db.execute 未 fail-loud（静默失去原子性）")
+    except RuntimeError as e:
+        if "事务内" in str(e) and getattr(db5._thread_local, "tx_depth", 0) == 0:
+            ok("Then-6: 远程事务内 db.execute() fail-loud（拒绝静默半工作）+ tx_depth 归零")
+        else:
+            bad("Then-6: 抛错但语义/计数不对：%s depth=%s" % (str(e)[:50], getattr(db5._thread_local, "tx_depth", 0)))
+    except Exception as e:
+        bad("Then-6: 抛了非 RuntimeError：%s: %s" % (type(e).__name__, str(e)[:60]))
+    os.environ.pop("DB_BACKEND", None); os.environ.pop("DB_URL", None)
 
 print()
 sys.exit(1 if FAIL else 0)

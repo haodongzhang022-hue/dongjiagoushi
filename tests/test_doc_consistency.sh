@@ -254,6 +254,11 @@ contains "db.py 修正无缝切换表述（写路径闭环为跟踪项）" "$(ca
 contains "db.py 远程事务内 db.execute fail-loud" "$(cat local-agent/data/db.py)" "远程后端的事务内不支持 db.execute()"
 contains "DATA_ARCHITECTURE 暴露 PG 写路径未闭环" "$(cat docs/DATA_ARCHITECTURE.md)" "PG 写路径端到端尚未闭环"
 contains "test_data_layer 组10 假绿收口为适配层冒烟" "$(cat local-agent/tests/test_data_layer.sh)" "适配层冒烟（sqlite 方言"
+# CI 依赖接线防静默退化：feature-verify Then-6 依赖 sqlalchemy；若 CI 不装，该信号灯
+# 在云端变空转（跳过）→ 与本地不一致。锁死「依赖声明在 requirements + CI 显式安装」。
+contains "requirements 声明 sqlalchemy 依赖项（非注释，Then-6 依赖）" "$(grep -E '^sqlalchemy' local-agent/requirements.txt)" "sqlalchemy"
+contains "CI feature-verify 作业显式安装依赖（不静默跳过）" "$(cat .cnb.yml)" 'python3 -c "import sqlalchemy'
+contains "feature-verify Then-6 带环境守卫（无 sqlalchemy 优雅跳过）" "$(cat scripts/feature-verify/collab/写时状态中介.sh)" "Then-6 跳过：未装 sqlalchemy"
 contains "AGENTS.md 登记阶段链门控规则" "$(cat AGENTS.md)" "阶段链门控"
 file_exists "阶段链门控引擎存在" "local-agent/review_cycle/gate.py"
 file_exists "阶段链唯一事实源存在" "local-agent/review_cycle/stage_spec.py"

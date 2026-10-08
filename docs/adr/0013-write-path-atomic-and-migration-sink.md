@@ -87,6 +87,18 @@
   这是「一致性优先」的自觉取舍；迁移需要一次建表/拷数据（大库有成本，先 `data-cli migrate --dry-run` 看代价）。
 - 难反转：一旦依赖负数编号语义与 branch 维度唯一键，回退会让既有冲突提案与分支版本错位。
 
+## CI 依赖接线（CI 失败修复）
+- `feature-verify` 的 Then-6（远程写路径 fail-loud）依赖 `sqlalchemy`。原先该作业
+  不装依赖，只在本地开发机（已装 sqlalchemy）为绿 → **CI 与本地不一致**：CI 上
+  `db.transaction()` 因缺 sqlalchemy 抛「需安装 sqlalchemy」的 `RuntimeError`，
+  语义不符 → 闸门红（本 PR 修复）。
+- 修法：① `local-agent/requirements.txt` 显式声明 `sqlalchemy>=2.0`；
+  ② `.cnb.yml` feature-verify 作业 `pip install -r local-agent/requirements.txt`
+  并 `import sqlalchemy` 校验，**装不上即作业失败，不静默跳过**（避免信号灯在云端
+  空转变假绿）；③ 脚本内加环境守卫（无 sqlalchemy 优雅跳过，对齐 README 约定，
+  保本地可跑）；④ `test_doc_consistency.sh` 加三条断言锁死「依赖声明 + CI 安装 +
+  脚本守卫」三者，防再次静默退化。
+
 ## 跟踪项（本 PR 不实现 · 另开 Issue）
 - **真 PG 写路径端到端闭环**：① `db.execute` 在远程后端复用当前事务连接（真闭环）；
   ② PG 方言 DDL（`SERIAL`/`BIGINT`，替换 `AUTOINCREMENT`）；③ 参数风格（`?` → `%(name)s`/`:name`）。

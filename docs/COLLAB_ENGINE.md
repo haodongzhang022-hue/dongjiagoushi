@@ -222,6 +222,11 @@ gid 每操作 / sentinel / dispatcher…），**迁移检查必须只读**：
 fail-loud 抛错**（拒绝静默半工作），事务内一律走 `tx.execute()`；文档「无缝切换」表述
 一并修正为「接口层已抽象、**写路径闭环为跟踪项**」（ADR-0013 跟踪项）。
 
+该 fail-loud 断言依赖 `sqlalchemy`（远程后端适配层）：已声明于
+`local-agent/requirements.txt`，CI 的 feature-verify 作业显式安装并校验
+（装不上即失败，不静默跳过）；脚本内保留环境守卫（无 sqlalchemy 优雅跳过，保本地可跑）。
+三条由 `test_doc_consistency.sh` 锁死，防 CI/本地再次不一致导致闸门假红/假绿。
+
 ### commits 小组整合提交
 
 小组内部/跨小组的修改统一**以小组为单位向上整合交付**：
