@@ -48,10 +48,18 @@
 
 防退化断言（有牙齿）：
 ```bash
-bash scripts/feature-verify.sh --check-map   # 未映射 / 映射失效 / 僵尸条目 → RED
+bash scripts/feature-verify.sh --check-map   # 未映射 / 映射失效 → RED
 ```
 ① 证据库每模块须已登记 ② 探针路径须真实存在 ③ 模拟"改该模块实现源"须真被选中
-④ 映射表不得有指向不存在模块的僵尸条目。CI 的 `feature-verify gate` 先跑它再跑 `--changed`。
+④ 僵尸条目（映射行指向暂无证据目录的模块）→ **仅 ⚠️ 警告，不阻断**。
+CI 的 `feature-verify gate` 先跑它再跑 `--changed`。
+
+**为什么僵尸条目只警告不 RED（跨 PR 雷收口 · Issue #162）**：真正的漏跑方向是
+①「目录有、映射无」（那才 RED）；僵尸行选中的模块无脚本 = 无贡献，不造成静默漏跑。
+且跨 PR 并发下必须容忍：A PR 先登记映射、B PR 后落证据脚本（或反之），中间态
+"有行无目录"属正常顺序。若把僵尸行判 RED，先合"登记映射"的 PR、再合"落脚本"的 PR，
+后合那个一落 main 就会让 `--check-map` 判红（主线变红）——本 PR 已预登记
+`collab:`（证据脚本由 PR #161 落地）并在 selector 样例中双向锁死该行为。
 
 
 ### 变更范围回退链（防假绿 · Issue #162 复评 S1）

@@ -18,6 +18,9 @@
 #   T13 CI 闸门已前置 --check-map（防退化断言）
 #   T14 target SHA 不可解析 → 保守全量（不假绿跳过 · S1 回归断言）
 #   T15 target SHA 无效但回退源可用 → 回退链继续真选测（不断链）
+#   T16 跨 PR 雷回归（Issue #162 收口）：映射前置登记（目录后落地）不得判 RED，
+#       但"目录有、映射无"仍须 RED——两方向同时锁死，防合 #161 后主线变红
+#   T17 脚本可执行位回归：feature-verify.sh / change-aware / 自测 / selector 样例 保持 100755
 #
 # 用法：bash tests/test_feature_verify.sh
 # 运行依赖：bash + git（纯逻辑）；python 样例在 python 环境跑（无则优雅跳过）
@@ -253,6 +256,46 @@ else
   bad "T15: target SHA 无效后未继续回退选测（OUT=$T15OUT）"
 fi
 rm -rf "$T15REPO"
+# ---- T16 跨 PR 雷回归：前置登记容忍 + 漏跑方向牙齿不丢 ----
+echo ""
+echo "▶ T16 跨 PR 雷回归（映射前置登记 vs 目录有映射无）"
+T16V="$(mktemp -d)"; mkdir -p "$T16V/only_dir" "$T16V/_templates"
+echo '#!/usr/bin/env bash' > "$T16V/only_dir/x.sh"
+# (a) 目录有、映射无 → RED（真漏跑方向）
+if FEATURE_VERIFY_DIR="$T16V" bash scripts/feature-verify.sh --check-map >/dev/null 2>&1; then
+  bad "T16a: 证据目录有、映射表无 → --check-map 仍绿（漏跑守护失效）"
+else
+  ok "T16a: 证据目录有、映射表无 → RED（漏跑方向牙齿不丢）"
+fi
+# (b) 映射有、目录无（前置登记）→ 绿（容忍跨 PR 中间态）
+cat > "$T16V/m_forward.map" <<'MAPEOF'
+only_dir: local-agent/collab/engine.py: local-agent/collab/engine\.py
+forward_only: local-agent/collab/engine.py: local-agent/collab/engine\.py
+MAPEOF
+if FEATURE_VERIFY_DIR="$T16V" FEATURE_VERIFY_MAP="$T16V/m_forward.map" \
+   bash scripts/feature-verify.sh --check-map >"$T16V/f.out" 2>&1; then
+  ok "T16b: 映射前置登记（目录后落地）→ --check-map 绿（跨 PR 雷消除）"
+else
+  bad "T16b: 前置登记被判 RED → 合 #161 后主线会变红（雷未消除）"
+fi
+grep -q "forward_only" "$T16V/f.out" 2>/dev/null \
+  && ok "T16c: 前置登记以 ⚠️ 警告显式暴露（不静默）" \
+  || bad "T16c: 前置登记未显式暴露"
+rm -rf "$T16V"
+# (c) 本 PR 已真实预登记 collab（与 #161 证据目录对齐）
+grep -q '^collab:' scripts/feature-verify/modules.map \
+  && ok "T16d: modules.map 已预登记 collab（合 #161 后不判红）" \
+  || bad "T16d: 未预登记 collab → 合 #161 后主线 --check-map 判红"
+
+# ---- T17 脚本可执行位回归（100755）----
+echo ""
+echo "▶ T17 脚本可执行位回归"
+for f in scripts/feature-verify.sh scripts/change-aware-test.sh tests/test_feature_verify.sh \
+         "scripts/feature-verify/selector/映射全覆盖.sh"; do
+  m="$(git ls-files -s "$f" | awk '{print $1}')"
+  [ "$m" = "100755" ] && ok "$f 保持 100755" || bad "$f 可执行位回归（$m，应 100755）"
+done
+
 # ---- 汇总 ----
 echo ""
 echo "======================================================"

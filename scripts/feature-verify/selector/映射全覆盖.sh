@@ -11,6 +11,10 @@
 #           **变异**：① 删掉任一模块的映射行 ② 把某模块探针路径改成不存在的路径
 #           ③ 用 FEATURE_VERIFY_CHANGED_FILES 注入「仅改某模块实现源」跑 --changed --dry-run
 #   Then    1) 基线 --check-map 必须绿（rc=0，全部模块被映射选中）；
+#           1b) 跨 PR 雷回归（Issue #162 收口）：映射表**前置登记**了证据目录尚未落地的
+#              模块（本 PR 预登记 collab，脚本随 PR #161 落地）时，--check-map 必须
+#              **仍绿**（⚠️ 警告不阻断）——否则先合本 PR 再合 #161，主线会因 collab
+#              未映射被判红；反向"目录有、映射无"仍必须 RED（牙齿不丢）；
 #           2) 删任一模块映射行 → rc=1（未映射即 RED，防退化有牙齿）；
 #           3) 探针路径失效 → rc=1（映射过期即 RED）；
 #           4) 改 local-agent/collab/closure.py（此前静默漏跑的模块）→ --changed 必须
@@ -154,6 +158,61 @@ if printf '%s' "$t8pat" | grep -q 'generate-dashboard\\\.py'; then
 else
   bad "Then-8: 映射 ERE 反斜杠被吞（pat='${t8pat}'）→ S2 未修复"
 fi
+# ---------- Then-9：跨 PR 雷回归（前置登记映射 / 目录后落地 必须容忍） ----------
+# 真实场景：本 PR 预登记 `collab:` 映射行，证据脚本由 PR #161 落地。两 PR 各自
+# base=main，谁先合都会出现"有映射行、暂无证据目录"的中间态——此时主线 --check-map
+# 必须仍绿（⚠️ 警告），否则后合的那个 PR 一落 main 就把主线判红（跨 PR 雷）。
+# 用 hermetic 临时证据库验证：造 "目录有、映射无" 仍 RED（牙齿不丢），
+# "映射有、目录无" 必须绿（容忍并发）。
+TMPV="$(mktemp -d)"
+mkdir -p "$TMPV/only_dir" "$TMPV/_templates"
+echo '#!/usr/bin/env bash' > "$TMPV/only_dir/x.sh"
+# (a) 目录有、映射无 → 必须 RED（真漏跑方向，牙齿不丢）
+if FEATURE_VERIFY_DIR="$TMPV" bash "$FV" --check-map >"$TMP/x1.out" 2>&1; then
+  bad "Then-9a: 证据目录有、映射表无 → --check-map 仍绿（漏跑守护失效）"
+else
+  ok "Then-9a: 证据目录有、映射表无 → RED（漏跑方向牙齿不丢）"
+fi
+# (b) 映射有、目录无（前置登记）→ 必须绿（容忍跨 PR 中间态）
+#     探针须用真实存在的实现源（探针检查独立于证据目录，不能靠假路径绕过）
+cat > "$TMPV/map_forward.map" <<'MAPEOF'
+only_dir: local-agent/collab/engine.py: local-agent/collab/engine\.py
+forward_only: local-agent/collab/engine.py: local-agent/collab/engine\.py
+MAPEOF
+if FEATURE_VERIFY_DIR="$TMPV" FEATURE_VERIFY_MAP="$TMPV/map_forward.map" \
+   bash "$FV" --check-map >"$TMP/x2.out" 2>&1; then
+  ok "Then-9b: 映射前置登记（目录后落地）→ --check-map 仍绿（跨 PR 雷消除）"
+else
+  bad "Then-9b: 前置登记映射被判 RED → 跨 PR 合并后主线会变红（雷未消除）"
+  sed 's/^/      /' "$TMP/x2.out"
+fi
+if grep -q "forward_only" "$TMP/x2.out" 2>/dev/null; then
+  ok "Then-9c: 前置登记以 ⚠️ 警告显式暴露（不静默、不阻断）"
+else
+  bad "Then-9c: 前置登记未显式暴露（静默）"
+fi
+rm -rf "$TMPV"
+
+# ---------- Then-10：本 PR 真实预登记 collab，且 post-#161 合并后仍绿 ----------
+if grep -q '^collab:' "$MAP"; then
+  ok "Then-10a: modules.map 已预登记 collab 映射行（与 PR #161 证据目录对齐）"
+else
+  bad "Then-10a: modules.map 未预登记 collab → 合 #161 后主线 --check-map 判红"
+fi
+# 模拟 #161 已合（collab 证据目录落地）→ 仍须绿
+TMPV2="$(mktemp -d)"
+mkdir -p "$TMPV2/collab" "$TMPV2/selector"
+echo '#!/usr/bin/env bash' > "$TMPV2/collab/写时状态中介.sh"
+echo '#!/usr/bin/env bash' > "$TMPV2/selector/映射全覆盖.sh"
+if FEATURE_VERIFY_DIR="$TMPV2" FEATURE_VERIFY_MAP="$MAP" \
+   bash "$FV" --check-map >"$TMP/x3.out" 2>&1; then
+  ok "Then-10b: 模拟 #161 已合（collab 目录落地）→ --check-map 绿"
+else
+  bad "Then-10b: 模拟 #161 已合后 --check-map 红（跨 PR 雷仍在）"
+  sed 's/^/      /' "$TMP/x3.out"
+fi
+rm -rf "$TMPV2"
+
 if [ "$FAIL" -gt 0 ]; then
   echo "🔴 selector/映射全覆盖 未达成 → 功能没做完（PASS=$PASS FAIL=$FAIL）"
   exit 1

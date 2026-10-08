@@ -41,3 +41,9 @@ review: local-agent/roles/reviewer.py: local-agent/roles/reviewer\.py
 
 # 变更选择器自身（本表 + 主执行器）——证据库自保，改选择器必须跑自身样例
 selector: scripts/feature-verify.sh: scripts/feature-verify\.sh|scripts/feature-verify/modules\.map
+
+# 协作运作引擎写路径（证据模块 scripts/feature-verify/collab/ 由 PR #161 引入）
+# 跨 PR 前置登记：本表与 PR #161 各自 base=main、互不冲突；若先合本 PR 后合 #161，
+# 中间态"有映射行、暂无证据目录"仅 ⚠️ 警告（不再 RED）——否则合 #161 后主线
+# --check-map 会因 collab 未映射直接判红（跨 PR 雷，Issue #162 收口）。
+collab: local-agent/collab/engine.py: local-agent/collab/(engine|store)\.py

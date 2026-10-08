@@ -34,7 +34,8 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-VERIFY_DIR="scripts/feature-verify"
+# 证据库根目录（FEATURE_VERIFY_DIR 供 hermetic 测试注入临时目录，默认仓库内路径）
+VERIFY_DIR="${FEATURE_VERIFY_DIR:-scripts/feature-verify}"
 MAP_FILE="${FEATURE_VERIFY_MAP:-$VERIFY_DIR/modules.map}"
 
 MODE="all"
@@ -253,7 +254,9 @@ select_by_changes() {
 #     ① 证据库每个模块必须在 modules.map 登记（未映射即 RED）
 #     ② 探针实现源路径必须真实存在（映射过期即 RED）
 #     ③ 模拟「改该模块实现源」→ 选择器必须选中它（映射失效即 RED，防静默漏跑）
-#     ④ 映射表不得有指向不存在模块的僵尸条目
+#     ④ 僵尸条目（映射行指向暂无证据目录的模块）→ 仅 ⚠️ 警告，不阻断：
+#        真漏跑方向是 ①「目录有、映射无」；且跨 PR 并发（A 先登记映射 / B 后落脚本）
+#        必须容忍，否则后合的 PR 一落 main 就把主线判红（跨 PR 雷 · Issue #162 收口）
 # ------------------------------------------------------------
 check_map() {
   local RED=0
@@ -297,21 +300,29 @@ check_map() {
     fi
   done <<< "$mods"
 
-  # ④ 僵尸条目：映射里的模块在证据库不存在
+  # ④ 僵尸条目（映射行指向暂无证据目录的模块）→ ⚠️ 警告，**不阻断**：
+  #    - 真漏跑方向是 ①「目录有、映射无」（那才 RED）；僵尸行选中的模块无脚本
+  #      = 无贡献，不造成静默漏跑；
+  #    - 跨 PR 并发下必须容忍：A PR 先登记映射、B PR 后落证据脚本（或反之），
+  #      中间态"有行无目录"属正常顺序，不该把主线判红（Issue #162 跨 PR 雷）。
+  local zombie=""
   while IFS=$'\t' read -r m p pat; do
     [ -n "$m" ] || continue
     if [ ! -d "$VERIFY_DIR/$m" ]; then
-      echo "  ❌ 映射条目 [$m] 指向不存在的证据模块目录 ${VERIFY_DIR}/${m}/（僵尸条目，RED）"
-      RED=1
+      zombie="$zombie $m"
     fi
   done < <(map_entries)
+  if [ -n "$zombie" ]; then
+    echo "  ⚠️ 映射条目指向暂无证据目录的模块:${zombie}"
+    echo "     （非阻断：跨 PR 并发中间态 / 待落脚本；不影响 ① 的漏跑守护）"
+  fi
 
   echo ""
   if [ "$RED" -gt 0 ]; then
-    echo "🔴 映射防退化断言未通过（未映射/映射失效/僵尸条目）→ blocked_on: feature_unverified"
+    echo "🔴 映射防退化断言未通过（未映射/映射失效）→ blocked_on: feature_unverified"
     exit 1
   fi
-  echo "🟢 映射防退化断言通过：证据库模块 100% 被 --changed 覆盖，无僵尸条目"
+  echo "🟢 映射防退化断言通过：证据库模块 100% 被 --changed 覆盖"
   exit 0
 }
 
