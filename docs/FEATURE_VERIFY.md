@@ -134,3 +134,14 @@ bash scripts/feature-regress.sh [--module X]     # 回归诊断定位坏功能
   "Why 功能级"说明。
 - 与 change-aware 按变更选测需协调复用 → `feature-verify.sh --changed` 复用既有
   change-aware 思路（git diff 定变更范围 → 按模块映射选测）。
+
+## 云端真跑本自测（复评 🟡3 / 测试残留 B 收口）
+`tests/test_feature_verify.sh` 已登记 `local-agent/hybrid/registry.json`（covers
+`scripts/feature-verify.sh` + `modules.map` + `feature-regress.sh` + `change-aware-test.sh`
++ 本 PR 文档/CI 文件）。云端 CI 的变更感知链路是 `.cnb.yml` → `IncrementalSelector`
+（`local-agent/hybrid/selector.py`，读 `registry.json`）——改选择器/映射即**真实选中本自测**，
+不再只是"源码里有字"。
+
+- 断言：T12a/T12b（registry 登记 + covers 结构可达）；T12c 有 python3 时**真实跑**
+  `IncrementalSelector.select([...])` 断言选中本自测，无 python3 则显式标注跳过（不假装通过）。
+- `scripts/change-aware-test.sh` 的手工入口映射保留，供本地/手动执行，**不再作为唯一判据**。

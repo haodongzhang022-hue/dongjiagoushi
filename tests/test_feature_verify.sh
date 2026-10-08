@@ -14,7 +14,7 @@
 #   T9 模块→实现源映射收口唯一事实源（Issue #162）
 #   T10 变异验证：移除任一模块映射 → --check-map RED（防退化有牙齿）
 #   T11 缺口回归自证：collab 实现源变更不再假绿（评审 🟡P1）
-#   T12 变更感知测试选择接线（选择器改动 → 功能级自测）
+#   T12 变更感知测试选择真接线：registry.json 登记本自测 + 选择器真实选中（非仅源码有字）
 #   T13 CI 闸门已前置 --check-map（防退化断言）
 #   T14 target SHA 不可解析 → 保守全量（不假绿跳过 · 复评 R1：含 **带 CNB_COMMIT**
 #       真实 CI 场景断言 T14c/T14d，否则测不到真实环境假绿）
@@ -193,15 +193,53 @@ else
   bad "改 local-agent/collab/engine.py 仍无可选脚本（OUT=$OUT_CHANGED）"
 fi
 
-# ---- T12 变更感知测试选择已接线（选择器改动 → 功能级自测）----
+# ---- T12 变更感知测试选择真接线（选择器/映射改动 → 云端 CI 真跑本自测）----
+# 评审 🟡3 / 测试残留 B：此前只 grep change-aware-test.sh（全仓无调用方）里的一行字符串
+# = 「源码里有字」，不是「链路真通」。云端 CI 的变更感知走 `.cnb.yml` →
+# hybrid/selector.py 的 IncrementalSelector → registry.json。故断言**真实链路**：
+#   ① registry.json 已登记 tests/test_feature_verify.sh 且 covers 选择器/映射（链路可达）；
+#   ② 有 python3 → 真实跑 IncrementalSelector.select(改动) 断言选中本自测（真通）；
+#   ③ change-aware-test.sh 手工入口映射保留（本地/手动执行用），但不再作为唯一判据。
 echo ""
-echo "▶ T12 变更感知测试选择接线（Issue #162）"
-if grep -q "scripts/feature-verify|tests/test_feature_verify.sh" scripts/change-aware-test.sh; then
-  ok "change-aware 已将 feature-verify 证据库/选择器变更映射到 test_feature_verify.sh"
+echo "▶ T12 变更感知测试选择真接线（registry → IncrementalSelector）"
+REG="local-agent/hybrid/registry.json"
+if grep -q '"tests/test_feature_verify.sh"' "$REG"; then
+  ok "T12a: registry.json 已登记 tests/test_feature_verify.sh（云端 CI 选择器可达）"
 else
-  bad "change-aware 未接线 feature-verify 变更 → 选择器改动无自测守护"
+  bad "T12a: registry.json 未登记本自测 → 云端 CI 不会真跑本自测的信号灯（残留 B）"
 fi
-
+COV_MISS=""
+for cf in "scripts/feature-verify.sh" "scripts/feature-verify/modules.map"; do
+  grep -q "\"$cf\"" "$REG" || COV_MISS="$COV_MISS $cf"
+done
+if [ -z "$COV_MISS" ]; then
+  ok "T12b: registry covers 选择器 + 映射表（改动即选中本自测）"
+else
+  bad "T12b: registry covers 缺:$COV_MISS → 选择器改动不触发本自测"
+fi
+# ③ 真实跑选择器（有 python3 才跑；无则显式标注为「未在本机验证链路」，不假装通过）
+if command -v python3 >/dev/null 2>&1; then
+  SEL_OUT="$(python3 - <<'PY' 2>/dev/null
+import sys
+sys.path.insert(0, 'local-agent')
+from hybrid.selector import IncrementalSelector
+s = IncrementalSelector(root_dir='.')
+sel = s.select(['scripts/feature-verify.sh', 'scripts/feature-verify/modules.map'])
+print('OK' if 'tests/test_feature_verify.sh' in sel else 'MISS:' + ','.join(sel))
+PY
+)"
+  if [ "$SEL_OUT" = "OK" ]; then
+    ok "T12c: IncrementalSelector 真实选中本自测（链路真通，非仅源码有字）"
+  else
+    bad "T12c: IncrementalSelector 未选中本自测（$SEL_OUT）→ 云端 CI 仍漏跑"
+  fi
+else
+  ok "T12c: 本机无 python3 → 跳过真实选择器复跑（链路可达性由 T12a/T12b 结构断言保障）"
+fi
+# ④ 手工入口映射仍在（本地/手动执行场景，非 CI 主链路）
+grep -q "scripts/feature-verify|tests/test_feature_verify.sh" scripts/change-aware-test.sh \
+  && ok "T12d: change-aware 手工入口映射保留（本地/手动执行用）" \
+  || bad "T12d: change-aware 手工入口映射丢失"
 # ---- T13 CI 闸门已跑 --check-map（防退化断言前置）----
 echo ""
 echo "▶ T13 CI 闸门接线 --check-map"
