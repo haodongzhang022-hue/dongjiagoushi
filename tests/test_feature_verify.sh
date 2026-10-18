@@ -30,6 +30,8 @@
 #       → --check-map RED，且 --changed 命中其实现源 → 硬失败（不再「无可选脚本 → 通过」假绿）
 #   T21 stale pending：目录已落地仍挂 `pending:` → ⚠️ 提示转正式登记（收窄容忍面）
 #   T22 合并态假红回归（Issue #162 合并态修复）：T9 登记判据 pending 感知 + 牙齿
+#   T23 fixture 假红根因回归（Issue #175）：宿主 commit.gpgsign=true 致裸 git commit
+#       静默失败 → 空仓库 `git rev-parse HEAD` 回显字面量 HEAD（rc=0）→ 断言假红
 #
 # 用法：bash tests/test_feature_verify.sh
 # 运行依赖：bash + git（纯逻辑）；python 样例在 python 环境跑（无则优雅跳过）
@@ -40,6 +42,32 @@ PASS=0; FAIL=0; SKIP=0
 ok(){ PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad(){ FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 skip(){ SKIP=$((SKIP+1)); echo "  ⏭️  $1"; }
+
+# ------------------------------------------------------------
+# hermetic git fixture 助手（Issue #175 · CI 假红根因修复）
+# fixture 仓库**不继承宿主 git 配置**：CI/开发机的系统级 gitconfig 常带
+# `commit.gpgsign=true`（本仓 CNB runner 即如此，gpg.program=cnb-gpgsign），
+# 若宿主签名工具不可用，`git commit` 会失败但 **stdout 被丢弃、rc 未检查**，
+# 于是 fixture 里根本没有 commit —— 而 `git rev-parse HEAD` 在空仓库里
+# **打印字面量 "HEAD" 且 rc=0**（不输出 SHA，只有 --verify 才失败），
+# 下游断言全被误导成"目标路径没走到"的假红。
+# 故：① 显式关掉签名/钩子（不依赖宿主配置）；② 提交后真核对 HEAD，
+#     没提交成功就 `exit 1`（fail-loud，绝不让 fixture 静默空壳）。
+# ------------------------------------------------------------
+fixture_git() {  # 在 fixture 仓库内固定 git 行为
+  git init -q -b work
+  git config user.email t@t; git config user.name t
+  git config tag.gpgsign false
+  git config commit.gpgsign false
+  git config core.hooksPath /dev/null
+  # 清掉可能残留的 gc/维护进程对仓库的干扰（fixture 极小，无需自动维护）
+  git config gc.auto 0
+}
+fixture_commit() {  # $1=message  —— 真提交 + 真核对，失败即 fail-loud
+  git add -A >/dev/null 2>&1
+  git commit -qm "$1" >/dev/null 2>&1 || { echo "❌ fixture 提交失败（$1）：宿主 git 配置不可用" >&2; exit 1; }
+  git rev-parse --verify --quiet HEAD >/dev/null 2>&1 || { echo "❌ fixture 无 HEAD（$1）" >&2; exit 1; }
+}
 
 # 证据库模块是否已在映射表登记（`pending:` 前缀视为已登记 · Issue #162 合并态修复）
 # 背景：T9 循环原用 `^${m}:` 精确匹配，合并态 `pending: collab:` 带前缀 → 漏判假红；
@@ -285,12 +313,12 @@ echo "▶ T14 target SHA 不可解析 → 回退链继续/保守全量（不假�
 T14REPO="$(mktemp -d)"
 (
   cd "$T14REPO" || exit 1
-  git init -q -b work; git config user.email t@t; git config user.name t
+  fixture_git
   mkdir -p scripts/feature-verify/foo
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
   printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
   cp "$OLDPWD/scripts/feature-verify.sh" scripts/feature-verify.sh
-  git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
+  fixture_commit init
 )
 # ① 不带 CNB_COMMIT：全部来源落空 → 保守全量
 T14OUT="$(cd "$T14REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
@@ -331,16 +359,16 @@ echo "▶ T14e 仅剩 HEAD~1..HEAD 收窄来源 → 保守全量（不静默欠�
 T14BREPO="$(mktemp -d)"
 (
   cd "$T14BREPO" || exit 1
-  git init -q -b work; git config user.email t@t; git config user.name t
+  fixture_git
   mkdir -p scripts/feature-verify/foo scripts/feature-verify/bar
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/bar/b.sh
   printf 'foo: scripts/x.py: scripts/x\\.py\nbar: scripts/y.py: scripts/y\\.py\n' \
     > scripts/feature-verify/modules.map
   cp "$OLDPWD/scripts/feature-verify.sh" scripts/feature-verify.sh
-  git add -A >/dev/null 2>&1; git commit -qm c1 >/dev/null 2>&1
+  fixture_commit c1
   printf 'changed\n' >> scripts/feature-verify/foo/a.sh
-  git add -A >/dev/null 2>&1; git commit -qm c2 >/dev/null 2>&1
+  fixture_commit c2
 )
 T14BOUT="$(cd "$T14BREPO" && CNB_COMMIT="$(git -C "$T14BREPO" rev-parse HEAD)" \
            CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
@@ -364,15 +392,15 @@ echo "▶ T15 target SHA 无效但 main 可用 → 回退链继续（不因首�
 T15REPO="$(mktemp -d)"
 (
   cd "$T15REPO" || exit 1
-  git init -q -b work; git config user.email t@t; git config user.name t
+  fixture_git
   mkdir -p scripts/feature-verify/foo
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
   printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
   cp "$OLDPWD/scripts/feature-verify.sh" scripts/feature-verify.sh
-  git add -A >/dev/null 2>&1; git commit -qm base >/dev/null 2>&1
+  fixture_commit base
   git branch -f main HEAD
   printf 'changed\n' > scripts/feature-verify/foo/a.sh
-  git add -A >/dev/null 2>&1; git commit -qm change >/dev/null 2>&1
+  fixture_commit change
 )
 T15OUT="$(cd "$T15REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
           bash scripts/feature-verify.sh --changed --dry-run 2>&1)"
@@ -557,6 +585,57 @@ map_registered collab "$T22M" \
   && bad "T22c: 未登记却判已登记（牙齿丢失）" \
   || ok "T22c: 未登记 → 判未登记（牙齿不丢）"
 rm -f "$T22M"
+
+# ---- T23 fixture 假红根因回归（Issue #175 · CI 红）：宿主 commit.gpgsign 不得污染 fixture ----
+# 真实根因（不是"目标路径没走到"）：CI runner 的系统级 gitconfig 带 `commit.gpgsign=true`
+#   + `gpg.program=cnb-gpgsign`，fixture 里裸 `git commit` 因此**失败**；而原 fixture 丢弃
+#   stdout 且不查 rc，于是仓库**没有 commit**。空仓库里 `git rev-parse HEAD` 会**回显字面量
+#   "HEAD" 且 rc=0**（只有 --verify 才失败），`CNB_COMMIT="$(git rev-parse HEAD)"` 因此变成
+#   字符串 "HEAD" → 断言全被误导成假红（T5/T14a/T14c/T14e-1 + selector Then-7a/7b）。
+# 本灯用**注入的坏签名配置**复现同一环境：fixture 必须自带反制（关签名）+ 真核对 HEAD。
+echo ""
+echo "▶ T23 fixture 不受宿主 commit.gpgsign 污染（Issue #175 假红根因）"
+if ! command -v git >/dev/null 2>&1; then
+  skip "T23: 本机无 git → 跳过（根因未在本机验证，不计入 PASS）"
+else
+  T23HOME="$(mktemp -d)"
+  cat > "$T23HOME/.gitconfig" <<'CFGEOF'
+[commit]
+	gpgsign = true
+[gpg]
+	program = cnb-gpgsign-intentionally-missing
+CFGEOF
+  T23REPO="$(mktemp -d)"
+  # (a) fixture 助手自身：带坏签名配置也必须真提交成功
+  T23RC=0
+  (
+    cd "$T23REPO" || exit 1
+    fixture_git
+    printf 'x\n' > f.txt
+    fixture_commit init
+  ) >"$T23HOME/a.out" 2>&1 || T23RC=1
+  if [ "$T23RC" -eq 0 ] \
+     && git -C "$T23REPO" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    ok "T23a: 坏 commit.gpgsign 环境下 fixture 仍真提交（关签名 + 核对 HEAD）"
+  else
+    bad "T23a: fixture 在坏签名环境下未提交成功（$(cat "$T23HOME/a.out")）"
+  fi
+  # (b) 鉴别力（证明本灯测的是根因，不是空过）：同环境下裸 git 命令必须真失败
+  #     —— 否则 T23a 就没有牙齿（说明坏环境没造出来）。
+  T23BARE="$(mktemp -d)"
+  (
+    cd "$T23BARE" || exit 1
+    HOME="$T23HOME" git init -q
+    printf 'x\n' > f.txt
+    HOME="$T23HOME" git -c user.email=t@t -c user.name=t commit -qm bare >/dev/null 2>&1
+  ) || true
+  if HOME="$T23HOME" git -C "$T23BARE" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    bad "T23b: 坏签名环境没造出来（裸 commit 反而成功）→ T23a 无鉴别力（空转灯）"
+  else
+    ok "T23b: 坏签名环境可复现裸 commit 失败（T23a 有鉴别力，非空转灯）"
+  fi
+  rm -rf "$T23REPO" "$T23BARE" "$T23HOME"
+fi
 
 # ---- 汇总 ----
 echo ""
