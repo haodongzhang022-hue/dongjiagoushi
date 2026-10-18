@@ -1,4 +1,4 @@
-# ADR-0009：dsh 适配作为独立模块（dsh-adapter）随 DSH 新版演进，版本闸门前置、不静默放行
+# ADR-0014：dsh 适配作为独立模块（dsh-adapter）随 DSH 新版演进，版本闸门前置、不静默放行
 
 - 状态：Accepted
 - 决策日期：2026-09

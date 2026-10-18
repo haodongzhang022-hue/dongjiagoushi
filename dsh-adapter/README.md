@@ -3,7 +3,7 @@
 架构师体系 ⇄ **DeepSeek Harness (dsh)** 适配插件（新版 `0.1.6-alpha.2` 兼容）。
 
 > 完整说明见 [`../docs/DSH_ADAPTER.md`](../docs/DSH_ADAPTER.md)；决策见
-> [`../docs/adr/0009-dsh-adapter-new-version.md`](../docs/adr/0009-dsh-adapter-new-version.md)。
+> [`../docs/adr/0014-dsh-adapter-new-version.md`](../docs/adr/0014-dsh-adapter-new-version.md)。
 
 ## 快速使用
 

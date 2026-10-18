@@ -7,4 +7,4 @@ python3 -m dsh_adapter.compat check 0.1.6-alpha.2   # → ok
 python3 -m dsh_adapter.compat matrix                # → 完整兼容矩阵
 ```
 
-模块说明见 `docs/DSH_ADAPTER.md`，决策见 `docs/adr/0009-dsh-adapter-new-version.md`。
+模块说明见 `docs/DSH_ADAPTER.md`，决策见 `docs/adr/0014-dsh-adapter-new-version.md`。

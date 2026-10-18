@@ -3,7 +3,7 @@
 > 面向 DSH（**DeepSeek Harness**）新版（`0.1.6-alpha.2`）的适配模块：把架构师体系
 > `local-agent/` 的能力暴露为 DSH 工具，并把"版本兼容"做成**前置闸门**。
 > 触发：Issue #145「dsh 已经有新版的了，适配一下最新版本……完成适配新版」。
-> 决策记录见 `docs/adr/0009-dsh-adapter-new-version.md`。
+> 决策记录见 `docs/adr/0014-dsh-adapter-new-version.md`。
 
 ---
 
@@ -153,7 +153,7 @@ CNB 平台已有 DSH 生态（`cnpc/dsh` = 官方 CLI 的 NPC、`fuliai/deepseek
 | 产物 | 位置 |
 |------|------|
 | 本模块说明 | `docs/DSH_ADAPTER.md`（本文件） |
-| 决策记录 | `docs/adr/0009-dsh-adapter-new-version.md` |
+| 决策记录 | `docs/adr/0014-dsh-adapter-new-version.md` |
 | 适配插件 | `dsh-adapter/` |
 | 版本矩阵（TS） | `dsh-adapter/src/compat.ts` |
 | 版本矩阵（Python） | `local-agent/dsh_adapter/compat.py` |
