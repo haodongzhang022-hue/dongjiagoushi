@@ -122,6 +122,9 @@ declare -a MODULE_MAP=(
   # ---- 七层深度引擎 ----
   "local-agent/depth/|local-agent/tests/test_depth_engine.sh"
 
+  # ---- 角色名册与派单接入 ----
+  "local-agent/roster/|local-agent/tests/test_roster.sh"
+
   # ---- 派发能力/分发引擎 ----
   "local-agent/dispatch/|local-agent/tests/test_dispatch_ability.sh,local-agent/tests/test_dispatch_engine.sh"
   "local-agent/dispatch_engine.py|local-agent/tests/test_dispatch_engine.sh"
