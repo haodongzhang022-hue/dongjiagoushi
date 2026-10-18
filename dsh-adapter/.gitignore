@@ -1,0 +1,3 @@
+# 构建产物与依赖（lib/ 由 scripts/build.mjs 生成；node_modules 供本地/CI 链接真实 dsh）
+node_modules/
+lib/

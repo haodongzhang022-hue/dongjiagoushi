@@ -48,6 +48,7 @@
 | **规模** | 规模预设 + 3 阶段渐进 | prescale/规模/档位/阶段 | `local-agent/scale/prescale.py` | docs/ENTRY_PRESCALE.md | Issue #41 |
 | **规模** | 秘书层动态扩展机制 | 秘书层/动态扩展/识别/注册/路由/秘书护栏 | `local-agent/scale/secretary_scale.py` | docs/SECRETARY_SCALE.md | Issue #100 决策① |
 | **拓扑** | 融合路由（规模→拓扑）| 拓扑/路由/agile/dag | `local-agent/topology/` | docs/ROUTER.md + FUSION_TOPOLOGY.md | Issue #41 |
+| **适配** | dsh 新版适配（dsh-adapter 独立模块）| dsh新版/适配新版/deepseek harness/cordis/defineTool/bundle patch/版本闸门/装不上 | `dsh-adapter/` + `local-agent/dsh_adapter/compat.py` | docs/DSH_ADAPTER.md | Issue #145 · module dsh-adapter v0.1.0 · ADR-0014-dsh |
 | **流水线** | 小组闭环（DevTeam）| 小组/开发小组/整合 | `local-agent/dev_team.py` | docs/DEV_TEAM.md | Issue #74 |
 | **流水线** | 接线驱动层（dev-team-driver）| 驱动/接线/开发小组 | `local-agent/dev_team_driver.py` | docs/DEV_TEAM.md | Issue #74 |
 | **流水线** | 开发增强拓扑 dev_enhanced | dev_enhanced/8节点 | `topology/topologies.py` | docs/DEV_ENHANCED.md | Issue #74 |
