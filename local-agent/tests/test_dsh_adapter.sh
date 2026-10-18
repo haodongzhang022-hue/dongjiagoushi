@@ -69,33 +69,39 @@ t "CLI: python -m dsh_adapter.compat check 退出码正确" \
   "cd '$ROOT' && $PY -m dsh_adapter.compat check 0.1.6-alpha.2 >/dev/null && $PY -m dsh_adapter.compat matrix >/dev/null"
 
 echo "===== [dsh-adapter] 2. TS 侧兼容层（Node 原生 TS 剥离） ====="
-if command -v node >/dev/null 2>&1; then
-  # node 由 .cnb.yml 在 CI 上显式安装并前置核验（缺则作业直接失败，不静默跳过）；
-  # 本脚本仍保留本地/离线可跑：无 node 时下面整段跳过并显式打印，不假装验过。
+# 门控按**真实能力**判定，不按「有没有 node」（Issue #175）：CI 镜像装到的可能是
+# 发行版 node v20，存在但不支持 `--experimental-strip-types` → 直接 `bad option`。
+# 那种情况要让日志说清"是环境能力不够"，而不是让它冒充"适配没做成"。
+NODE_TS_READY=0
+NODE_NOTE=""
+if ! command -v node >/dev/null 2>&1; then
+  NODE_NOTE="无 node"
+elif ! node --experimental-strip-types -e '' >/dev/null 2>&1; then
+  NODE_NOTE="node $(node --version) 不支持 --experimental-strip-types（需 ≥22.6）"
+else
+  NODE_TS_READY=1
+fi
+if [ "$NODE_TS_READY" = "1" ]; then
   t "TS compat 测试 15 项全绿" "node --experimental-strip-types '$DSH_DIR/tests/compat.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "组合包契约测试 15 项全绿" "node '$DSH_DIR/tests/bundle.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "插件加载测试 9 项全绿" "node --experimental-strip-types '$DSH_DIR/tests/plugin.test.mjs' | tail -1 | grep -q 'fail=0'"
 else
-  echo "  -- 无 node，跳过 TS 侧（CI 环境将安装）"
+  echo "  -- 跳过 TS 侧：${NODE_NOTE}（CI 由 scripts/ci-ensure-node.sh 保证可用）"
 fi
 
 echo "===== [dsh-adapter] 2b. 桥接实际调用（真实 Python 引擎） ====="
-# 三态门控（Issue #175）：① 有 node + 已链接真实 dsh → 真跑桥接 + 真装载探针；
-#   ② 有 node 但未链接 dsh → 只跑桥接实跑（Python 引擎可达）；
-#   ③ **无 node → 显式跳过**（曾漏判：else 分支自称"桥接实跑仍验证"却直接调 node，
-#     上游 python:3.11 镜像无 node → `node: command not found` 被记红，CI 假红）。
-if ! command -v node >/dev/null 2>&1; then
-  echo "  -- 无 node，跳过桥接实跑与真实装载探针（TS/桥接侧未在本环境验证）"
+# 三态门控（Issue #175）：① node 能力就绪 + 已链接真实 dsh → 真跑桥接 + 真装载探针；
+#   ② 能力就绪但未链接 dsh → 只跑桥接实跑（Python 引擎可达）；
+#   ③ node 缺失/太旧 → 显式跳过并打印原因（曾漏判：else 分支自称"桥接实跑仍验证"
+#     却直接调 node → `command not found` / `bad option` 被记成功能缺陷 = CI 假红）。
+if [ "$NODE_TS_READY" != "1" ]; then
+  echo "  -- 跳过桥接实跑与真实装载探针：${NODE_NOTE}（TS/桥接侧未验证）"
 elif [ -e "$DSH_DIR/node_modules/@deepseek-ai/dsh-tools" ]; then
   t "桥接实际调用（dsh_adapter/dev_standard/relay 真跑）" "node --experimental-strip-types '$DSH_DIR/tests/bridge.live.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "真实 defineTool 装载探针（7 工具注册）" "node --experimental-strip-types '$DSH_DIR/tests/real-load.probe.mjs' | tail -1 | grep -q 'REAL-LOAD-OK'"
-elif command -v node >/dev/null 2>&1; then
+else
   echo "  -- 未链接真实 dsh，跳过真实装载探针；桥接实跑仍验证"
   t "桥接实际调用（Python 引擎可达）" "cd '$DSH_DIR' && node --experimental-strip-types tests/bridge.live.test.mjs | tail -1 | grep -q 'fail=0'"
-else
-  # 无 node：显式跳过并打印（.cnb.yml 会在 CI 上装 node，本分支只服务离线/精简环境）。
-  # 不把"环境缺能力"记成"功能有缺陷"，也不假装验过——TS 侧到底跑没跑，日志里看得见。
-  echo "  -- 无 node，跳过桥接实跑（TS 侧未在本环境验证；CI 由 .cnb.yml 装 node 后真跑）"
 fi
 
 echo "===== [dsh-adapter] 3. 组合包契约文件 ====="

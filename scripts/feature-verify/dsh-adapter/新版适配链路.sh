@@ -8,9 +8,10 @@
 # 五要素:
 #   Given   dsh-adapter/（package.json dsh.bundle.patch + cordis.patch.yml +
 #           src/{index,compat,bridge}.ts）+ local-agent/dsh_adapter/compat.py
-#   When    真跑 `bash local-agent/tests/test_dsh_adapter.sh`（18 组信号灯）+
+#   When    真跑 `bash local-agent/tests/test_dsh_adapter.sh`（信号灯全绿，fail=0）+
 #           读产物做语义断言（不只看"文件在"）
-#   Then    1) 信号灯全绿（TS/Python 双端版本矩阵、defineTool 装载探针、桥接实跑）；条数按环境推导：有 node 18 组 / 无 node 13 组（Issue #175）；
+#   Then    1) 信号灯全绿（TS/Python 双端版本矩阵、defineTool 装载探针、桥接实跑）；
+#              前置 Then-0 要求 node 具备原生 TS 剥离能力（≥22.6），否则判红不放过；
 #           2) package.json 真实声明 dsh.bundle.patch（组合包契约，非空壳）；
 #           3) 版本闸门在加载路径上（index.ts 出现 checkVersion + throw，
 #              compat 判定旧版为 incompatible、乱版显式失败）；
@@ -36,8 +37,12 @@ echo "==== [feature-verify] dsh-adapter/新版适配链路 ===="
 # 没有 node 就等于"适配没验过"。环境前提做成**显式红灯**，不留给下游跳过：
 #   - .cnb.yml 已在 CI 上安装 node 并前置核验（缺则作业直接失败），本闸门再兜一层；
 #   - 任何环境缺 node 都判红 → 跳过可见，不拿"跳过"冒充"验过"。
-if command -v node >/dev/null 2>&1; then
-  ok "Then-0: node 可用（$(node --version)）→ TS 侧信号灯可真跑"
+# 判据按**真实能力**：distro node v20 存在但缺 `--experimental-strip-types`，
+# TS 侧同样跑不了（实测 `bad option`）——"有 node"不等于"node 能用"（Issue #175）。
+if command -v node >/dev/null 2>&1 && node --experimental-strip-types -e '' >/dev/null 2>&1; then
+  ok "Then-0: node 可用（$(node --version)，支持原生 TS 剥离）→ TS 侧信号灯可真跑"
+elif command -v node >/dev/null 2>&1; then
+  bad "Then-0: node $(node --version) 不支持 --experimental-strip-types（需 ≥22.6）→ TS 侧无法验证"
 else
   bad "Then-0: 无 node → TS 侧（Cordis/defineTool/加载闸门）无法验证，适配不算做完"
 fi
