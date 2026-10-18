@@ -52,5 +52,21 @@ if [ "$R7" = "1" ]; then ok "check 目标角色(@测试)未命中评审 被拦�
 R8="$(status check "")"
 if [ "$R8" = "1" ]; then ok "check 空文本被拦截"; else bad "空文本未拦截(code=$R8)"; fi
 
+# 9. 漏写 @ 的角色提及（Issue #169 真实故障）→ 必须拦截
+#    用户实际写法 dongdongxiaozu/dongjiagoushi(架构·评审) 少了 @，平台不识别为 NPC 提及
+R9="$(status check --role 架构·评审 "dongdongxiaozu/dongjiagoushi(架构·评审) [触发:架构·评审] 这里唤醒会出错")"
+if [ "$R9" = "1" ]; then ok "check 漏写 @ 的角色提及被拦截（Issue #169）"; else bad "漏写 @ 未拦截(code=$R9)"; fi
+
+# 10. 漏写 @ + @CodeBuddy 兜底（Issue #169 原文形态）→ 必须拦截
+R10="$(status check --role 架构·评审 "dongdongxiaozu/dongjiagoushi(架构·评审) 这里唤醒会出错，是哪里出bug了吗 @CodeBuddy")"
+if [ "$R10" = "1" ]; then ok "check 原文形态(漏@ + @CodeBuddy) 被拦截"; else bad "原文形态未拦截(code=$R10)"; fi
+
+# 11. AGENTS.md 已固化 @ 召唤硬约束（防再犯）
+if grep -q '[@] 召唤必须带' AGENTS.md && grep -q '漏写 `@`' AGENTS.md; then
+  ok "AGENTS.md 固化 @ 召唤必须带 @ 规则"
+else
+  bad "AGENTS.md 缺少 @ 召唤硬约束"
+fi
+
 echo "结果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = "0" ]
