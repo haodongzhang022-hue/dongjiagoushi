@@ -42,6 +42,7 @@
 | [0007-桥接闭环体系内落地](0007-bridge-closed-loop-in-framework.md) | 本地⇄网页桥⇄cnb云端异步开发→本地测试先行，作为体系能力非独立产品 | Accepted |
 | [0008-跨端聚合控制页](0008-dashboard-aggregate-control.md) | 每端一个面板的聚合控制面，不另立 web 服务/产品 | Accepted |
 | [0009-默认真实传输](0009-live-transport-over-mock.md) | 默认走真实 cnb.cool 传输，mock 降为单测/兜底 | Accepted |
+| [0009-dsh适配作为独立模块](0009-dsh-adapter-new-version.md) | dsh 适配独立模块化 + 版本闸门前置（不静默放行），loader 只 import 构建产物 | Accepted |
 | [0010-三宿主真实传输](0010-three-host-real-transport.md) | 本地/网页/云端三宿主同契约真实机制，非 mock 假装 | Accepted |
 | [0011-评审增量上下文+攒批异步](0011-review-incremental-coalesced-cycle.md) | 评审循环走增量上下文+攒批异步，不做同步乒乓逐轮复述/构建 | Accepted |
 | [0012-阶段链门控](0012-stage-chain-gate.md) | 开发→评审→测试走阶段链门控，不让本该串行的环节并行/重复触发 | Accepted |

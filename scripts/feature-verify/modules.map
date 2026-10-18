@@ -41,6 +41,9 @@ peer-closure: local-agent/collab/closure.py: local-agent/collab/(peer|closure|hu
 # 评审双轴必走（角色实现）
 review: local-agent/roles/reviewer.py: local-agent/roles/reviewer\.py
 
+# dsh 新版适配（独立模块 dsh-adapter · Issue #145）
+dsh-adapter: local-agent/tests/test_dsh_adapter.sh: dsh-adapter/|local-agent/dsh_adapter/|local-agent/tests/test_dsh_adapter\.sh|docs/DSH_ADAPTER\.md
+
 # 变更选择器自身（本表 + 主执行器）——证据库自保，改选择器必须跑自身样例
 selector: scripts/feature-verify.sh: scripts/feature-verify\.sh|scripts/feature-verify/modules\.map
 
