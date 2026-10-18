@@ -172,14 +172,14 @@ CREATE TABLE acl (
 CREATE TABLE versions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_loc TEXT NOT NULL,          -- 被版本的实体 loc
-    vno        INTEGER NOT NULL,       -- 版本号（1..n）
+    vno        INTEGER NOT NULL,       -- 主线 1..n；冲突提案用负数编号（-1,-2,…），不推进主线
     payload    TEXT DEFAULT '{}',      -- 该版本快照内容
     author     TEXT DEFAULT '',        -- 谁提交的这版
     branch     TEXT DEFAULT 'main',    -- 分支（多 agent 并行修改用小组分支）
     parent_vno INTEGER DEFAULT 0,      -- 基于哪一版（冲突检测关键）
     status     TEXT DEFAULT 'open',    -- open/merged/conflict/discarded
     created_at TEXT,
-    UNIQUE(entity_loc, vno)
+    UNIQUE(entity_loc, branch, vno)    -- 含 branch：不同分支各自的 vno 空间互不挤占
 );
 ```
 
@@ -188,6 +188,44 @@ CREATE TABLE versions (
 2. 各自在自己的小组 **branch** 上写新版本（`parent_vno = 所基于版本`）；
 3. 提交时**冲突检测**：若 `parent_vno != 主干最新版本` → 判定 `conflict`，提示基于最新版 rebase，不盲目覆盖；
 4. `commits` 负责把多个小组分支**整合**成主线（见下）。
+
+#### 写路径原子性（写时状态中介 · 差距 D 修复）
+
+冲突检测的**有效性**依赖「读 latest → 写新版本」是一个原子步骤——否则两个 agent 都读到
+`latest=3`、都写 `vno=4`，冲突检测形同虚设。落地三件套：
+
+1. **事务包裹**：`update_entity_with_base()` / `update_entity()` 的读-改-写整体进
+   `db.transaction()`（sqlite 下最外层用 `BEGIN IMMEDIATE` 立即取写锁）；
+2. **冲突提案独立编号**：冲突版本写**负数 vno**（`add_conflict_version`），
+   `latest_version()` 只认 `vno>0 AND status!='conflict'` 的主线——
+   **一次冲突不会把该实体永久卡死**，也不抬高主线基准；
+3. **受理闸门直查**：`conflicts()` 按 `status='conflict'` 直查（带 `idx_versions_status`），
+   不走 `versions_of` 的 `vno DESC LIMIT 50` 窗口——主线版本 ≥50 后负数提案不会被截掉而静默丢失。
+
+旧库（旧唯一键 `(entity_loc, vno)`、冲突占正数 vno）由 `data/migrate.py` 幂等迁移，
+并**下沉到 `schema.init_schema()`**：全仓入口只要走建表就都会升级既有库，
+不依赖各自记得先调 `admin.init()`（详见 ADR-0013）。
+
+**热路径纪律（复评 🔴5）**：`init_schema()` 是读热路径的必经点（webui 每请求 /
+gid 每操作 / sentinel / dispatcher…），**迁移检查必须只读**：
+`_run_migrations()` 带**健康库快路径**——M1/M2 标记均已应用即直接返回，
+**不开写事务、不跑 DDL**；只在确有 pending 时才开 `db.transaction()` 取写锁。
+否则已迁移完的库也会每次抢 `BEGIN IMMEDIATE`，把只读语义的操作串行化、
+他人持写锁时被阻塞到 `busy_timeout` 抛 `database is locked`。
+`data-cli migrate --dry-run` 只报告待迁移项、不落写。
+由 `test_data_layer.sh` 第 9 组 + feature-verify `collab/写时状态中介` Then-5 双处锁死。
+
+**远程后端（PG/MySQL）写路径收口（复评 🔴 返工）**：`db.execute()` 在远程后端每次都在
+新连接上另开事务，**无法复用当前事务连接**（真 PG 17.11 实测：事务内 `db.execute(INSERT)`
++ raise → 残留 1 行）。本轮**不实现完整 PG 写路径**（非默认后端、CI 全走 sqlite），
+而是**显式收口**——远程后端在事务内调 `db.execute()` / 嵌套 `db.transaction()` **直接
+fail-loud 抛错**（拒绝静默半工作），事务内一律走 `tx.execute()`；文档「无缝切换」表述
+一并修正为「接口层已抽象、**写路径闭环为跟踪项**」（ADR-0013 跟踪项）。
+
+该 fail-loud 断言依赖 `sqlalchemy`（远程后端适配层）：已声明于
+`local-agent/requirements.txt`，CI 的 feature-verify 作业显式安装并校验
+（装不上即失败，不静默跳过）；脚本内保留环境守卫（无 sqlalchemy 优雅跳过，保本地可跑）。
+三条由 `test_doc_consistency.sh` 锁死，防 CI/本地再次不一致导致闸门假红/假绿。
 
 ### commits 小组整合提交
 
@@ -298,7 +336,8 @@ revoke(principal, loc_pattern, by)
 
 # ④ 版本
 checkout(loc, principal)              # 返回当前版本 + 基线 vno
-update_entity(loc, payload, principal, branch='main')  # 写新版本（冲突检测）
+update_entity(loc, payload, principal, branch='main')  # 写新版本（冲突检测，事务内）
+update_entity_with_base(loc, payload, base_vno, ...)  # 带基线写入（并发冲突检测核心）
 versions_of(loc)                      # 版本历史
 
 # ⑤ 小组提交
@@ -319,6 +358,9 @@ conflicts()                           # 待处理冲突清单
 | 多 agent 并发修改冲突检测 | 基于旧版本提交 → 标 conflict | ✅ 通过 |
 | 小组提交整合 + 最小模块粒度 | commit + merge_commit | ✅ 通过 |
 | 不破坏既有六表数据层 | test_data_layer.sh + 新 collab 测试 | ✅ 全绿 |
+| 并发写不产生重复 vno（写时状态中介） | 16 线程同基提交 + feature-verify `collab/写时状态中介` | ✅ ok=1 / conflict=15 / err=0，主线 vno 无重复 |
+| 旧库经任意建表入口自动升级 | 造旧库（旧唯一键+冲突占正数）→ 只走 `schema.init_schema()` | ✅ 约束升级 / 主线可写 / 冲突不丢 |
+| 健康库读热路径不被写锁阻塞 | 另连接持写锁 → 纯读 gid / `init_schema()` / `migrate()` | ✅ 0.00s 返回（快路径不开写事务） |
 
 **测试信号灯**：新增 `local-agent/tests/test_collab.sh`，未通过即红灯阻塞不放行。
 

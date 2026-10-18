@@ -22,7 +22,7 @@ import os
 # 使 `from data import ...` 可导入（把本文件上级目录加进 path）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data import admin, schema  # noqa: E402
+from data import admin, migrate, schema  # noqa: E402
 
 
 def main():
@@ -31,6 +31,9 @@ def main():
 
     sub.add_parser("init", help="建表 + 登记数据管理员")
     sub.add_parser("tables", help="查看当前表")
+    pm = sub.add_parser("migrate", help="执行库结构/数据迁移（幂等，可重放）")
+    pm.add_argument("--dry-run", action="store_true",
+                    help="只报告待迁移项，不落任何写（大库迁移前先看代价）")
 
     # agent
     pa = sub.add_parser("agent", help="agent 档案")
@@ -73,6 +76,8 @@ def main():
 
     if args.cmd == "init":
         print(json.dumps(admin.init(), ensure_ascii=False, indent=2))
+    elif args.cmd == "migrate":
+        print(json.dumps(migrate.migrate(dry_run=args.dry_run), ensure_ascii=False, indent=2))
     elif args.cmd == "tables":
         print("tables:", schema.list_tables())
     elif args.cmd == "agent":

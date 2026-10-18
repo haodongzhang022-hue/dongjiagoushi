@@ -15,7 +15,9 @@
   | stats         | 聚合指标快照                   | 进度统计：并发度/队列积压/活跃数等 |
 
 表结构在 SQLite 与 PostgreSQL / MySQL 上保持一致（类型用通用类型，
-SQLite 会宽松兼容），同一套 schema 在不同后端无缝切换。
+SQLite 会宽松兼容），同一套 schema 在接口层共用；**但 PG 写路径端到端尚未闭环**
+（方言 DDL / 参数风格 / 事务内 `db.execute` 连接复用，见 ADR-0013 跟踪项），
+切 PG 前须先收口该跟踪项，勿按「无缝」预期直接上生产。
 
 SQL 方言说明：
   - 自增主键：SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`、PG/MySQL `SERIAL/BIGINT AUTO_INCREMENT`
@@ -24,6 +26,31 @@ SQL 方言说明：
   - TEXT 类型各库通用；布尔用 INTEGER(0/1) 兼容 SQLite，PG 映射 boolean。
 """
 from . import db
+
+# versions 表 DDL 单独导出：迁移要「建新表 → 拷数据 → 换名」，需要能精确引用
+# 这张表的建表/建索引语句。此前靠 `"CREATE TABLE IF NOT EXISTS versions " in ddl`
+# 之类字符串匹配，DDL 一改格式（换行/多空格）就静默失配（迁移抛 no such table）。
+VERSIONS_TABLE_DDL = """
+    CREATE TABLE IF NOT EXISTS versions (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_loc    TEXT NOT NULL,
+        vno           INTEGER NOT NULL,         -- 主线 1..n；冲突提案用负数编号（-1,-2,…），不推进主线
+        payload       TEXT DEFAULT '{}',
+        author        TEXT DEFAULT '',
+        branch        TEXT DEFAULT 'main',
+        parent_vno    INTEGER DEFAULT 0,        -- 基于哪一版（冲突检测关键）
+        status        TEXT DEFAULT 'open',      -- open/merged/conflict/discarded
+        created_at    TEXT,
+        UNIQUE(entity_loc, branch, vno)
+    )
+    """
+
+VERSIONS_INDEX_DDL = [
+    "CREATE INDEX IF NOT EXISTS idx_versions_loc ON versions(entity_loc)",
+    "CREATE INDEX IF NOT EXISTS idx_versions_branch ON versions(branch)",
+    # 冲突清单按 status 直查（受理闸门高频消费），全量扫描在大库上会拖慢
+    "CREATE INDEX IF NOT EXISTS idx_versions_status ON versions(status)",
+]
 
 # 通用 DDL（SQLite 方言，PG/MySQL 在 init_schema 内做最小改写）
 SCHEMA_DDL = [
@@ -161,22 +188,8 @@ SCHEMA_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_acl_principal ON acl(principal)",
     "CREATE INDEX IF NOT EXISTS idx_acl_pattern ON acl(loc_pattern)",
     # ---- 10. 版本实体（协作运作机制 · ④ 版本整合，冲突检测）----
-    """
-    CREATE TABLE IF NOT EXISTS versions (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        entity_loc    TEXT NOT NULL,
-        vno           INTEGER NOT NULL,         -- 1..n
-        payload       TEXT DEFAULT '{}',
-        author        TEXT DEFAULT '',
-        branch        TEXT DEFAULT 'main',
-        parent_vno    INTEGER DEFAULT 0,        -- 基于哪一版（冲突检测关键）
-        status        TEXT DEFAULT 'open',      -- open/merged/conflict/discarded
-        created_at    TEXT,
-        UNIQUE(entity_loc, vno)
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_versions_loc ON versions(entity_loc)",
-    "CREATE INDEX IF NOT EXISTS idx_versions_branch ON versions(branch)",
+    VERSIONS_TABLE_DDL,
+    *VERSIONS_INDEX_DDL,
     # ---- 11. 小组整合提交（协作运作机制 · ⑤ 小组提交）----
     """
     CREATE TABLE IF NOT EXISTS commits (
@@ -575,9 +588,20 @@ SCHEMA_DDL = [
 
 
 def init_schema():
-    """初始化全部数据表（幂等，可重复调用）。"""
+    """初始化全部数据表（幂等，可重复调用）。
+
+    建表后**自动跑迁移**：迁移下沉到本函数，全仓 11 处入口（dispatcher×5 /
+    gid / sentinel / dev_team / admin）只要走 `init_schema()` 就都会升级既有库，
+    不再依赖各自记得先调 `admin.init()`——否则旧库经 dispatcher 等入口写入
+    仍会撞旧唯一键（差距 H 未修）。
+    """
+    # 延迟导入：migrate 依赖 schema（建表/探测），模块级互相 import 会成环
+    from . import migrate
+    # 旧 versions 表先升到位：否则下面 idx_versions_branch 会撞 no such column
+    migrate.ensure_versions_upgraded()
     for ddl in SCHEMA_DDL:
         db.execute(ddl)
+    migrate.migrate()
     return list_tables()
 
 

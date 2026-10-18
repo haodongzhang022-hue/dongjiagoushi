@@ -188,17 +188,18 @@ def update_entity(loc, payload, principal="data_admin", branch="main"):
     ent = store.get_entity(loc)
     if ent is None:
         raise KeyError(f"[collab] 不存在 {loc}")
-    latest = store.latest_version(loc, branch)
-    base = latest if latest > 0 else ent["version"]
-    new_vno = base + 1
-    # 写入新版本
-    store.add_version(loc, new_vno, payload, author=principal, branch=branch,
-                      parent_vno=base, status="open")
-    # 同步主实体指针
-    store.update_entity_payload(loc, payload, new_vno)
-    admin.record_event(principal, "entity_updated",
-                       {"loc": loc, "vno": new_vno, "branch": branch})
-    return {"loc": loc, "vno": new_vno, "base": base}
+    with db.transaction():
+        latest = store.latest_version(loc, branch)
+        base = latest if latest > 0 else ent["version"]
+        new_vno = base + 1
+        # 写入新版本
+        store.add_version(loc, new_vno, payload, author=principal, branch=branch,
+                          parent_vno=base, status="open")
+        # 同步主实体指针
+        store.update_entity_payload(loc, payload, new_vno)
+        admin.record_event(principal, "entity_updated",
+                           {"loc": loc, "vno": new_vno, "branch": branch})
+        return {"loc": loc, "vno": new_vno, "base": base}
 
 
 def update_entity_with_base(loc, payload, base_vno, principal="data_admin",
@@ -209,22 +210,24 @@ def update_entity_with_base(loc, payload, base_vno, principal="data_admin",
     ent = store.get_entity(loc)
     if ent is None:
         raise KeyError(f"[collab] 不存在 {loc}")
-    latest = store.latest_version(loc, branch)
-    if latest > base_vno:
-        # 主干已前进：基于过期版本 → 冲突
-        store.add_version(loc, latest + 1, payload, author=principal, branch=branch,
-                          parent_vno=base_vno, status="conflict")
-        admin.record_event(principal, "version_conflict",
-                           {"loc": loc, "base": base_vno, "latest": latest})
-        return {"loc": loc, "vno": latest + 1, "base": base_vno, "latest": latest,
-                "status": "conflict"}
-    new_vno = latest + 1
-    store.add_version(loc, new_vno, payload, author=principal, branch=branch,
-                      parent_vno=base_vno, status="open")
-    store.update_entity_payload(loc, payload, new_vno)
-    admin.record_event(principal, "entity_updated",
-                       {"loc": loc, "vno": new_vno, "base": base_vno})
-    return {"loc": loc, "vno": new_vno, "base": base_vno, "status": "ok"}
+    # 读 latest → 写新版本 必须在同一事务内（消除 TOCTOU 竞态）
+    with db.transaction():
+        latest = store.latest_version(loc, branch)
+        if latest > base_vno:
+            # 主干已前进：基于过期版本 → 冲突（独立编号，不推进主线）
+            cv = store.add_conflict_version(loc, payload, author=principal,
+                                            branch=branch, parent_vno=base_vno)
+            admin.record_event(principal, "version_conflict",
+                               {"loc": loc, "base": base_vno, "latest": latest})
+            return {"loc": loc, "vno": cv["vno"], "base": base_vno, "latest": latest,
+                    "status": "conflict"}
+        new_vno = latest + 1
+        store.add_version(loc, new_vno, payload, author=principal, branch=branch,
+                          parent_vno=base_vno, status="open")
+        store.update_entity_payload(loc, payload, new_vno)
+        admin.record_event(principal, "entity_updated",
+                           {"loc": loc, "vno": new_vno, "base": base_vno})
+        return {"loc": loc, "vno": new_vno, "base": base_vno, "status": "ok"}
 
 
 def versions_of(loc):
@@ -276,12 +279,13 @@ def commits(status=None, group_loc=None):
 
 
 def conflicts():
-    """待处理冲突清单（含冲突版本与冲突提交）。"""
-    conf_versions = []
-    for e in store.list_entities():
-        for v in store.versions_of(e["loc"]):
-            if v["status"] == "conflict":
-                conf_versions.append(v)
+    """待处理冲突清单（含冲突版本与冲突提交）。
+
+    直接按 status 直查，不走 versions_of 的「按 vno DESC 限 50」窗口：
+    冲突提案用负数编号，在 DESC 里排最后，一旦主线版本 ≥50 就会被窗口截掉，
+    导致冲突静默丢失（DD-4 受理闸门拿不到提案）。
+    """
+    conf_versions = store.conflict_versions()
     conf_commits = store.commits(status="conflict")
     return {"version_conflicts": conf_versions, "commit_conflicts": conf_commits}
 

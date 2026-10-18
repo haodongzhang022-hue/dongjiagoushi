@@ -82,11 +82,11 @@
 |----|------|------|
 | **SQLite 承载 2500 agent 档案** | ✅ 可行 | 实测 `test_data_layer.sh` 场景7：2500 agent 登记 + 2500 消息 + 进度事件全落库通过 |
 | **事务/索引支持** | ✅ 可行 | SQLite WAL + busy_timeout，短事务 + 索引支撑并发读，满足单机数百级 |
-| **2500 级强一致生产** | ⚠️ 有风险（需分布式） | 单机 SQLite 有写锁上限；生产 2500 级建议切 PostgreSQL（`DB_BACKEND=postgresql://...`），同一套 schema/repository 无缝切换 |
+| **2500 级强一致生产** | ⚠️ 有风险（需分布式） | 单机 SQLite 有写锁上限；生产 2500 级建议切 PostgreSQL（`DB_BACKEND=postgresql://...`）——**接口层已抽象为同一套 schema/repository，但 PG 写路径端到端尚未闭环**（方言 DDL/参数风格/事务内 `db.execute` 连接复用，见 ADR-0013 跟踪项）；切 PG 前须先收口该跟踪项，勿按「无缝」预期直接上生产 |
 | **消息管线可回放** | ✅ 可行 | messages 表带 msg_id/status/ts，支持 topic 回放（审计/复盘） |
 | **数据管理员角色** | ✅ 可行 | `roles/data_admin.py` 内置注册，输出契约明确，被 @ 可召唤 |
 
-**规避方案**：默认 SQLite 零依赖开箱即用；规模声明 `spec.resource_estimate()` 判定超 `LOCAL_CAP`（默认 64）时建议切换 PostgreSQL/Redis 后端，同一套接口无缝迁移。
+**规避方案**：默认 SQLite 零依赖开箱即用；规模声明 `spec.resource_estimate()` 判定超 `LOCAL_CAP`（默认 64）时建议切换 PostgreSQL/Redis 后端——**接口层同一套、调用方无需改**，但 **PG 写路径闭环仍为跟踪项**（见 ADR-0013），切换前先收口。
 
 ---
 

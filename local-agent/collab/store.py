@@ -193,25 +193,60 @@ def add_version(entity_loc, vno, payload, author="", branch="main", parent_vno=0
 
 
 def latest_version(entity_loc, branch="main"):
-    """取某实体某分支的当前最新版本号。"""
+    """取某实体某分支的当前**主线有效**版本号（不含 conflict 提案）。
+
+    conflict 版本只是待处理的越权提案，不推进主线，因此不参与取最大。
+    """
     row = db.query_one(
-        "SELECT MAX(vno) AS v FROM versions WHERE entity_loc=? AND branch=?",
+        "SELECT MAX(vno) AS v FROM versions "
+        "WHERE entity_loc=? AND branch=? AND status!='conflict' AND vno>0",
         (entity_loc, branch),
     )
     return row["v"] if row and row["v"] else 0
 
 
-def get_version(entity_loc, vno):
-    row = db.query_one("SELECT * FROM versions WHERE entity_loc=? AND vno=?",
-                       (entity_loc, vno))
+def add_conflict_version(entity_loc, payload, author="", branch="main", parent_vno=0):
+    """记录一个冲突提案（占用独立负数编号空间，不污染主线 vno）。"""
+    row = db.query_one(
+        "SELECT MIN(vno) AS v FROM versions WHERE entity_loc=? AND branch=? AND vno<0",
+        (entity_loc, branch),
+    )
+    vno = (row["v"] - 1) if row and row["v"] else -1
+    return add_version(entity_loc, vno, payload, author=author, branch=branch,
+                       parent_vno=parent_vno, status="conflict")
+
+
+def get_version(entity_loc, vno, branch="main"):
+    """取某分支下的指定版本（约束含 branch 后，vno 单值不再唯一）。"""
+    row = db.query_one(
+        "SELECT * FROM versions WHERE entity_loc=? AND vno=? AND branch=?",
+        (entity_loc, vno, branch))
     if row:
         row["payload"] = _loads(row.get("payload"))
     return dict(row) if row else None
 
 
-def set_version_status(entity_loc, vno, status):
-    db.execute("UPDATE versions SET status=? WHERE entity_loc=? AND vno=?",
-               (status, entity_loc, vno))
+def set_version_status(entity_loc, vno, status, branch="main"):
+    """改某分支下指定版本的状态（不带 branch 会误改其他分支的同号版本）。"""
+    db.execute(
+        "UPDATE versions SET status=? WHERE entity_loc=? AND vno=? AND branch=?",
+        (status, entity_loc, vno, branch))
+
+
+def conflict_versions(entity_loc=None):
+    """按 status 直查全部冲突提案（不受 vno 排序窗口影响）。"""
+    sql = "SELECT * FROM versions WHERE status='conflict'"
+    params = ()
+    if entity_loc:
+        sql += " AND entity_loc=?"
+        params = (entity_loc,)
+    sql += " ORDER BY entity_loc, vno DESC"
+    out = []
+    for r in db.query(sql, params):
+        d = dict(r)
+        d["payload"] = _loads(d.get("payload"))
+        out.append(d)
+    return out
 
 
 def versions_of(entity_loc, limit=50):

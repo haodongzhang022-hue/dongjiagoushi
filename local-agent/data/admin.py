@@ -21,12 +21,17 @@
   5. **数据管理员唯一负责**：数据写入/校验/统计/归档由本角色统一执行，
      人类/总师只通过二级信息（看板/统计）俯瞰，不直接触碰原始库。
 """
-from . import db, schema, repository as repo
+from . import db, migrate, schema, repository as repo
 
 
 def init():
-    """初始化数据库：建表 + 登记数据管理员档案。"""
+    """初始化数据库：建表 + 迁移既有库 + 登记数据管理员档案。
+
+    迁移是幂等的：新库为空时整体 skip；旧库则补齐 versions 唯一键与冲突编号。
+    """
+    # init_schema() 内部已跑迁移；此处只取结果用于汇报，不重复执行
     tables = schema.init_schema()
+    migration = migrate.last_result()
     repo.upsert_agent(
         agent_id="data_admin",
         role="架构·数据管理员",
@@ -34,7 +39,7 @@ def init():
         status="active",
         spec={"backend": db.backend(), "tables": tables},
     )
-    return {"backend": db.backend(), "tables": tables}
+    return {"backend": db.backend(), "tables": tables, "migration": migration}
 
 
 # ---------- 内容存档 ----------

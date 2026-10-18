@@ -592,13 +592,28 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 - **层级空间**：`spaces` 父子树（根→小组→子小组→…）+ 共享空间归属。
 - **权限空间（ACL）**：声明「哪个 AI 可访问哪个任务位置/哪个记忆位置」（`r|w|rw|none`），未授权拒绝读写。
 - **版本整合 + 小组提交**：`versions` 版本实体 + 基于父版本的冲突检测；`commits` 以**小组为单位**按**最小模块粒度**统一向上整合交付，避免多 agent 改同一对象冲突、Issue 合并不失效。
+- **写路径原子化（写时状态中介 · ADR-0013）**：「读 latest → 写新版本」必须**整体在一个事务内**
+  （sqlite 最外层 `BEGIN IMMEDIATE`），否则并发写是「撞键报错」而非「确定性判冲突」；
+  冲突提案写**负数 vno**、`latest_version()` 只认主线（`vno>0 AND status!='conflict'`）——
+  一次冲突不得把实体永久卡死；`conflicts()` 按 `status` 直查，不走 `vno DESC` 窗口（防主线 ≥50 后冲突静默丢失）。
+  旧库迁移下沉到 `schema.init_schema()`（全仓入口建表即升级，不依赖各自记得调 `admin.init()`），
+  迁移与 `schema_migrations` 标记**同事务**（不留「已标记未建表」半写）。
+  **热路径只读**：`migrate()` 先只读探测 pending，**只在确有 pending 时才开事务**——
+  `init_schema()` 在 webui（每请求）/ gid（每操作）高频调用，无条件取写锁会把只读操作串行化/打挂。
+  **远程后端写路径显式收口（复评返工）**：`db.execute` 在 PG/MySQL 下每次另开连接事务、
+  无法复用当前事务连接（真 PG 实测事务内 `db.execute` + raise 残留 1 行）——故远程后端在
+  事务内调 `db.execute()` / 嵌套 `db.transaction()` **直接 fail-loud 抛错**（拒绝静默半工作），
+  事务内一律走 `tx.execute()`；**真 PG 写路径闭环为跟踪项**（ADR-0013），文档「无缝切换」表述
+  一并修正为「接口层已抽象、写路径闭环为跟踪项」，不让假象留白。
+  信号灯：`local-agent/tests/test_collab.sh` 第 7 组 + `test_data_layer.sh` 第 8/9/10 组 +
+  feature-verify `collab/写时状态中介`（真跑 16 线程并发 + 真造旧库 + fail-loud 收口）。
 
 - **数据先行**：每个 agent / 任务 / 消息在进入业务前，先由数据管理员登记入库。
 - **统一口径**：所有指标统计以 `stats` / `progress` 为准，禁止各 agent 自造口径。
 - **可回溯留痕**：协作产出必须写 `archives`，进度变化必须写 `progress`，禁止无痕产出。
 - **消息可回放**：消息管线（`messages`）可重放，供审计复盘，不吞异常。
 - **唯一负责**：数据写入 / 校验 / 统计 / 归档由「架构·数据管理员」统一执行，人类 / 总师只通过 `progress_report` / `task_overview` / `snapshot_stats` 二级信息俯瞰。
-- **后端可伸缩**：默认 SQLite 零依赖；生产 / 2500 级切 PostgreSQL（`DB_BACKEND`），同一套表结构与接口无缝迁移。
+- **后端可伸缩**：默认 SQLite 零依赖；生产 / 2500 级切 PostgreSQL（`DB_BACKEND`），表结构与仓储接口已抽象为同一套，**但 PG 写路径端到端尚未闭环**（见 ADR-0013 跟踪项），勿按「无缝」预期直接上生产。
 
 ## 领域文档 + 追踪问题纪律（Issue #98 · 借鉴 mattpocock/skills · 固定规则）
 

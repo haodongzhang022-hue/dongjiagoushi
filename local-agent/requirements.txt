@@ -3,3 +3,7 @@
 # openai>=1.0.0
 # pyyaml>=6.0
 pyyaml>=6.0
+# 远程后端（PG/MySQL）适配层与对应冒烟测试依赖（ADR-0013 跟踪项）：
+# data/db.py 的 sqlalchemy 分支 + test_data_layer 第10组 / feature-verify Then-6 需要。
+# 默认 sqlite 后端零依赖，无需本项。
+sqlalchemy>=2.0

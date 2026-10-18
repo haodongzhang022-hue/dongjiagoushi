@@ -60,6 +60,16 @@ contains() {
   fi
 }
 
+absent() {
+  local name="$1" haystack="$2" needle="$3"
+  if [[ "$haystack" != *"$needle"* ]]; then
+    PASS=$((PASS+1)); echo "  ✅ $name"
+  else
+    FAIL=$((FAIL+1)); FAILED_ITEMS+=("[$name] 不应再含: $needle")
+    echo "  ❌ $name（不应再含: $needle）"
+  fi
+}
+
 file_exists() {
   local name="$1" file="$2"
   if [ -f "$file" ]; then
@@ -237,6 +247,34 @@ contains "CAPABILITY_INDEX 登记评审段调度器" "$(cat docs/CAPABILITY_INDE
 file_exists "ADR-0011 存在（评审效率决策）" "docs/adr/0011-review-incremental-coalesced-cycle.md"
 file_exists "ADR-0012 存在（阶段链门控决策）" "docs/adr/0012-stage-chain-gate.md"
 contains "CAPABILITY_INDEX 登记阶段链门控" "$(cat docs/CAPABILITY_INDEX.md)" "stage-gate"
+# 八、写时状态中介（写路径原子化 + 迁移下沉 · ADR-0013）文档-实现一致性
+echo ""
+echo "▶ 八、写时状态中介（写路径原子化）一致性"
+file_exists "ADR-0013 存在（写路径原子化决策）" "docs/adr/0013-write-path-atomic-and-migration-sink.md"
+contains "ADR README 登记 ADR-0013" "$(cat docs/adr/README.md)" "0013-write-path-atomic"
+contains "CAPABILITY_INDEX 登记写时状态中介" "$(cat docs/CAPABILITY_INDEX.md)" "写时状态中介"
+contains "AGENTS.md 登记写路径原子化规则" "$(cat AGENTS.md)" "写路径原子化"
+contains "COLLAB_ENGINE 记录唯一键含 branch" "$(cat docs/COLLAB_ENGINE.md)" "UNIQUE(entity_loc, branch, vno)"
+contains "COLLAB_ENGINE 记录负数冲突编号语义" "$(cat docs/COLLAB_ENGINE.md)" "冲突提案用负数编号"
+file_exists "迁移模块存在" "local-agent/data/migrate.py"
+file_exists "写时状态中介 feature-verify 存在" "scripts/feature-verify/collab/写时状态中介.sh"
+# 复评返工：远程写路径显式收口（fail-loud）+ 假绿收口 + PG 闭环跟踪项
+contains "ADR-0013 记录 PG 写路径闭环为跟踪项" "$(cat docs/adr/0013-write-path-atomic-and-migration-sink.md)" "跟踪项"
+contains "db.py 修正无缝切换表述（写路径闭环为跟踪项）" "$(cat local-agent/data/db.py)" "跟踪项"
+contains "db.py 远程事务内 db.execute fail-loud" "$(cat local-agent/data/db.py)" "远程后端的事务内不支持 db.execute()"
+contains "DATA_ARCHITECTURE 暴露 PG 写路径未闭环" "$(cat docs/DATA_ARCHITECTURE.md)" "PG 写路径端到端尚未闭环"
+contains "test_data_layer 组10 假绿收口为适配层冒烟" "$(cat local-agent/tests/test_data_layer.sh)" "适配层冒烟（sqlite 方言"
+# CI 依赖接线防静默退化：feature-verify Then-6 依赖 sqlalchemy；若 CI 不装，该信号灯
+# 在云端变空转（跳过）→ 与本地不一致。锁死「依赖声明在 requirements + CI 显式安装」。
+contains "requirements 声明 sqlalchemy 依赖项（非注释，Then-6 依赖）" "$(grep -E '^sqlalchemy' local-agent/requirements.txt)" "sqlalchemy"
+contains "CI feature-verify 作业显式安装依赖（不静默跳过）" "$(cat .cnb.yml)" 'python3 -c "import sqlalchemy'
+contains "feature-verify Then-6 带环境守卫（无 sqlalchemy 优雅跳过）" "$(cat scripts/feature-verify/collab/写时状态中介.sh)" "Then-6 跳过：未装 sqlalchemy"
+# 🟡 收口：「无缝迁移/切换」残留清零——文档不得再给「零成本切 PG」的假象
+# （db.py / DATA_ARCHITECTURE 已改口，AGENTS.md:616 与 schema.py:18 两处残留一并收）。
+absent "AGENTS.md 不再称「同一套表结构与接口无缝迁移」" "$(cat AGENTS.md)" "同一套表结构与接口无缝迁移"
+absent "schema.py 不再称「同一套 schema 在不同后端无缝切换」" "$(cat local-agent/data/schema.py)" "在不同后端无缝切换"
+contains "AGENTS.md 暴露 PG 写路径未闭环（勿按无缝预期）" "$(cat AGENTS.md)" "但 PG 写路径端到端尚未闭环"
+contains "schema.py 暴露 PG 写路径未闭环（勿按无缝预期）" "$(cat local-agent/data/schema.py)" "但 PG 写路径端到端尚未闭环"
 contains "AGENTS.md 登记阶段链门控规则" "$(cat AGENTS.md)" "阶段链门控"
 file_exists "阶段链门控引擎存在" "local-agent/review_cycle/gate.py"
 file_exists "阶段链唯一事实源存在" "local-agent/review_cycle/stage_spec.py"
