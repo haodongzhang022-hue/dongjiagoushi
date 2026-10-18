@@ -10,13 +10,18 @@
 #   6. 旧版→新版判据（0.1.2 判 incompatible，0.1.6-alpha.2 判 ok）
 set -e
 cd "$(dirname "$0")/.."
+# 失败落点显式化（Issue #175）：CI 上 `t()` 把每项输出重定向到临时文件，若脚本因
+# `set -e` 在项外提前退出，失败证据就进不了日志 → 只看到 pass=N fail=1 无法定位。
+# 这里在退出时打印落点，并把最近一项的输出回显（不吞错误原文）。
+_last_item=""
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "[dsh-adapter] 异常退出 rc=$rc（最后执行项: ${_last_item:-无}）"; fi' EXIT
 PY=python3
 ROOT="$(pwd)"
 DSH_DIR="$ROOT/../dsh-adapter"
 [ -d "$DSH_DIR" ] || DSH_DIR="$ROOT/dsh-adapter"
 
 pass=0; fail=0
-t() { local d="$1"; shift; if eval "$*" >/tmp/dshad_out.txt 2>&1; then
+t() { local d="$1"; shift; _last_item="$d"; if eval "$*" >/tmp/dshad_out.txt 2>&1; then
   echo "  OK $d"; pass=$((pass+1))
 else
   echo "  XX $d"; cat /tmp/dshad_out.txt; fail=$((fail+1))
@@ -65,6 +70,8 @@ t "CLI: python -m dsh_adapter.compat check 退出码正确" \
 
 echo "===== [dsh-adapter] 2. TS 侧兼容层（Node 原生 TS 剥离） ====="
 if command -v node >/dev/null 2>&1; then
+  # node 由 .cnb.yml 在 CI 上显式安装并前置核验（缺则作业直接失败，不静默跳过）；
+  # 本脚本仍保留本地/离线可跑：无 node 时下面整段跳过并显式打印，不假装验过。
   t "TS compat 测试 15 项全绿" "node --experimental-strip-types '$DSH_DIR/tests/compat.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "组合包契约测试 15 项全绿" "node '$DSH_DIR/tests/bundle.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "插件加载测试 9 项全绿" "node --experimental-strip-types '$DSH_DIR/tests/plugin.test.mjs' | tail -1 | grep -q 'fail=0'"
@@ -82,9 +89,13 @@ if ! command -v node >/dev/null 2>&1; then
 elif [ -e "$DSH_DIR/node_modules/@deepseek-ai/dsh-tools" ]; then
   t "桥接实际调用（dsh_adapter/dev_standard/relay 真跑）" "node --experimental-strip-types '$DSH_DIR/tests/bridge.live.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "真实 defineTool 装载探针（7 工具注册）" "node --experimental-strip-types '$DSH_DIR/tests/real-load.probe.mjs' | tail -1 | grep -q 'REAL-LOAD-OK'"
-else
-  echo "  -- 未链接真实 dsh（CI 将装入），跳过真实装载探针；桥接实跑仍验证"
+elif command -v node >/dev/null 2>&1; then
+  echo "  -- 未链接真实 dsh，跳过真实装载探针；桥接实跑仍验证"
   t "桥接实际调用（Python 引擎可达）" "cd '$DSH_DIR' && node --experimental-strip-types tests/bridge.live.test.mjs | tail -1 | grep -q 'fail=0'"
+else
+  # 无 node：显式跳过并打印（.cnb.yml 会在 CI 上装 node，本分支只服务离线/精简环境）。
+  # 不把"环境缺能力"记成"功能有缺陷"，也不假装验过——TS 侧到底跑没跑，日志里看得见。
+  echo "  -- 无 node，跳过桥接实跑（TS 侧未在本环境验证；CI 由 .cnb.yml 装 node 后真跑）"
 fi
 
 echo "===== [dsh-adapter] 3. 组合包契约文件 ====="

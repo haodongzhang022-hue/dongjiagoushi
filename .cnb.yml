@@ -83,6 +83,15 @@ main:
             echo "==== 变更范围感知测试（pull_request · IncrementalSelector） ===="
             echo "只跑受影响的测试模块，避免全量 43 脚本造成 CPU 浪费"
             echo ""
+            # node 显式安装并核验（Issue #175）：dsh-adapter 的 TS 侧信号灯依赖 node，
+            # 镜像（python:3.11）默认没有 → 过去 4 项静默跳过，CI 上 pass 数漂移、
+            # 真红落在跳过项外看不见。宁可真装真跑，也不留空转信号灯。
+            if ! command -v node >/dev/null 2>&1; then
+              (apt-get update -qq && apt-get install -y -qq nodejs npm) >/dev/null 2>&1 || true
+            fi
+            command -v node >/dev/null 2>&1 \
+              || { echo "  ❌ node 不可用 → dsh-adapter TS 侧信号灯会空转，拒绝静默跳过"; exit 1; }
+            echo "  ✅ node $(node --version)"
             pip install -q -r local-agent/requirements.txt 2>/dev/null || true
             python3 - <<'PY'
             import sys, subprocess
@@ -162,6 +171,14 @@ main:
             bash scripts/feature-verify.sh --check-map || exit 1
             echo "  ✅ 映射防退化断言通过（无未映射模块）"
             echo ""
+            # node 显式安装并核验（Issue #175）：dsh-adapter 功能校验要真跑 TS 侧信号灯，
+            # 镜像默认无 node → 缺 node 即本作业失败，不允许"没跑也算过"。
+            if ! command -v node >/dev/null 2>&1; then
+              (apt-get update -qq && apt-get install -y -qq nodejs npm) >/dev/null 2>&1 || true
+            fi
+            command -v node >/dev/null 2>&1 \
+              || { echo "  ❌ node 不可用 → dsh-adapter 功能校验无法真跑（拒绝假绿）"; exit 1; }
+            echo "  ✅ node $(node --version)"
             # 依赖显式安装：feature-verify 的 collab/写时状态中介 Then-6（远程写路径
             # fail-loud）依赖 sqlalchemy。**不静默跳过**——装不上即本作业失败，
             # 否则该信号灯在 CI 上变空转（假绿），与本仓「信号灯非空转」纪律相悖。

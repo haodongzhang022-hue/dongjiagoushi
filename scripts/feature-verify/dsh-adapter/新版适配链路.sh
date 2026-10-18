@@ -31,21 +31,32 @@ bad(){ FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 echo "==== [feature-verify] dsh-adapter/新版适配链路 ===="
 
-# ---------- Then-1：信号灯真跑（条数按环境推导，Issue #175 假红收口） ----------
-# 信号灯条数**取决于环境是否具备 node**：有 node 跑满 18 组；无 node（如 CI 的
-# python:3.11 镜像）显式跳过 TS/桥接侧 → 13 组。硬编码 18 会把合法跳过判成红
-# （CI 假红之一）。故：fail 必须 0，pass 须等于本环境应得条数（13 / 18）。
-if command -v node >/dev/null 2>&1; then EXPECT_PASS=18; else EXPECT_PASS=13; fi
+# ---------- 0. 前置：node 必须可用（Issue #175） ----------
+# 新版本适配的核心判据有一半在 TS 侧（Cordis apply / defineTool / 加载闸门），
+# 没有 node 就等于"适配没验过"。环境前提做成**显式红灯**，不留给下游跳过：
+#   - .cnb.yml 已在 CI 上安装 node 并前置核验（缺则作业直接失败），本闸门再兜一层；
+#   - 任何环境缺 node 都判红 → 跳过可见，不拿"跳过"冒充"验过"。
+if command -v node >/dev/null 2>&1; then
+  ok "Then-0: node 可用（$(node --version)）→ TS 侧信号灯可真跑"
+else
+  bad "Then-0: 无 node → TS 侧（Cordis/defineTool/加载闸门）无法验证，适配不算做完"
+fi
+
+# ---------- Then-1：信号灯真跑 ----------
+# 判据用「exit 0 且 fail=0」而不是硬编码条数：条数随判据增删漂移，
+# 硬编码会把"测试变多了"也判成红，并把真实失败原因藏成"条数不符"（Issue #175）。
 if OUT="$(bash local-agent/tests/test_dsh_adapter.sh 2>&1)"; then
-  if echo "$OUT" | grep -qE "pass=${EXPECT_PASS} fail=0"; then
-    ok "Then-1: 信号灯全绿（pass=${EXPECT_PASS} fail=0，node=$([ "$EXPECT_PASS" = 18 ] && echo 有 || echo 无)）"
+  if echo "$OUT" | grep -qE 'pass=[0-9]+ fail=0'; then
+    ok "Then-1: 信号灯全绿（$(echo "$OUT" | grep -oE 'pass=[0-9]+ fail=0' | tail -1)）"
   else
-    bad "Then-1: 信号灯条数不符（期望 pass=${EXPECT_PASS} fail=0）"
+    bad "Then-1: 信号灯汇总行不是 fail=0"
     echo "$OUT" | tail -5 | sed 's/^/      /'
   fi
 else
+  # 输出全文回显（不 tail 截断）：红在靠前的项时 tail 只留尾部会丢证据，
+  # 留下"只看到 pass=N fail=1 定不了位"的空窗（Issue #175 实测）。
   bad "Then-1: local-agent/tests/test_dsh_adapter.sh 红 → 新版适配未达成"
-  echo "$OUT" | tail -12 | sed 's/^/      /'
+  echo "$OUT" | sed 's/^/      /'
 fi
 
 # ---------- Then-2：组合包契约真实声明 ----------
