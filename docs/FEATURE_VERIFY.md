@@ -33,19 +33,96 @@
 | Evidence | 可核验产物——跑完落到哪个可 grep/可查的语义产物 |
 | Why 功能级 | 说明纯 grep/通畅抓不到、本脚本如何真实判"功能做完" |
 
+## 模块→实现源映射（唯一事实源 · Issue #162）
+`--changed` 按变更选测受影响模块，映射**只在一处维护** = `scripts/feature-verify/modules.map`
+（不再散落 `case "$srcmod"` 硬编码——原缺口：7 个证据模块只覆盖 3 个，未覆盖模块的实现源
+变更**静默漏跑**，`exit 0` 假绿）。
+
+格式（每行一条，`:` 分隔）：
+```
+[pending: ]<evidence-module>: <代表性实现源路径（自测探针）>: <实现源选择 ERE>
+```
+`pending:` 前缀 = **显式「待落地前置登记」**（证据目录暂由外部 PR 落地，如跨 PR 并发）。
+- 新增 feature-verify 模块必须在 `modules.map` 登记，否则 `--check-map` 判 RED；
+- 实现源路径变更须同步改该行 ERE，否则探针失配 → RED；
+- 同一实现源命中多模块时全部选测（宁多跑，不漏跑）。
+
+防退化断言（有牙齿）：
+```bash
+bash scripts/feature-verify.sh --check-map   # 未映射 / 映射失效 / 未标记目录缺失 → RED
+```
+① 证据库每模块须已登记 ② 探针路径须真实存在 ③ 模拟"改该模块实现源"须真被选中
+④ 映射行指向暂无证据目录的模块 → **按是否显式 `pending:` 标记分流**（复评 T9）；
+⑤ 目录已落地仍挂 `pending:` → ⚠️ 提示转正式登记。
+CI 的 `feature-verify gate` 先跑它再跑 `--changed`。
+
+**僵尸容忍为何必须收窄到显式 `pending:`（复评 T9）**：真正的漏跑方向是
+①「目录有、映射无」（那才 RED）；而"映射有、目录无"必须区分两种成因——
+- **跨 PR 中间态**（A PR 先登记映射、B PR 后落证据脚本）：正常顺序，须容忍，
+  否则先合"登记映射"的 PR、再合"落脚本"的 PR，后合那个一落 main 就让主线判红；
+- **证据目录被误删/改名/映射残留**：属 #162 要消灭的**静默假绿**形状（实现源变更
+  既不被选测、也不落"未映射"告警 → `exit 0`），绝不能放过。
+
+旧行为对两者一律 ⚠️ 放过 = 分不清成因、重开假绿。故容忍**只给显式标记**：
+`pending: collab: …`（脚本由 PR #161 落地）才 ⚠️ 不阻断；**未标记**的目录缺失一律 RED，
+且 `--changed` 命中该模块实现源时**硬失败**（不再「无可选脚本 → 通过」）。
+本 PR 已用 `pending: collab:` 显式预登记，并在 selector 样例
+Then-9/10/11 + `test_feature_verify` T16/T20/T21 双向锁死该行为。
+
+### 合并态假红修复（Issue #162 合并态 · 登记判据 pending 感知）
+跨 PR 两态下「证据库模块是否已登记」的判据必须 **pending 感知**：`^<m>:` 精确匹配会把
+`pending: collab:`（#163 先合、collab 证据目录尚由 #161 落地的中间态）判成"未登记"→
+**合并态假红**；而 `T16d`/`Then-10a` 又要求该 `pending:` 行存在 → 两条断言在合并态互斥。
+收口为 `^(<m>|pending: <m>):`（`map_registered()` / selector `Then-2` 同源），并让
+`T16d`/`Then-10a` **按 `collab/` 目录是否已落地分流**——目录未落地要求 `pending:` 预登记、
+目录已落地要求已登记（去/留前缀皆绿）。四态自洽：`#163-only`、`main+#163`、
+`main+#161+#163`、以及 `#161` 合并后**去前缀的清理态**，皆 🟢；删映射 / 未标记目录缺失仍 RED。
+
+### 变更范围回退链（防假绿 · Issue #162 复评 R1 + 🟡欠选）
+`--changed` 确定变更范围时按**两级回退链**逐个来源尝试，判据是 **`git diff` 真成功
+（`rc=0`）**，不是"来源存在"：
+
+- **可靠来源**（给出**真实 PR 范围**）：注入变量 `FEATURE_VERIFY_CHANGED_FILES` →
+  `CNB_PULL_REQUEST_TARGET_SHA` → `main...HEAD`。diff 成功即采信（成功且为空 = 权威
+  "确无变更"）。
+- **收窄来源**（只覆盖**最后一个提交**）：`HEAD~1..HEAD` → 多提交 PR 会欠选（漏跑），
+  故**不静默收窄**，标记 `CHANGED_NARROWED=1` 转保守全量。
+
+**为什么以 `rc=0` 为准**：旧实现只要来源被尝试就 `resolved=1`（"尝试"当"成功"），
+于是「diff 失败但来源存在」→ `resolved=1` → 报「变更范围为空 → 跳过」→ `exit 0`
+**假绿**。真实 CI feature-verify gate 必设 `CNB_COMMIT`，旧实现在此路径恒假绿
+（`CNB_COMMIT` 分支条件 `HEAD = CNB_COMMIT` 在 CI 恒成立，随后 `HEAD~1..HEAD` 在浅
+克隆/单提交下失败、`out` 为空，但 `resolved=1` 已无条件写入）。
+
+**保守全量触发**：回退链全部落空（浅克隆单提交、target SHA 不可解析且无 `main`）**或**
+仅剩收窄来源（可能欠选）→ 置 `CHANGED_KNOWN=0` → **保守全量回归**（不漏跑优先），
+绝不跳过。回归断言见 `tests/test_feature_verify.sh` T14（含**带 `CNB_COMMIT`** 场景
+T14c/T14d）+ T14e（收窄不欠选）+ T15（回退链不断）+ 功能级
+`selector/映射全覆盖.sh` Then-7a/7b（含 `CNB_COMMIT` 场景）。
+
+映射表 ERE 读取用**安全 trim**（只去首尾空白、不解释反斜杠）——旧实现用 `xargs` 会吞掉
+ERE 里的 `\.` 转义，把 `scripts/x\.py` 变成 `scripts/x.py`（`.` 变通配，映射失真）。
+回归断言见 `selector/映射全覆盖.sh` Then-8。
+
+**测试前提钉死（复评 R2）**：T14/T14e/T15/Then-7 的 fixture 用 `git init -q -b work`
+**显式指定非 `main` 分支名**，不依赖环境 `init.defaultBranch`——默认 `main` 的环境
+（git ≥2.28 常见配置）下 fixture 会自带可解析 `main`，前提失效、测的不是目标路径。
+
 ## 目录与命令
 ```
 scripts/feature-verify/
+  modules.map                     # ⭐ 模块→实现源映射（唯一事实源 · Issue #162）
   README.md                       # 使用说明 + 写脚本铁律
   _templates/verify.template.sh   # 新功能骨架（复制改名）
   <module>/<功能名>.sh             # 一处一功能（module=实现域）
-scripts/feature-verify.sh          # 主执行器（all/module/feature/changed/list）
+scripts/feature-verify.sh          # 主执行器（all/module/feature/changed/check-map/list）
 scripts/feature-regress.sh         # 回归诊断（--all 语义别名）
 ```
 ```bash
 bash scripts/feature-verify.sh --all             # 全量回归
 bash scripts/feature-verify.sh --changed         # 按变更自动选测（PR 门禁用）
 bash scripts/feature-verify.sh --list            # 证据库盘点
+bash scripts/feature-verify.sh --check-map       # 映射防退化断言（未映射/失效即 RED）
 bash scripts/feature-regress.sh [--module X]     # 回归诊断定位坏功能
 ```
 
@@ -67,3 +144,29 @@ bash scripts/feature-regress.sh [--module X]     # 回归诊断定位坏功能
   "Why 功能级"说明。
 - 与 change-aware 按变更选测需协调复用 → `feature-verify.sh --changed` 复用既有
   change-aware 思路（git diff 定变更范围 → 按模块映射选测）。
+
+## 云端真跑本自测（复评 🟡3 / 残留 B · 🔴必修 1 已清零）
+`tests/test_feature_verify.sh` 已登记 `local-agent/hybrid/registry.json`。云端 CI 的变更感知
+链路是 `.cnb.yml` → `IncrementalSelector`（`local-agent/hybrid/selector.py`，读 `registry.json`）。
+
+**承重 covers（逐条真验，删任一条 → T12b 必红）**：
+
+| 变更文件 | 含义 |
+|---|---|
+| `scripts/feature-verify.sh` | 闸门本体 |
+| `scripts/feature-verify/modules.map` | 模块→实现源映射 |
+| `local-agent/hybrid/selector.py` | 选择器本体 |
+| `scripts/feature-regress.sh` | 回归诊断 |
+| `scripts/change-aware-test.sh` | 变更感知手工入口 |
+| `docs/FEATURE_VERIFY.md` | 模块文档 |
+| `.cnb.yml` | CI 接线 |
+
+**选择器过滤口径（🔴必修 1）**：`selector.py` 原先 `not f.endswith(".sh")` 把所有 `.sh` 变更
+一并过滤，导致 `covers: ["scripts/xxx.sh"]` 成为永不命中的**死条目**——改闸门本体在云端不选中本自测。
+已收窄为**只过滤测试脚本自身**（`tests/` / `local-agent/tests/` 前缀），`scripts/*.sh` 作为源码按
+covers 真触发；"改测试脚本自身不触发其他测试"的原有语义保留。
+
+- 断言：T12a（registry 登记）；T12b **逐条真验**——期望承重 covers 钉死在测试里，每条单独喂
+  `IncrementalSelector.select([cf])` 断言命中本自测，**删任一条 → 必红**；无 python3 则计
+  **SKIP**（不计入 PASS/FAIL），显式暴露"本机未验链路"，不假装通过。
+- `scripts/change-aware-test.sh` 的手工入口映射保留，供本地/手动执行，**不再作为唯一判据**。

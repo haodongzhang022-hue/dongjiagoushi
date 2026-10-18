@@ -187,8 +187,14 @@ class IncrementalSelector(object):
         """
         if not changed_files:
             return []
-        # 过滤掉测试脚本自身（.sh 变更不触发测试）
-        source_files = [f for f in changed_files if not f.endswith(".sh")]
+        # 只过滤「测试脚本自身」——改测试脚本本身不触发其他测试；
+        # 但 scripts/*.sh（闸门/回归/选择器脚本等）是**源码**，其变更须按 covers 真触发测试。
+        # 旧口径 `not f.endswith(".sh")` 把所有 .sh 一并误杀，导致 registry 里
+        # `covers: ["scripts/xxx.sh"]` 成为永不命中的死条目（Issue #162 复评 🔴必修 1）。
+        source_files = [
+            f for f in changed_files
+            if not (f.startswith("tests/") or f.startswith("local-agent/tests/"))
+        ]
         direct = set()
         for sf in source_files:
             direct.update(self._find_by_source(sf))

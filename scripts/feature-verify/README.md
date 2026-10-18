@@ -14,9 +14,34 @@
 ```
 scripts/feature-verify/
   README.md                    # 本说明
+  modules.map                  # ⭐ 模块→实现源映射（唯一事实源 · Issue #162）
   _templates/verify.template.sh # 新功能校验脚本骨架（复制改名）
   <module>/<功能名>.sh          # 一处一功能，module=实现域，功能名可感知
 ```
+
+## 模块→实现源映射（唯一事实源 · Issue #162）
+`--changed` 要按变更选测受影响模块，就需要"模块 → 实现源路径"的映射。该映射
+**只在一处维护** = `modules.map`（不再散落 `case "$srcmod"` 硬编码）：
+
+```
+<evidence-module>: <代表性实现源路径（自测探针）>: <实现源选择 ERE>
+```
+
+- **新增 feature-verify 模块**：在 `modules.map` 加一行，否则 `--check-map` 判 RED。
+- **实现源路径变了**：同步改该行 ERE，否则探针失配 → `--check-map` 判 RED。
+- **同一实现源命中多个模块**：全部选测（宁多跑，不漏跑）。
+
+防退化断言（有牙齿）：
+```bash
+bash scripts/feature-verify.sh --check-map
+```
+它做五件事：① 证据库每个模块必须已登记（未映射即 RED）② 探针路径必须真实存在
+（映射过期即 RED）③ 模拟"改该模块实现源"必须真被选中（映射失效即 RED）
+④ 映射行指向暂无证据目录的模块 → **按是否显式 `pending:` 标记分流**（复评 T9）：
+`pending:` 前缀（显式待落地前置登记，如跨 PR 由他 PR 落脚本）→ ⚠️ 不阻断；
+**未标记**的目录缺失（误删/改名/残留僵尸）→ ❌ RED。⑤ 目录已落地仍挂 `pending:` → ⚠️ 提示
+转正式登记（收窄容忍面）。CI 的 `feature-verify gate` 会先跑它再跑 `--changed`。
+
 
 ## 五要素（每份脚本头部必须写清，机器可读）
 1. **Given**   前提 / 前置（需要什么才能跑）

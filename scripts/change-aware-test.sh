@@ -161,6 +161,11 @@ declare -a MODULE_MAP=(
   "local-agent/gid.py|local-agent/tests/test_ops_sim.sh"
   "local-agent/ops.py|local-agent/tests/test_ops_sim.sh"
 
+  # ---- feature-verify 选择器/证据库（Issue #162）：映射/选择器/自测改动须跑功能级自测 ----
+  "scripts/feature-verify|tests/test_feature_verify.sh"
+  "scripts/feature-verify.sh|tests/test_feature_verify.sh"
+  "scripts/feature-regress.sh|tests/test_feature_verify.sh"
+
   # ---- 测试脚本自身变更 → 兜底核心测试 ----
   "tests/|tests/test_architect_system.sh,tests/test_doc_consistency.sh,tests/test_mini_e2e.sh"
   "local-agent/tests/|local-agent/tests/test_local_agent.sh,tests/test_architect_system.sh"

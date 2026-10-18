@@ -688,6 +688,22 @@
       "cpu_cost_est": 1.8,
       "time_est": 6.0,
       "kind": "cpu-dense"
+    },
+    "tests/test_feature_verify.sh": {
+      "name": "test_feature_verify",
+      "covers": [
+        "scripts/feature-verify.sh",
+        "scripts/feature-verify/modules.map",
+        "local-agent/hybrid/selector.py",
+        "scripts/feature-regress.sh",
+        "scripts/change-aware-test.sh",
+        "docs/FEATURE_VERIFY.md",
+        ".cnb.yml"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 1.2,
+      "time_est": 7.0,
+      "kind": "cpu-dense"
     }
   }
 }
