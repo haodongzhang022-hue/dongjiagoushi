@@ -220,6 +220,88 @@ schema.init_schema()   # 缺列库若没先升表，这里就撞 no such column:
 assert ("entity_loc", "branch", "vno") in migrate._unique_cols("versions")
 assert not ({"branch", "status"} - migrate._columns("versions")), "缺列未补齐"
 print("  ✅ 更旧的库（缺 branch/status 列）经 init_schema 先升表再建索引，不崩")
+
+# (5) 形态断言：唯一键**已含 branch**、但**缺 status 列**（手工改库 / 第三方库形态）
+#     旧判据只看唯一键 → 判「无需迁移」跳过，而 init_schema 的 idx_versions_status
+#     建索引照样撞 no such column 崩在入口。这里直接造该形态验判据。
+p4 = os.path.join(tempfile.mkdtemp(), "branchkey_nostatus.db")
+os.environ["DB_PATH"] = p4
+importlib.reload(db)
+c = sqlite3.connect(p4)
+c.executescript("""
+CREATE TABLE versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_loc TEXT NOT NULL,
+    branch TEXT NOT NULL DEFAULT 'main',
+    vno INTEGER NOT NULL, payload TEXT DEFAULT '{}',
+    author TEXT DEFAULT '', parent_vno INTEGER DEFAULT 0, created_at TEXT,
+    UNIQUE(entity_loc, branch, vno)
+);
+INSERT INTO versions (entity_loc, branch, vno, payload) VALUES ('loc://task.h/h', 'main', 1, '{}');
+""")
+c.commit(); c.close()
+assert ("entity_loc", "branch", "vno") in migrate._unique_cols("versions"), "前置：唯一键应已含 branch"
+assert "status" not in migrate._columns("versions"), "前置：应缺 status 列"
+assert migrate.needs_m1() is True, "唯一键含 branch 但缺 status 列 → 应判需迁移（否则入口建索引崩溃）"
+schema.init_schema()   # 未判需迁移则这里撞 no such column: status
+assert not ({"branch", "status"} - migrate._columns("versions")), "缺列未补齐"
+assert ("entity_loc", "branch", "vno") in migrate._unique_cols("versions"), "重建后唯一键丢失 branch 维度"
+row = db.query("SELECT branch, vno, payload FROM versions WHERE entity_loc='loc://task.h/h'")
+assert row == [{"branch": "main", "vno": 1, "payload": "{}"}], "重建未保留既有分支版本行：%r" % (row,)
+print("  ✅ 唯一键含 branch、缺 status 列的库：needs_m1 判需迁移 → init_schema 补齐不崩、数据保留")
+EOF
+
+echo "===== [data] 8b. tx_depth 遗弃路径兜底归零（非 with + 中途异常）====="
+$PY - <<'EOF'
+import os, sqlite3, tempfile
+
+p = os.path.join(tempfile.mkdtemp(), "abandon.db")
+os.environ["DB_PATH"] = p
+from data import db, schema
+
+schema.init_schema()
+db.execute("CREATE TABLE IF NOT EXISTS t (a int)")
+db.execute("INSERT INTO t (a) VALUES (0)")          # 已提交基线
+
+def visible():
+    """**另开连接**看真实落库状态（本连接可见 ≠ 已提交）。"""
+    c = sqlite3.connect(p); n = c.execute("SELECT count(*) FROM t").fetchone()[0]; c.close()
+    return n
+
+# (1) 遗弃路径：非 with 用法 + 中途异常，Transaction 对象连 __exit__ 都没跑。
+#     先造「内层正常收尾、外层被丢弃」的形态（单层遗弃时帧还在、语义上像内层，
+#     属不可判定的一次性代价，见 db._reclaim_abandoned_tx 说明）。
+def nest_then_abandon():
+    outer = db.transaction()          # depth 1（外层）
+    inner = db.transaction()          # depth 2（内层，不被 with 管理）
+    inner._finish("commit")           # 内层按帧收尾：只摘帧、不退计数（交外层）
+    raise KeyboardInterrupt("外层被丢弃：既不 with 也不 commit/rollback")
+
+
+try:
+    nest_then_abandon()
+except KeyboardInterrupt:
+    pass
+# 此刻：depth=1 但存活帧=0 —— 典型遗弃形态（外层连接仍处显式事务、数据未落库）
+assert db._depth() == 1, "前置：遗弃后计数应残留 1，实为 %r" % db._depth()
+assert db.is_in_tx(), "前置：遗弃对象应留下悬空 sqlite 事务"
+assert visible() == 1, "前置：外层遗弃后其写不应已提交（实见 %d 行）" % visible()
+# 最强形态：连帧都被清掉、计数仍残留（旧版静默丢写的原始场景）——直接构造
+db._tx_stack().clear()
+assert db._depth() == 1 and db._tx_stack() == [], "前置：帧已清、计数残留"
+
+# (2) 使用点兜底：污染后**下一次** transaction() 必须自愈并真落库
+with db.transaction() as t2:
+    t2.execute("INSERT INTO t (a) VALUES (2)")
+assert visible() == 2, "遗弃后 with 事务写静默丢失（外部可见 %d 行，期望 2）" % visible()
+assert db._depth() == 0, "兜底后计数未归零：%r" % (db._depth(),)
+
+# (3) 未污染不得误清：计数与存活帧一致时兜底必须是 no-op（否则最外层 commit 被跳过）
+with db.transaction() as t3:
+    assert db._reclaim_abandoned_tx(db.connect()) is False, "活跃事务被误判为遗弃（会丢最外层 commit）"
+    t3.execute("INSERT INTO t (a) VALUES (3)")
+assert db._depth() == 0 and visible() == 3, "误清后写丢失：depth=%r rows=%d" % (db._depth(), visible())
+print("  ✅ 遗弃路径（非 with + 中途异常）后 tx_depth 归零且写不丢；活跃事务不被误清")
 EOF
 
 echo "===== [data] 9. 读热路径 · 健康库 init_schema / gid 不抢写锁 ====="
@@ -305,9 +387,27 @@ import importlib
 importlib.reload(db)
 eng = db.connect()
 # 显式断言真实方言：名为 pg 分支、实跑 sqlite —— 把「假绿」暴露在测试里而非藏起来
+# 牙口：不止「本连接 dialect 是 sqlite」，还要证明**整组确实跑在 sqlite 后端上**
+# （DB_BACKEND=postgresql 但 DB_URL=sqlite://）——把两者一起钉，改任一侧都 RED。
+# 牙口：把「本组跑在什么方言上」变成后续断言的**入参**（运行时构件，非纯文本）
+# ——真方言不是 sqlite（例如哪天真接了 PG）时探针为空，整组直接失败；
+# 「名 pg 实 sqlite」的假绿形态也一并钉死，不靠"删掉这行照样绿"。
 assert eng.dialect.name == "sqlite", (
-    "本组只冒烟 sqlalchemy 适配层（sqlite 方言）；真 PG 语义未验证，"
-    "需要真 PG 请另开跟踪项（ADR-0013）")
+    "只有 sqlite 方言被冒烟验证过；真方言=%r 请另开跟踪项（ADR-0013）" % (eng.dialect.name,))
+_DIALECT_PROBE = {"sqlite": "适配层冒烟（sqlite 方言 · PG 语义未验证）"}.get(eng.dialect.name)
+assert _DIALECT_PROBE, (
+    "本组只冒烟 sqlalchemy 适配层（sqlite 方言）；真方言=%r 语义未验证，"
+    "需要真 PG 请另开跟踪项（ADR-0013）" % (eng.dialect.name,))
+assert db.is_remote() and db.backend() == "postgresql", (
+    "本组必须挂在远程分支上冒烟（否则测的是 sqlite 原生路径，等于没测适配层）："
+    "backend=%r remote=%r" % (db.backend(), db.is_remote()))
+assert db.is_remote() and db.backend() == "postgresql", (
+    "本组必须挂在远程分支上冒烟（否则测的是 sqlite 原生路径，等于没测适配层）："
+    "backend=%r remote=%r" % (db.backend(), db.is_remote()))
+assert str(eng.url).startswith("sqlite:"), (
+    "本组 URL 必须是 sqlite://（名 pg 实 sqlite 的假绿形态要显式暴露）：%s" % (eng.url,))
+_engine_klass = type(eng).__module__ + "." + type(eng).__name__
+assert "sqlalchemy" in _engine_klass, "适配层必须真走 sqlalchemy Engine：%s" % _engine_klass
 db.execute("CREATE TABLE IF NOT EXISTS t (a int)")
 tx = db.transaction(); tx.execute("INSERT INTO t (a) VALUES (1)"); tx.commit()
 assert db.query("SELECT * FROM t") == [{"a": 1}]
@@ -331,6 +431,18 @@ try:
 except RuntimeError as e:
     assert "事务内" in str(e), e
 assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
+
+# 适配层 API 形状的**真牙齿**：非 with 用法的 commit/rollback 必须真的落库/回滚，
+# 而不是"没抛 AttributeError 就算过"（旧断言只调 tx.commit() 不查结果，删掉
+# `_SQLA_Tx._finish` 里的 ctx.__exit__ 仍绿；本段改查真实落库状态）。
+tx5 = db.transaction(); tx5.execute("INSERT INTO t (a) VALUES (5)"); tx5.commit()
+assert db.query("SELECT a FROM t ORDER BY a") == [{"a": 1}, {"a": 3}, {"a": 5}], \
+    "非 with 的 commit() 未真落库（适配层收尾丢失 ctx.__exit__）"
+tx6 = db.transaction(); tx6.execute("INSERT INTO t (a) VALUES (6)"); tx6.rollback()
+assert db.query("SELECT a FROM t ORDER BY a") == [{"a": 1}, {"a": 3}, {"a": 5}], \
+    "非 with 的 rollback() 未真回滚（适配层用异常退出 ctx 的分支失效）"
+assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
+
 # 远程不支持嵌套事务（会取新连接另开事务）→ 显式拒绝
 try:
     with db.transaction():
@@ -340,7 +452,7 @@ try:
 except RuntimeError as e:
     assert "嵌套" in str(e), e
 assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
-print("  ✅ sqlalchemy 适配层冒烟（sqlite 方言）+ 事务内 db.execute/嵌套 fail-loud 全通过")
+print("  ✅ " + _DIALECT_PROBE + " + 事务内 db.execute/嵌套 fail-loud 全通过")
 EOF
 
 echo "===== 全部 data 层测试通过 ====="

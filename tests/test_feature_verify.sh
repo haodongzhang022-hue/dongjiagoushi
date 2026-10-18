@@ -291,6 +291,42 @@ PYSEL
 else
   skip "T12b: 本机无 python3 → 跳过逐条真验（链路可达性未在本机验证，不计入 PASS）"
 fi
+# ③ 死条目扫描（Issue #165 🟡5）：registry 每一条 covers 必须**字面存在**，
+#    或能被双向前缀归一化**真命中本测试**。两条都不成立 = 永不命中的死条目 → RED。
+#    （历史形态：`topology/router.py` 裸路径 / `embedding/` 目录名——靠归一化侥幸命中，
+#      但路径本身是假的，读表的人以为它是文件，映射一改就静默失配。）
+if command -v python3 >/dev/null 2>&1; then
+  DEAD_OUT="$(python3 - <<'PYDEAD' 2>&1
+import json, os, sys
+sys.path.insert(0, 'local-agent')
+from hybrid.selector import IncrementalSelector
+s = IncrementalSelector(root_dir='.')
+reg = json.load(open('local-agent/hybrid/registry.json', encoding='utf-8'))
+dead = []
+for test, info in reg['tests'].items():
+    for cov in info.get('covers', []):
+        path = cov.rstrip('/')
+        if os.path.exists(path):
+            continue                       # ① 字面存在 = 活
+        # ② 路径本身不存在时，「归一化能命中自己」是**同义反复**（自比较必然相等），
+        #    拿它当判据会永远绿（本断言首版即栽在这）。改判「能否命中**其他**测试」：
+        #    能命中共用该实现源的别的测试 = 这条路径确实指向真实实现（如
+        #    `embedding/` 被 test_memory_store 也覆盖）；连别人都不命中 = 死条目。
+        others = [t for t in s._find_by_source(path) if t != test]
+        if others:
+            continue
+        dead.append(test + ' -> ' + cov)
+print('DEAD:' + ','.join(dead) if dead else 'OK')
+PYDEAD
+)"
+  case "$DEAD_OUT" in
+    OK) ok "T12d: registry 无死 covers 条目（字面存在 或 归一化命中其他测试）" ;;
+    DEAD:*) bad "T12d: registry 存在死 covers 条目（${DEAD_OUT#DEAD:}）→ 永不命中，映射失真" ;;
+    *) bad "T12d: 死条目扫描异常（$DEAD_OUT）" ;;
+  esac
+else
+  skip "T12d: 本机无 python3 → 跳过死条目扫描（不计入 PASS）"
+fi
 # ③ 手工入口映射仍在（本地/手动执行场景，非 CI 主链路）
 grep -q "scripts/feature-verify|tests/test_feature_verify.sh" scripts/change-aware-test.sh \
   && ok "T12c: change-aware 手工入口映射保留（本地/手动执行用）" \

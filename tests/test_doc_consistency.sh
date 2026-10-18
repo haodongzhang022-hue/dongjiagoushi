@@ -276,10 +276,21 @@ file_exists "迁移模块存在" "local-agent/data/migrate.py"
 file_exists "写时状态中介 feature-verify 存在" "scripts/feature-verify/collab/写时状态中介.sh"
 # 复评返工：远程写路径显式收口（fail-loud）+ 假绿收口 + PG 闭环跟踪项
 contains "ADR-0013 记录 PG 写路径闭环为跟踪项" "$(cat docs/adr/0013-write-path-atomic-and-migration-sink.md)" "跟踪项"
+# 口径锁死（Issue #165 🟡4）：feature-verify 的 Then 段实为 Then-1~6（含 1b/2b/5b 与 Then-6），
+# ADR 写「Then-1~5」是漏数；同时锁「遗弃事务兜底」这条新决策必须出现在 ADR 里。
+contains "ADR-0013 Then 口径为 Then-1~6（非 Then-1~5）" "$(grep 'collab/写时状态中介' docs/adr/0013-write-path-atomic-and-migration-sink.md)" "Then-1~6"
+absent "ADR-0013 不再写旧口径 Then-1~5" "$(cat docs/adr/0013-write-path-atomic-and-migration-sink.md)" "（Then-1~5）"
+contains "ADR-0013 记录遗弃事务兜底决策" "$(cat docs/adr/0013-write-path-atomic-and-migration-sink.md)" "遗弃事务兜底"
 contains "db.py 修正无缝切换表述（写路径闭环为跟踪项）" "$(cat local-agent/data/db.py)" "跟踪项"
 contains "db.py 远程事务内 db.execute fail-loud" "$(cat local-agent/data/db.py)" "远程后端的事务内不支持 db.execute()"
 contains "DATA_ARCHITECTURE 暴露 PG 写路径未闭环" "$(cat docs/DATA_ARCHITECTURE.md)" "PG 写路径端到端尚未闭环"
 contains "test_data_layer 组10 假绿收口为适配层冒烟" "$(cat local-agent/tests/test_data_layer.sh)" "适配层冒烟（sqlite 方言"
+# 组10 方言断言加牙（Issue #165 🟡3）：删掉 `eng.dialect.name` 断言三套件仍绿 → 无牙。
+# 锁两件事：① 断言本体还在（真的取 dialect.name 参与判断）；② 它**被后续输出消费**
+# （`_DIALECT_PROBE` 进 print），不是孤零零一行「删了也无感」的装饰。
+contains "组10 方言断言仍在（查 eng.dialect.name）" "$(cat local-agent/tests/test_data_layer.sh)" 'assert eng.dialect.name == "sqlite"'
+contains "组10 方言断言有牙（探针被后续输出消费）" "$(cat local-agent/tests/test_data_layer.sh)" "_DIALECT_PROBE"
+contains "组10 输出由探针驱动（删断言即失去输出来源）" "$(cat local-agent/tests/test_data_layer.sh)" 'print("  ✅ " + _DIALECT_PROBE' 
 # CI 依赖接线防静默退化：feature-verify Then-6 依赖 sqlalchemy；若 CI 不装，该信号灯
 # 在云端变空转（跳过）→ 与本地不一致。锁死「依赖声明在 requirements + CI 显式安装」。
 contains "requirements 声明 sqlalchemy 依赖项（非注释，Then-6 依赖）" "$(grep -E '^sqlalchemy' local-agent/requirements.txt)" "sqlalchemy"

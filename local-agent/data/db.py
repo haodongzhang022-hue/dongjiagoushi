@@ -109,6 +109,44 @@ def _depth():
     return getattr(_thread_local, "tx_depth", 0)
 
 
+def _tx_stack():
+    """本线程存活的事务对象 id 栈（自底向外；空 = 当前没有存活的事务对象）。"""
+    stack = getattr(_thread_local, "tx_objs", None)
+    if stack is None:
+        stack = []
+        _thread_local.tx_objs = stack
+    return stack
+
+
+def _drop_tx_frame(tx):
+    """事务收尾时把自己的登记摘掉（幂等；不在栈上则无副作用）。"""
+    stack = _tx_stack()
+    try:
+        stack.remove(id(tx))
+    except ValueError:
+        pass
+
+
+def is_in_tx(conn=None):
+    """`conn` 是否处于一个**由我们显式 `BEGIN` 开启、尚未结束**的事务（sqlite）。
+
+    **不要直接用 `conn.in_transaction`**：CPython 的 sqlite3（`in_transaction` 只读）
+    在 `isolation_level=''` 下自己开隐式事务，**没显式 `BEGIN` 时它也为 True**（实测）
+    ——拿它当判据会把正常状态误判成「遗弃」，还会在驱动报错时把 `tx_depth` 清成 0，
+    反过来让最外层事务跳过 commit（静默丢写）。故用只读队列自测：
+    `BEGIN IMMEDIATE` 成功且随后 `ROLLBACK`，说明此前无显式事务。
+    """
+    if DB_BACKEND in ("postgresql", "mysql"):
+        return False
+    conn = conn if conn is not None else connect()
+    try:
+        conn.execute("BEGIN")            # 不带 IMMEDIATE：不抢写锁，只探"能否开事务"
+    except sqlite3.OperationalError:
+        return True                      # 已有显式事务（cannot start a transaction ...）
+    conn.execute("ROLLBACK")
+    return False
+
+
 def execute(sql, params=()):
     """执行一条写语句（insert/update/delete），返回受影响行数。
 
@@ -157,6 +195,38 @@ def query_one(sql, params=()):
     return rows[0] if rows else None
 
 
+def _reclaim_abandoned_tx(conn):
+    """遗弃路径兜底：把「事务对象已不存在、但计数没归零」的残留计数收回。
+
+    **为什么需要**：`tx_depth` 是纯软件计数。`tx = db.transaction()` 之后若既不
+    `with` 也不 commit/rollback（中途异常把对象丢了、外层只 `except: pass`），
+    计数就永久留在 1。此后 `transaction()` 以为「已在外层事务」而**跳过
+    `BEGIN IMMEDIATE`**，新一轮事务是空壳 → 写溢出到上一轮遗弃的悬空事务里，
+    调用方 `with` 正常退出也**不落库，写被静默丢失**（`test_data_layer` 组 8b 实测：
+    外部连接可见行数不增）。
+
+    判据是「**存活的事务对象层数**」，不是猜连接状态：`transaction()` 建对象时把
+    `id(tx)` 压入 `_thread_local.tx_objs`，收尾（commit/rollback/`__exit__`）时弹出。
+    计数器 > 存活层数 = 有层被遗弃，此时把计数收敛到存活层数（遗弃层视作已收尾，
+    其悬空事务由随后的最外层 `BEGIN IMMEDIATE` 收编、`COMMIT` 落库）。
+
+    与「连接当前有没有事务」无关：CPython sqlite3 在 `isolation_level=''` 下自己开
+    隐式事务，`in_transaction` 常态即 True，拿它当判据会误判（见 `is_in_tx`）。
+    只收 sqlite 分支；远程后端 `eng.begin()` 一开事务即真实存在、无空壳。
+    返回是否做了兜底（供诊断/测试）。
+    """
+    if DB_BACKEND in ("postgresql", "mysql") or _depth() <= 0:
+        return False
+    alive = len(_tx_stack())
+    if _depth() == alive:
+        return False
+    if alive == 0 and is_in_tx(conn):
+        # 遗弃层被认作最外层，就由我们替它收尾（最外层无人可交，不收就是丢写）
+        conn.execute("ROLLBACK")
+    _thread_local.tx_depth = alive
+    return True
+
+
 def transaction():
     """返回一个上下文管理器，包裹一批写操作（原子提交/回滚）。"""
     if DB_BACKEND in ("postgresql", "mysql"):
@@ -171,11 +241,17 @@ def transaction():
         _thread_local.tx_depth = depth
         return tx
     conn = connect()
+    # 遗弃路径兜底：计数与「存活的事务对象层数」不符 = 上一轮对象被丢弃（非 with +
+    # 中途异常）。不兜底的话下面会跳过 `BEGIN IMMEDIATE`，新事务变空壳 → 写溢出到
+    # 遗弃的悬空事务、`with` 正常退出也不落库（静默丢写）。
+    _reclaim_abandoned_tx(conn)
     depth = _depth()
     if depth == 0:
         conn.execute("BEGIN IMMEDIATE")  # 立即取写锁，读-改-写期间不被他人插入
     _thread_local.tx_depth = depth + 1
-    return _SQLite_Tx(conn, depth + 1)
+    tx = _SQLite_Tx(conn, depth + 1)
+    _tx_stack().append(id(tx))           # 存活登记：本层对象被遗弃时据此识别
+    return tx
 
 
 class _SQLite_Tx:
@@ -212,6 +288,7 @@ class _SQLite_Tx:
                 "嵌套事务不支持显式 %s()：只有最外层事务能提交/回滚。"
                 "内层请直接退出 with（异常会冒泡到最外层回滚）。" % action)
         self._closed = True
+        _drop_tx_frame(self)
         # 按本层深度收敛（不用「当前深度-1」：内层显式调用抛错时不会走 __exit__，
         # 用「当前深度-1」会让计数永久留 1，之后事务静默失去原子性）。
         depth = self._depth - 1
@@ -231,6 +308,7 @@ class _SQLite_Tx:
         depth = self._depth - 1
         _thread_local.tx_depth = depth
         self._closed = True
+        _drop_tx_frame(self)
         if depth > 0:
             return False  # 内层不提交，交给最外层
         if exc_type is None:

@@ -67,7 +67,18 @@
     「**sqlalchemy 适配层冒烟（sqlite 方言 · PG 语义未验证）**」+ 组内**显式断言
     `eng.dialect.name == 'sqlite'`**（把假绿暴露在测试里），并补事务内 `db.execute`/嵌套的
     fail-loud 断言。
-13. **`needs_m1()` 合并判据（复评 🟡2 一行硬化）**：唯一键缺 branch **或** 缺 `branch`/`status`
+13. **遗弃事务兜底（Issue #165 🟡1 收口）**：`tx_depth` 是纯软件计数，非 `with` 用法 + 中途
+    异常把事务对象丢掉（外层只 `except: pass`）时计数永久留 1 → 下一次 `transaction()`
+    以「已在外层事务」为由**跳过 `BEGIN IMMEDIATE`**，新事务成空壳，写溢出到悬空事务、
+    `with` 正常退出也不落库（**静默丢写**，实测外部连接可见行数不增）。修法：`transaction()`
+    建对象即登记存活帧，`_reclaim_abandoned_tx()` 判据取「**计数 > 存活帧数 = 有层被遗弃**」
+    并收敛计数；遗弃层被认作最外层时替它 `ROLLBACK`。判据**刻意不取**
+    `conn.in_transaction`——CPython sqlite3 在 `isolation_level=''` 下自己开隐式事务，
+    该属性常态即 True，拿它当判据会把正常状态误判成遗弃。
+    已知边界（诚实标注）：单层遗弃时帧仍在，与「内层活事务」不可区分，属不可判定的一次性
+    代价；真正丢写的「帧已不在、计数残留」形态已锁死（`test_data_layer` 组 8b +
+    feature-verify `Then-4b`，回退兜底即 RED）。
+14. **`needs_m1()` 合并判据（复评 🟡2 一行硬化）**：唯一键缺 branch **或** 缺 `branch`/`status`
     列，任一成立即需重建。否则「唯一键已含 branch、但缺 status 列」的库（手工改库/第三方库形态）
     会被判「无需迁移」跳过，`idx_versions_status` 照样撞 `no such column` 崩在入口。
 
@@ -79,8 +90,8 @@
 ## 后果（权衡）
 - 好处：并发写从「撞键 / 锁死」变为确定性判冲突；冲突不再污染主线、不再静默丢失；
   旧库经任意入口自动升级；事务 API 自洽（`tx_depth` 无泄漏）。
-  已由 `test_collab.sh` 第 7 组、`test_data_layer.sh` 第 8/9/10 组、
-  feature-verify `collab/写时状态中介`（Then-1~5）锁死。第 9 组 / Then-5 专门锁
+  已由 `test_collab.sh` 第 7 组、`test_data_layer.sh` 第 8/8b/9/10 组、
+  feature-verify `collab/写时状态中介`（Then-1~6）锁死。第 9 组 / Then-5 专门锁
   「健康库读热路径不取写锁」：另一连接持写锁时纯读 gid / `init_schema()` 必须成功，
   去掉快路径即转红。
 - 代价：写路径串行化（`BEGIN IMMEDIATE`），高并发下冲突方要重试/rebase——

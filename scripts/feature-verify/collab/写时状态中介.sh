@@ -12,6 +12,7 @@
 #           ② 旧库唯一键升级为 (entity_loc, branch, vno)、主线可写、旧冲突仍留在队列
 #           ③ 空库直接跑 `data-cli migrate` 不崩、不留「已标记但未建表」的半写
 #           ④ transaction() 非 with 用法的 commit/rollback 后 tx_depth 归零
+#           ④b 遗弃路径（非 with + 中途异常，对象被丢弃）后 tx_depth 归零、后续写不静默丢
 #           ⑤ 他人持写锁期间 init_schema()（webui 每请求 / gid 每操作的热路径）不阻塞
 #   Evidence 本脚本内断言（真跑并发 + 真造旧库）+ 主线 vno / conflicts() 返回值
 # 为什么是「功能级」：纯 grep 只能看到 `db.transaction()` 字样，抓不到
@@ -135,6 +136,42 @@ if d1 == 0 and d2 == 0:
     ok("Then-4: transaction().commit()/rollback() 后 tx_depth 归零（无泄漏）")
 else:
     bad("Then-4: tx_depth 泄漏 commit后=%d rollback后=%d" % (d1, d2))
+
+# ---- Then-4b: 遗弃路径（非 with + 中途异常）不得污染 tx_depth → 后续写不得静默丢 ----
+# 旧口径 Then-4 只锁了「非 with 用法显式 commit/rollback」，漏了「对象被丢弃、
+# 连 __exit__ 都没跑」这条路径：计数永久留 1 → 下一次 transaction() 跳过 BEGIN，
+# 新事务成空壳，with 正常退出也不落库（静默丢写）。此处按「外部连接可见行数」判定。
+p4b = os.path.join(TMP, "abandon.db")
+os.environ["DB_PATH"] = p4b
+db4 = importlib.reload(db)
+importlib.reload(schema)
+schema.init_schema()
+db4.execute("CREATE TABLE IF NOT EXISTS t (a int)")
+db4.execute("INSERT INTO t (a) VALUES (0)")
+
+def _visible():
+    """另开连接看真实落库状态（本连接可见 ≠ 已提交）。"""
+    c = sqlite3.connect(p4b); n = c.execute("SELECT count(*) FROM t").fetchone()[0]; c.close()
+    return n
+
+def _nest_then_abandon():
+    db4.transaction()                       # depth 1（外层）
+    inner = db4.transaction()               # depth 2（内层，不被 with 管理）
+    inner._finish("commit")                 # 内层摘帧、计数交外层
+    raise KeyboardInterrupt("外层被丢弃：既不 with 也不 commit/rollback")
+
+try:
+    _nest_then_abandon()
+except KeyboardInterrupt:
+    pass
+db4._tx_stack().clear()                     # 最强形态：帧没了、计数残留（旧版静默丢写场景）
+assert db4._depth() == 1 and db4.is_in_tx(), "前置：应处于被污染的遗弃状态"
+with db4.transaction() as tx4b:
+    tx4b.execute("INSERT INTO t (a) VALUES (1)")
+if db4._depth() == 0 and _visible() == 2:
+    ok("Then-4b: 遗弃路径（非 with + 中途异常）后 tx_depth 归零，with 事务写真落库不静默丢")
+else:
+    bad("Then-4b: 遗弃路径污染未兜底 depth=%r 外部可见=%d（期望 2）" % (db4._depth(), _visible()))
 
 # ---- Then-5: 热路径可用性——他人持写锁时 init_schema() 不得阻塞/抛锁错 ----
 # 🔴5 就是从这个缝里漏出去的：迁移下沉后 init_schema() 无条件 BEGIN IMMEDIATE，
