@@ -365,6 +365,28 @@ else
   echo "  ❌ 运行时核验：阶段链门控未拦下抢跑/重复触发"
 fi
 
+
+# ============================================================
+# ADR-0013 口径锁（Issue #165 项4）：ADR 声明的 Then 覆盖区间必须与证据脚本一致
+# ------------------------------------------------------------
+# 证据脚本 `scripts/feature-verify/selector/映射全覆盖.sh` 的 Then-N 会随迭代增长，
+# ADR 里写死的 `Then-1~N` 就会过期（正是 🟡 项：字面 5 但实为 11）。
+# 本断言以**脚本实际最大 Then 序号**为准反查 ADR，ADR 口径漂了即红。
+# ============================================================
+echo ""
+echo "▶ ADR-0013 Then 覆盖区间口径锁"
+ADR_FILE="docs/adr/0013-write-path-atomic-and-migration-sink.md"
+SEL_SH="scripts/feature-verify/selector/映射全覆盖.sh"
+if [ -f "$ADR_FILE" ] && [ -f "$SEL_SH" ]; then
+  MAX_THEN_MARK="$(grep -oE '^# -+ Then-[0-9]+' "$SEL_SH" | grep -oE '[0-9]+' | sort -n | tail -1)"
+  ADR_THEN="$(grep -oE 'Then-1~[0-9]+' "$ADR_FILE" | grep -oE '[0-9]+$' | head -1)"
+  check "ADR-0013 声明的 Then-1~N 与证据脚本实际最大 Then 一致" "$MAX_THEN_MARK" "$ADR_THEN"
+  contains "ADR-0013 口径引用指向 collab/写时状态中介证据" "$(cat "$ADR_FILE")" 'collab/写时状态中介'
+else
+  FAIL=$((FAIL+1)); FAILED_ITEMS+=("[ADR-0013 口径锁] 文件缺失：$ADR_FILE 或 $SEL_SH")
+  echo "  ❌ ADR-0013 口径锁：文件缺失"
+fi
+
 # ============================================================
 # 汇总（信号灯）
 # ============================================================

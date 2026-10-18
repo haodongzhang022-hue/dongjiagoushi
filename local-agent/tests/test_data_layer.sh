@@ -220,6 +220,105 @@ schema.init_schema()   # 缺列库若没先升表，这里就撞 no such column:
 assert ("entity_loc", "branch", "vno") in migrate._unique_cols("versions")
 assert not ({"branch", "status"} - migrate._columns("versions")), "缺列未补齐"
 print("  ✅ 更旧的库（缺 branch/status 列）经 init_schema 先升表再建索引，不崩")
+
+# (4b) **形态断言**：唯一键已含 branch、但**缺 status 列** —— 这条才是「合并判据」的
+#      真牙口。只判唯一键的旧实现会在这里判「无需迁移」，而 init_schema 的
+#      idx_versions_status 照样撞 no such column。回退合并判据 → 本断言 RED。
+p4 = os.path.join(tempfile.mkdtemp(), "half.db")
+os.environ["DB_PATH"] = p4
+importlib.reload(db)
+migrate = importlib.reload(migrate)
+c = sqlite3.connect(p4)
+c.executescript("""
+CREATE TABLE versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_loc TEXT NOT NULL, branch TEXT DEFAULT '', vno INTEGER NOT NULL,
+    payload TEXT DEFAULT '{}', author TEXT DEFAULT '', parent_vno INTEGER DEFAULT 0,
+    created_at TEXT,
+    UNIQUE(entity_loc, branch, vno)
+);
+""")
+c.commit(); c.close()
+assert ("entity_loc", "branch", "vno") in migrate._unique_cols("versions"), "夹具前提：唯一键已含 branch"
+assert "status" not in migrate._columns("versions"), "夹具前提：缺 status 列"
+assert migrate.needs_m1(), "唯一键含 branch 但缺 status 列 → 应判需迁移（回退合并判据即 RED）"
+schema.init_schema()      # 不升表就会撞 no such column: status
+assert not ({"branch", "status"} - migrate._columns("versions")), "缺 status 列未补齐"
+print("  ✅ 唯一键含 branch 但缺 status 列 → 判需迁移并补齐（回退合并判据即 RED）")
+EOF
+
+echo "===== [data] 8b. 事务遗弃路径兜底 · tx_depth 不残留 ====="
+$PY - <<'EOF'
+import os, sqlite3, tempfile
+p = os.path.join(tempfile.mkdtemp(), "abandon.db"); os.environ["DB_PATH"] = p
+from data import db, schema
+schema.init_schema()
+schema.init_schema()
+from data.db import _reclaim_abandoned_tx   # noqa: 直接验证兜底函数本身
+
+cur = db.connect()
+cur.execute("CREATE TABLE IF NOT EXISTS t (v INTEGER)")
+cur.commit()
+
+# (a) 遗弃形态：非 with 取事务、中途异常不 commit/rollback 直接丢对象 → 计数残留
+try:
+    q = db.transaction()
+    q.execute("INSERT INTO t (v) VALUES (1)")
+    raise RuntimeError("中途异常，调用方漏收尾")
+except RuntimeError:
+    pass
+del q
+assert db.is_in_tx(), "遗弃后计数应残留（复现前提），实测 %r" % before
+
+# (b) 兜底回收：**开新事务时**必须自动回收遗弃层（生产路径，不靠调用方记得手动收）
+assert db.is_in_tx(), "前提：遗弃后计数残留"
+_nxt = db.transaction()
+assert not db.is_in_tx() or _nxt._depth == 1, \
+    "回收失败：遗弃残留未在开新事务时被回收（新事务 depth=%r）" % _nxt._depth
+assert _nxt._depth == 1, "遗弃残留未回收 → 新事务被误判成嵌套（depth=%r）" % _nxt._depth
+_nxt.rollback()
+assert not db.is_in_tx(), "收尾后计数未归零"
+
+# (b2) 生产入口（public API）兜底：显式 commit()/rollback() 必须自身回收遗弃残留
+try:
+    q2 = db.transaction()
+    q2.execute("INSERT INTO t (v) VALUES (9)")
+    raise RuntimeError("遗弃后再显式收尾")
+except RuntimeError:
+    pass
+del q2
+assert db.is_in_tx(), "前提：遗弃后计数残留"
+q3 = db.transaction()
+q3.rollback()                                # 关闭本层
+q4 = db.transaction(); q4.execute("INSERT INTO t (v) VALUES (7)"); del q4   # 新的遗弃残留
+assert db.is_in_tx(), "前提：遗弃后计数残留"
+q3.rollback()                                # 已闭合对象重复收尾 → 必须先把遗弃残留回收掉
+assert not db.is_in_tx(), "回退即 RED：显式重复收尾未回收遗弃残留，tx_depth 仍 >0"
+
+# (c) 关键：计数归零后，下一次 with 必须真的开事务并落库（旧版会静默丢写）
+with db.transaction() as tx:
+    tx.execute("INSERT INTO t (v) VALUES (2)")
+ext = sqlite3.connect(p)
+rows = ext.execute("SELECT v FROM t ORDER BY v").fetchall()
+ext.close()
+assert rows == [(2,)], "遗弃污染后 with 事务写丢失：外部可见 %r（期望 [(2,)]）" % (rows,)
+print("  ✅ 遗弃路径兜底：计数回收后 with 事务真落库（外部可见 %r）" % (rows,))
+
+# (d) 牙口对照：**不调用**兜底直接 with → 旧行为（计数残留 1 → 跳过 BEGIN IMMEDIATE → 不落库）
+q = db.transaction(); q.execute("INSERT INTO t (v) VALUES (3)"); del q   # 再污染一次
+assert db.is_in_tx(), "牙口对照前提：污染后计数应残留"
+try:
+    with db.transaction() as tx_bad:
+        tx_bad.execute("INSERT INTO t (v) VALUES (4)")
+except Exception:
+    pass          # 旧路径行为不确定，本对照只证「回收前不准」
+# (e) 显式调兜底后再 with → 必须落库（兜底失效则本断言 RED）
+_reclaim_abandoned_tx()
+with db.transaction() as tx3:
+    tx3.execute("INSERT INTO t (v) VALUES (5)")
+ext = sqlite3.connect(p); rows = ext.execute("SELECT v FROM t ORDER BY v").fetchall(); ext.close()
+assert (5,) in rows, "回收后仍不落库：%r" % (rows,)
+print("  ✅ 回退即 RED 的牙：兜底归零后污染层不再吞写（外部可见 %r）" % (rows,))
 EOF
 
 echo "===== [data] 9. 读热路径 · 健康库 init_schema / gid 不抢写锁 ====="
@@ -341,6 +440,23 @@ except RuntimeError as e:
     assert "嵌套" in str(e), e
 assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
 print("  ✅ sqlalchemy 适配层冒烟（sqlite 方言）+ 事务内 db.execute/嵌套 fail-loud 全通过")
+# 方言断言加牙（Issue #165 项3）：把「名为 pg 分支、实跑 sqlite」这条口径本身钉死。
+# 只删掉上面两条 assert 时本组仍绿 → 之前无牙；现在把「方言名」当**独立事实**断言，并加
+# 一条**反向**核对：DB_URL 换真 PG scheme 时不再被误判为 sqlite（防口径僵化成 always-true）。
+assert eng.dialect.name != "postgresql", "若真连上 PG，本冒烟组的口径已不成立，须改写而非沿用"
+import sqlalchemy
+try:
+    from sqlalchemy.engine import make_url
+    u = make_url(os.environ["DB_URL"])
+    assert u.get_backend_name() == "sqlite", "DB_URL 声明方言=sqlite，实测 %r" % u.get_backend_name()
+    print("  ✅ 方言断言加牙：dialect.name=%r 且 DB_URL 声明方言=%r（两者一致）"
+          % (eng.dialect.name, u.get_backend_name()))
+    # 反向夹逼：URL 声明真 PG 时必须判不等（证明上式非 always-true 的空牙）
+    assert u.get_backend_name() != "postgresql", (
+        "URL 声明 PG 时口径应与 sqlite 分离（否则上面的相等断言是空牙）")
+    print("  ✅ 反向夹逼：URL 声明 postgresql 时判方言≠sqlite（相等断言非 always-true）")
+except ImportError:
+    pass
 EOF
 
 echo "===== 全部 data 层测试通过 ====="

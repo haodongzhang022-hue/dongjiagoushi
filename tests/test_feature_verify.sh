@@ -669,6 +669,65 @@ else
   fi
 fi
 
+
+# ---- T25 registry covers 死条目体检（Issue #165 项5）：相对路径必须相对 local-agent/ 解析 ----
+echo ""
+echo "▶ T25 registry covers 死条目体检（相对路径禁止裸登记）"
+if command -v python3 >/dev/null 2>&1; then
+  REG_OUT="$(python3 - <<'PYREG'
+import json, os
+reg = json.load(open('local-agent/hybrid/registry.json', encoding='utf-8'))
+dead, unnorm = [], []
+for tname, t in reg.get('tests', {}).items():
+    for cf in t.get('covers', []):
+        # ① 路径必须能从仓库根解析：含 / 或本身就在根目录存在（如 AGENTS.md）
+        if '/' not in cf and not os.path.exists(cf):
+            unnorm.append('%s -> %s' % (tname, cf))
+            continue
+        # ② 归一化后仍不存在 → 真死条目 → 必红
+        if not os.path.exists(cf) and not os.path.exists(os.path.join('local-agent', cf)):
+            dead.append('%s -> %s' % (tname, cf))
+print('UNNORM:%s|DEAD:%s' % (';'.join(unnorm), ';'.join(dead)))
+PYREG
+)"
+  U="${REG_OUT#UNNORM:}"; U="${U%%|*}"; D="${REG_OUT##*DEAD:}"
+  if [ -n "$U" ]; then
+    bad "T25a: registry covers 存在未归一化相对路径（$U）→ 读表的人会以为它是仓库内文件"
+  else
+    ok "T25a: registry covers 全部为仓库根相对路径（无裸相对路径）"
+  fi
+  if [ -n "$D" ]; then
+    bad "T25b: registry covers 存在死条目（$D）→ 变更感知映射落空"
+  else
+    ok "T25b: registry covers 无死条目（指向不存在的路径数为 0）"
+  fi
+  # 牙齿：注入一条死条目 → 必须 RED
+  T25REG="$(mktemp)"; cp local-agent/hybrid/registry.json "$T25REG"
+  python3 - "$T25REG" <<'PYMUT'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding='utf-8'))
+d['tests']['tests/test_feature_verify.sh']['covers'].append('local-agent/__dead_never_exists__.py')
+json.dump(d, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+PYMUT
+  MUT_OUT="$(python3 - "$T25REG" <<'PYREG'
+import json, os, sys
+reg = json.load(open(sys.argv[1], encoding='utf-8'))
+dead = [cf for t in reg.get('tests', {}).values() for cf in t.get('covers', [])
+        if not os.path.exists(cf) and not os.path.exists(os.path.join('local-agent', cf))]
+print(';'.join(dead))
+PYREG
+)"
+  rm -f "$T25REG"
+  if [ -n "$MUT_OUT" ]; then
+    ok "T25c: 注入死条目被抓出（牙齿在线，T25b 非空跑）"
+  else
+    bad "T25c: 注入死条目未被抓出（T25b 空跑，无牙）"
+  fi
+else
+  skip "T25: 本机无 python3 → 跳过 registry 体检"
+fi
+
 # ---- 汇总 ----
 echo ""
 echo "======================================================"
