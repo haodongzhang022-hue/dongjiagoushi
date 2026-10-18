@@ -41,7 +41,7 @@
    该分支整体未回 `main` → `dsh-adapter/` 至今不在 `main`。已由 **PR #175**（base=main）重做合并路径。
 2. **PR #171**（npc:go 模型换 hy3）：同样 base=`auto/architect-framework-7a13`，属同一错路径族。
    其改动内容已在 `main`（`a250d20`），**不应按现状合并**，随旧分支一并清理。
-3. **桥接回执缺幂等**：#124 同一份结果回执写了两遍（需时另开单）。
+3. **PR #171「npc:go 模型换 hy3」**：同一错路径族（base=`auto/architect-framework-7a13`）。但其改动内容已在 `main`（`a250d20`）→ **不该按现状合并**，随旧分支清理。
 4. **PR #160 引用的 Issue 已 404**（编号截断），不影响台账。
 
 ## 五、剩余 open 汇总
