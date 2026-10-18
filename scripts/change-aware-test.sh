@@ -122,6 +122,9 @@ declare -a MODULE_MAP=(
   # ---- 七层深度引擎 ----
   "local-agent/depth/|local-agent/tests/test_depth_engine.sh"
 
+  # ---- MCP 汇聚注册表（端点登记/三前端/转发）----
+  "local-agent/mcp_hub/|local-agent/tests/test_mcp_hub.sh"
+
   # ---- 角色名册与派单接入 ----
   "local-agent/roster/|local-agent/tests/test_roster.sh"
 
