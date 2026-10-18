@@ -637,6 +637,38 @@ CFGEOF
   rm -rf "$T23REPO" "$T23BARE" "$T23HOME"
 fi
 
+# ---- T24 CI node 版本假红回归（Issue #175 · 装了 node 却仍全红） ----
+# 根因（真 CI 日志逐字）：.cnb.yml 用 `apt-get install nodejs` 装到 v20.19，而 dsh-adapter
+# 的 TS 信号灯用 `node --experimental-strip-types`（Node >= 22.6）→ `bad option` →
+# 3 项全红。"有 node" ≠ "node 能用"：装完必须**按能力**核验，不是按存在核验。
+echo ""
+echo "▶ T24 CI node 版本闸门（有 node 但能力不足也算未就绪）"
+if [ ! -f scripts/ci-ensure-node.sh ]; then
+  bad "T24a: 缺 scripts/ci-ensure-node.sh（.cnb.yml 已改为调用它）"
+else
+  if bash scripts/ci-ensure-node.sh --check-only >/dev/null 2>&1; then
+    ok "T24a: 本机 node 可用 → --check-only 通过"
+    # 鉴别力：伪造"能跑但仅 v20 语义"的 node（拒绝该 flag）时，必须判不可用
+    T24BIN="$(mktemp -d)"
+    printf '#!/bin/bash\ncase "$*" in *--experimental-strip-types*) echo "node: bad option: --experimental-strip-types" >&2; exit 9;; --version) echo "v20.19.2";; *) echo v20;; esac\n' > "$T24BIN/node"
+    chmod +x "$T24BIN/node"
+    if PATH="$T24BIN:$PATH" bash scripts/ci-ensure-node.sh --check-only >/dev/null 2>&1; then
+      bad "T24b: 不支持 --experimental-strip-types 的 node 被判可用（牙齿丢失）"
+    else
+      ok "T24b: 能力不足的 node 被判不可用（按能力核验，非按存在）"
+    fi
+    # .cnb.yml 必须真的接上（否则脚本再对也不生效）
+    if grep -q 'ci-ensure-node.sh' .cnb.yml && ! grep -q 'apt-get install -y -qq nodejs npm' .cnb.yml; then
+      ok "T24c: .cnb.yml 两处作业调用 ci-ensure-node.sh（不再裸装 apt v20）"
+    else
+      bad "T24c: .cnb.yml 未接 ci-ensure-node.sh 或仍在裸装 apt nodejs"
+    fi
+    rm -rf "$T24BIN"
+  else
+    skip "T24: 本机 node 不支持 TS 剥离 → 跳过（能力核验已由 T24b 覆盖）"
+  fi
+fi
+
 # ---- 汇总 ----
 echo ""
 echo "======================================================"
