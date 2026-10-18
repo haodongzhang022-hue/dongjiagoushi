@@ -10,7 +10,7 @@
 #           src/{index,compat,bridge}.ts）+ local-agent/dsh_adapter/compat.py
 #   When    真跑 `bash local-agent/tests/test_dsh_adapter.sh`（18 组信号灯）+
 #           读产物做语义断言（不只看"文件在"）
-#   Then    1) 18 组信号灯全绿（TS/Python 双端版本矩阵、defineTool 装载探针、桥接实跑）；
+#   Then    1) 信号灯全绿（TS/Python 双端版本矩阵、defineTool 装载探针、桥接实跑）；条数按环境推导：有 node 18 组 / 无 node 13 组（Issue #175）；
 #           2) package.json 真实声明 dsh.bundle.patch（组合包契约，非空壳）；
 #           3) 版本闸门在加载路径上（index.ts 出现 checkVersion + throw，
 #              compat 判定旧版为 incompatible、乱版显式失败）；
@@ -31,11 +31,18 @@ bad(){ FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 echo "==== [feature-verify] dsh-adapter/新版适配链路 ===="
 
-# ---------- Then-1：18 组信号灯真跑 ----------
+# ---------- Then-1：信号灯真跑（条数按环境推导，Issue #175 假红收口） ----------
+# 信号灯条数**取决于环境是否具备 node**：有 node 跑满 18 组；无 node（如 CI 的
+# python:3.11 镜像）显式跳过 TS/桥接侧 → 13 组。硬编码 18 会把合法跳过判成红
+# （CI 假红之一）。故：fail 必须 0，pass 须等于本环境应得条数（13 / 18）。
+if command -v node >/dev/null 2>&1; then EXPECT_PASS=18; else EXPECT_PASS=13; fi
 if OUT="$(bash local-agent/tests/test_dsh_adapter.sh 2>&1)"; then
-  echo "$OUT" | grep -qE 'pass=18 fail=0' \
-    && ok "Then-1: 信号灯全绿（pass=18 fail=0）" \
-    || { bad "Then-1: 信号灯条数不符（期望 pass=18 fail=0）"; echo "$OUT" | tail -5 | sed 's/^/      /'; }
+  if echo "$OUT" | grep -qE "pass=${EXPECT_PASS} fail=0"; then
+    ok "Then-1: 信号灯全绿（pass=${EXPECT_PASS} fail=0，node=$([ "$EXPECT_PASS" = 18 ] && echo 有 || echo 无)）"
+  else
+    bad "Then-1: 信号灯条数不符（期望 pass=${EXPECT_PASS} fail=0）"
+    echo "$OUT" | tail -5 | sed 's/^/      /'
+  fi
 else
   bad "Then-1: local-agent/tests/test_dsh_adapter.sh 红 → 新版适配未达成"
   echo "$OUT" | tail -12 | sed 's/^/      /'

@@ -73,7 +73,13 @@ else
 fi
 
 echo "===== [dsh-adapter] 2b. 桥接实际调用（真实 Python 引擎） ====="
-if command -v node >/dev/null 2>&1 && [ -e "$DSH_DIR/node_modules/@deepseek-ai/dsh-tools" ]; then
+# 三态门控（Issue #175）：① 有 node + 已链接真实 dsh → 真跑桥接 + 真装载探针；
+#   ② 有 node 但未链接 dsh → 只跑桥接实跑（Python 引擎可达）；
+#   ③ **无 node → 显式跳过**（曾漏判：else 分支自称"桥接实跑仍验证"却直接调 node，
+#     上游 python:3.11 镜像无 node → `node: command not found` 被记红，CI 假红）。
+if ! command -v node >/dev/null 2>&1; then
+  echo "  -- 无 node，跳过桥接实跑与真实装载探针（TS/桥接侧未在本环境验证）"
+elif [ -e "$DSH_DIR/node_modules/@deepseek-ai/dsh-tools" ]; then
   t "桥接实际调用（dsh_adapter/dev_standard/relay 真跑）" "node --experimental-strip-types '$DSH_DIR/tests/bridge.live.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "真实 defineTool 装载探针（7 工具注册）" "node --experimental-strip-types '$DSH_DIR/tests/real-load.probe.mjs' | tail -1 | grep -q 'REAL-LOAD-OK'"
 else
