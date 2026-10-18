@@ -77,19 +77,34 @@ row=db.query('SELECT * FROM dispatch WHERE event_id=?',(r['event_id'],))
 print(len(row), row[0]['target_role'] if row else '')")
 [ "$R8" = "1 架构·评审" ] && ok "派单落 dispatch 表可回查（target_role 正确）" || bad "留痕缺失: $R8"
 
-# 9. 不可跑角色：照样派但显式 warning（不假装派成功）
+# 9. 不可跑角色：直接拒派（ok=False，不返回 event_id、不写 dispatch、不占 dedup）
 R9=$(py "
 from roster import intake
-r=intake({'target':'架构·审核前置助手','task':'二选一拿不准','entity':'amb-'+__import__('os').environ['RUN']})
-print(r.get('warning',''))")
-[ "$R9" = "role_not_implemented" ] && ok "无实现角色派单显式告警（不假绿）" || bad "无实现角色未告警: $R9"
+from data import db, schema
+schema.init_schema()
+e='amb-'+__import__('os').environ['RUN']
+r=intake({'target':'架构·审核前置助手','task':'二选一拿不准','entity':e})
+row=db.query('SELECT * FROM dispatch WHERE entity=?',(e,))
+print(r['ok'], r.get('reason'), bool(r.get('event_id')), len(row))")
+[ "$R9" = "False role_not_implemented False 0" ] && ok "无实现角色拒派（不假绿/不落库）" || bad "无实现角色未被拒: $R9"
 
-# 10. 缺口如实：drift 里必须能看见 settings/registry 的缺项
+# 10. 缺口如实：漂移只有两类，且每条都带 kind/sources
 R10=$(py "
 from roster import specs
 d=specs.drift()
-print(len(d)>0, all(x['gaps'] for x in d))")
-[ "$R10" = "True True" ] && ok "事实源漂移如实暴露（每条都带缺哪侧）" || bad "漂移被隐藏: $R10"
+print(len(d)>0,
+      all(x['kind'] in ('missing_in_source','no_implementation') and x['sources'] for x in d),
+      any(x['kind']=='no_implementation' for x in d))")
+[ "$R10" = "True True True" ] && ok "缺口分两类如实暴露（每条带 kind+sources）" || bad "缺口口径不对: $R10"
+
+# 10b. 漂移口径以 registry 为基准：relay 子集不报假问题、真缺的必须报
+R10b=$(py "
+from roster import specs
+d={x['role_id']: (x['kind'], x['sources']) for x in specs.drift()}
+fake = [k for k,(kind,srcs) in d.items() if kind=='missing_in_source' and set(srcs) <= {'relay'}]
+real = d.get('arch.deliverer', ('',''))[1], d.get('arch.data_admin', ('',''))[1]
+print(len(fake), 'team' in real[0], 'team' in real[1])")
+[ "$R10b" = "0 True True" ] && ok "漂移口径正确（relay 子集不误报 / team 真缺报出来）" || bad "漂移口径仍错: $R10b"
 
 # 11. verify：对端清单 ⇄ 本仓名册 双向差集
 R11=$(py "
@@ -138,6 +153,63 @@ case "$R15" in
   "dispatched rejected False") ok "同实体同角色二次派单被 dedup 拦截（护栏复用）";;
   *) bad "去重护栏失效: $R15";;
 esac
+
+# 16. 不存在曾用名：解析器与 catalog 必须自一致（认得出的必是名册里真有的角色）
+R16=$(py "
+from roster import resolve, catalog, specs
+ids={r['role_id'] for r in catalog()['roles']}
+ghost=resolve('架构·版本管理')
+print(ghost['ok'], ghost.get('reason'), resolve('arch.developer')['role_id'] in ids)")
+[ "$R16" = "False unknown_role True" ] && ok "幽灵角色名不被解析（resolve ⇄ catalog 自一致）" || bad "幽灵角色可解析: $R16"
+
+# 17. 名册不造第五份清单：每个 role_id 都必须来自某个事实源
+R17=$(py "
+from roster import catalog
+c=catalog()
+print(all(r['name'] for r in c['roles']), all(r['role_id'] and not r['role_id'].startswith('unregistered.') for r in c['roles']))")
+[ "$R17" = "True True" ] && ok "名册全部来自事实源（无临时编造条目）" || bad "名册含造出来的条目: $R17"
+
+# 18. 文档承诺兑现：webhook 有 roster 派单入口，且 intake 真有调用方（不再是死代码）
+R18=$(bash -c "cd \"$ROOT\" && grep -q 'roster' local-agent/dispatcher/webhook.py && grep -rq 'roster' --include=*.py local-agent/dispatcher/ && echo wired")
+[ "$R18" = "wired" ] && ok "webhook 接真实入口（intake 非孤岛）" || bad "webhook 未接 roster: $R18"
+
+# 19. 真实 HTTP 端到端：鉴权 → intake → 200/400 语义正确（不 mock）
+R19=$(py "
+import sys, json, threading, time, urllib.request, urllib.error, os
+sys.path.insert(0, os.path.dirname(os.path.abspath('.')))
+from data import schema; schema.init_schema()
+from dispatcher import security, webhook
+from http.server import HTTPServer
+src=security.get_source('local_pc') or security.register_source('local_pc', ip_whitelist=['127.0.0.1','::1'])
+key=src['api_key']
+srv=HTTPServer(('127.0.0.1',0), webhook._WebhookHandler)
+port=srv.server_address[1]
+threading.Thread(target=srv.serve_forever, daemon=True).start(); time.sleep(0.2)
+def post(path, body, k=key):
+    req=urllib.request.Request('http://127.0.0.1:%d%s'%(port,path),
+        data=json.dumps(body).encode(),
+        headers={'X-API-Key':k,'Content-Type':'application/json'})
+    try:
+        r=urllib.request.urlopen(req); return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+u=os.environ['RUN']
+c1,b1=post('/webhook/local_pc/roster',{'target':'arch.developer','task':'补token','entity':'wh-ok-'+u})
+c2,b2=post('/webhook/local_pc/roster',{'target':'架构·审核前置助手','task':'x','entity':'wh-ni-'+u})
+c3,b3=post('/webhook/local_pc/roster',{'target':'arch.developer','task':'x'}, k='wrong')
+srv.shutdown()
+print(c1, b1['ok'], bool(b1.get('event_id')), c2, b2['reason'], c3)")
+[ "$R19" = "200 True True 400 role_not_implemented 401" ] && ok "真实 HTTP 端到端（派单/拒派/鉴权语义正确）" || bad "HTTP 端到端异常: $R19"
+
+# 20. CLI 真能跑：`python -m roster.cli intake` 不因同名函数遮蔽子模块而崩
+R20=$(py "
+import subprocess, os, sys, json
+env=dict(os.environ); env['PYTHONPATH']='.'
+r=subprocess.run([sys.executable,'-m','roster.cli','intake','--target','arch.developer',
+                  '--task','补 token','--dry-run'],capture_output=True,text=True,env=env)
+out=json.loads(r.stdout) if r.stdout.strip().startswith('{') else {}
+print(r.returncode, out.get('dry_run'), out.get('role_id'))")
+[ "$R20" = "0 True arch.developer" ] && ok "CLI intake 可运行（不崩、dry-run 生效）" || bad "CLI intake 崩了: $R20"
 
 echo "结果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = "0" ]

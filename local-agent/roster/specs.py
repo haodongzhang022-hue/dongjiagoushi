@@ -25,13 +25,19 @@
 两个不同角色），ID 改名频率低得多，且天然适合写进 query / JSON key。
 
   `arch.secretary`   ← 命名空间(arch/mkt) + 稳定英文短名
-  `role_id` 一旦发布不改；改名另开 ID 并保留 alias（见 `RENAMED_FROM`）。
+  `role_id` 一旦发布不改；真改名了就另开 ID 并在 `ROLED_ALIASES` 里留旧名。
+
+## 缺口判定口径（**基准是 registry**）
+
+「漂移」= 一个**本地真能跑**的角色，在某个**真该有它名字**的源里找不到。
+反过来（某源有名字、本地没实现）不算漂移，算 `impl=false` 缺口——名册照样列。
+`relay_card.ROLES` 只有 14 个名字是设计如此（只管接力卡校验），不要求它覆盖全部角色。
 """
 import os
 import re
 
 __all__ = [
-    "ROLE_IDS", "RENAMED_FROM", "NAMESPACES", "ROLE_SPECS",
+    "ROLE_IDS", "NAMESPACES", "ID_REQUIRED_SOURCES",
     "get_spec", "role_by_id", "role_by_name", "specs",
 ]
 
@@ -41,7 +47,7 @@ REPO_ROOT = os.path.dirname(_LOCAL_AGENT)
 # 命名空间前缀 → 中文前缀（角色名以中文前缀开头）
 NAMESPACES = {"arch": "架构·", "mkt": "市场·"}
 
-# 规范角色全称 → 稳定 ID。**只增不改**：ID 是对外的锚，改名走 RENAMED_FROM。
+# 规范角色全称 → 稳定 ID。**只增不改**：ID 是对外的锚，删/改 ID 都要升 contract 版本。
 ROLE_IDS = {
     # ---- 入口 / 需求 / 设计 ----
     "架构·秘书": "arch.secretary",
@@ -80,10 +86,16 @@ ROLE_IDS = {
     "架构·优化": "arch.optimizer",
 }
 
-# 曾经用过、已不再出现的角色名 → 现名（改了名但 ID 不变时两种都认得）
-RENAMED_FROM = {
-    "架构·版本管理": "架构·对齐",
-}
+# 真该有角色名的源。**registry 不在此列**——它是基准而不是被比对方。
+# 只对 settings / team 要求「必须有名字」，缺了才算漂移。
+# `relay_card.ROLES` 只管「接力卡 @ 时校验哪些名字」，本身就是子集（14 个），
+# 不要求它覆盖全部角色——把它算进比对 = 报假问题。
+ID_REQUIRED_SOURCES = ("settings", "team")
+
+# 曾用名 → 规范名（**只在真改过名时才加**，不是猜）。
+# 注意：`架构·版本管理` / `arch.version_keeper` 从来不存在——`roles.version_keeper`
+# 只是 team.yaml 里的**模块名**，角色名一直是「架构·对齐」。别再往里加。
+ROLED_ALIASES = {}
 
 # 角色对外可见的**触发方式**（与 relay_card 的 @ 格式一致，ID 化后跨仓可用）
 AT_TEMPLATE = "@{repo}({name})"
@@ -210,26 +222,17 @@ def _build():
     specs, missing_ids, drift = {}, [], []
     for name in names:
         rid = ROLE_IDS.get(name)
-        canonical = RENAMED_FROM.get(name, name)
-        if rid is None:
-            rid = ROLE_IDS.get(canonical)
         if rid is None:
             missing_ids.append(name)      # 新角色没登记 ID：显式缺口，不临时编
             rid = "unregistered." + re.sub(r"[^\w]+", "_", name).strip("_")
 
         in_settings, in_team = name in s, name in t
         in_registry, in_relay = name in reg, name in relay
+        present = {"settings": in_settings, "team": in_team,
+                   "registry": in_registry, "relay": in_relay}
 
-        # 「缺哪一侧」必须分别记：settings 有、本地没有 = 云端能 @ 但跑不起来
-        gaps = []
-        if not in_settings:
-            gaps.append("settings")
-        if not in_team:
-            gaps.append("team")
-        if not in_registry:
-            gaps.append("registry")
-        if not in_relay:
-            gaps.append("relay")
+        # 缺口（「这个源里没有这个角色名」）——信息，不是错误
+        gaps = [src for src in ("settings", "team", "registry", "relay") if not present[src]]
 
         spec = {
             "role_id": rid,
@@ -250,13 +253,25 @@ def _build():
             "at": AT_TEMPLATE.format(repo=repo, name=name),
             "relay": RELAY_TEMPLATE.format(name=name),
         }
-        if name in RENAMED_FROM:
-            spec["renamed_from"] = name
-            spec["name"] = RENAMED_FROM[name]
         specs[rid] = spec
 
-        if not in_settings or not in_registry:
-            drift.append({"role_id": rid, "name": name, "gaps": gaps})
+    # 漂移 = 本地能跑，但在某个真该有名字的源里缺失（registry 自身是基准，不比对）
+    for rid, spec in specs.items():
+        if not spec["impl"]:
+            continue
+        missing = [src for src in ID_REQUIRED_SOURCES
+                   if src != "registry" and not spec[f"in_{src}"]]
+        if missing:
+            drift.append({"role_id": rid, "name": spec["name"],
+                          "kind": "missing_in_source", "sources": missing})
+
+    # 登记了但跑不起来：**也是缺口**，对端派单前必须知道
+    for rid, spec in specs.items():
+        if not spec["impl"]:
+            drift.append({"role_id": rid, "name": spec["name"],
+                          "kind": "no_implementation",
+                          "sources": [s2 for s2 in ("settings", "team", "relay")
+                                      if spec[f"in_{s2}"]]})
 
     _CACHE.update({"specs": specs, "missing_ids": missing_ids,
                    "drift": drift, "repo": repo})
@@ -278,24 +293,28 @@ def role_by_id(role_id):
 
 
 def role_by_name(name):
-    """中文名/别名 → 稳定 ID（含「别名归一化」与「改名映射」）。"""
+    """中文名/别名 → 稳定 ID。
+
+    只认「名册里确实存在的角色」——解析出 catalog 里没有的角色 = 自相矛盾，
+    对端拿这个 ID 派单会派空。别名走 `ROLED_ALIASES`（真改过名才登记）。
+    """
     if not name:
         return None
-    name = name.strip()
-    canonical = RENAMED_FROM.get(name, name)
+    name = str(name).strip()
+    canonical = ROLED_ALIASES.get(name, name)
     for rid, spec in specs().items():
         if spec["name"] == canonical:
             return rid
     # 别名：无「架构·」前缀但核心名能匹配
-    if "·" not in name:
+    if "·" not in canonical:
         for rid, spec in specs().items():
-            if spec["name"].split("·", 1)[-1] == name and "·" in spec["name"]:
+            if "·" in spec["name"] and spec["name"].split("·", 1)[-1] == canonical:
                 return rid
     return None
 
 
 def drift():
-    """缺口明细：settings 有/本地没有，或本地有/settings 没有。"""
+    """缺口明细（两类）：`missing_in_source`（本地能跑、某源没登记）/`no_implementation`（登记了跑不起来）。"""
     return (_CACHE or _build())["drift"]
 
 

@@ -23,8 +23,10 @@
   ② **认不出的目标不猜**：`resolve()` 失败即返回未派发 + 候选，让对端修；
      猜一个"最像的"角色等于把活派给错的人，比失败更糟。
 
-  ③ **不可跑的角色照样派但显式标注**：登记了没实现的角色，派过去也只是落一条记录，
-     所以返回 `impl=false` 警告——不静默假装派成功了。
+  ③ **不可跑的角色直接拒派（不是派了再警告）**：登记了但本地没有实现类 = 派过去没人开工，
+     返回 `ok=False` + `reason=role_not_implemented`，**不写 dispatch、不占 dedup 键、
+     不返回 event_id**。`ok=True + warning` 是对端最容易误判的假绿——`ok` 只代表"活了"，
+     不代表"能跑"。要派就给可跑的实现类，或先补实现再派。
 
 留痕：每次接入都写一条 dispatch 记录（走 enqueue），对端可用 event_id 回查。
 """
@@ -81,7 +83,17 @@ def intake(req, dispatch=True):
 
     role_id, role_name = r["role_id"], r["name"]
 
-    # ② 翻译成标准事件（dispatcher 认得的那种）
+    # ② 不可跑 → 拒派（执行-验证分离：能不能跑是 registry 说了算，不是 warning 说了算）
+    if not r.get("impl", False):
+        return {"ok": False, "reason": "role_not_implemented",
+                "role_id": role_id, "role": role_name,
+                "sources": [k for k in ("settings", "team", "relay")
+                            if (_specs.get_spec(role_id) or {}).get(f"in_{k}")],
+                "hint": (f"{role_name} 在事实源里登记了，但本地没有实现类"
+                         f"（roles.ROLE_REGISTRY）——派过去只会留痕不会开工，故拒派。"
+                         f"补实现或改派 catalog 里 impl=true 的角色。")}
+
+    # ③ 翻译成标准事件（dispatcher 认得的那种）
     event = {
         "event_type": req.get("event_type") or "requirement",
         "source": source,
@@ -99,8 +111,7 @@ def intake(req, dispatch=True):
 
     if not dispatch:
         return {"ok": True, "dry_run": True, "event": event,
-                "role_id": role_id, "role": role_name,
-                "impl": r.get("impl", False)}
+                "role_id": role_id, "role": role_name, "impl": True}
 
     _ensure_schema()
     try:
@@ -110,7 +121,7 @@ def intake(req, dispatch=True):
         return {"ok": False, "reason": "dispatcher_unavailable", "error": str(e),
                 "role_id": role_id, "role": role_name}
 
-    # ③ 定向规则：把「派给谁」说清楚，而不是让通用规则再猜一次
+    # ④ 定向规则：把「派给谁」说清楚，而不是让通用规则再猜一次
     rule = {
         "name": "roster_target_dispatch",
         "match": {"event_type": event["event_type"]},
@@ -122,21 +133,20 @@ def intake(req, dispatch=True):
     }
     engine = Dispatcher(rule_engine=rules_mod.RuleEngine([rule]))
     result = engine.process_event(event)
+    status = result.get("status")
 
     out = {
-        "ok": result.get("status") in ("dispatched", "hold", "queued"),
-        "status": result.get("status"),
+        # 只有真派出去才算 ok；queue 的 hold/queued 不是"已派"
+        "ok": status == "dispatched",
+        "status": status,
         "event_id": result.get("event_id"),
         "role_id": role_id,
         "role": role_name,
         "target_agent": result.get("target_agent", ""),
         "entity": event["entity"],
     }
-    # 不可跑的角色：派是派了（留痕），但要明确告诉对方「它跑不了」
-    if not r.get("impl", False):
-        out["warning"] = "role_not_implemented"
-        out["note"] = (f"{role_name} 在 settings/team 里登记了，但本地没有实现类"
-                       f"（roles.ROLE_REGISTRY），派过去只会留痕不会开工")
+    if not out["ok"]:
+        out["reason"] = result.get("note") or status or "not_dispatched"
     return out
 
 

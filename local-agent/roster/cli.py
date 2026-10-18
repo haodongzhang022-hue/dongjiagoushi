@@ -12,7 +12,10 @@ import argparse
 import json
 import sys
 
-from . import payload, intake as _intake, specs as _specs
+from . import payload, specs as _specs
+import importlib
+# 包的 `intake` 名字被同名函数占用（from .intake import intake），取子模块本体要显式 importlib
+_intake = importlib.import_module(__package__ + ".intake")
 
 
 def _wire(cat):
@@ -54,7 +57,7 @@ def main(argv=None):
     i.add_argument("--source", default="roster.cli")
     i.add_argument("--dry-run", action="store_true")
 
-    sub.add_parser("drift", help="缺口明细")
+    sub.add_parser("drift", help="缺口明细（missing_in_source / no_implementation）")
     sub.add_parser("wire", help="扁平文本（grep 用）")
 
     a = ap.parse_args(argv)
