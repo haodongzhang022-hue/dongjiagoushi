@@ -1,0 +1,44 @@
+{
+  "name": "@dongjiagoushi/dsh-adapter",
+  "version": "0.1.0",
+  "description": "架构师体系 ⇄ DeepSeek Harness (dsh) 适配插件：把 local-agent 协作能力暴露为 dsh 工具（新版 0.1.6 兼容，cordis all-plugin + defineTool + profile bundle）",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-tools": { "optional": true }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dshCompat": {
+    "testedAgainst": ["0.1.6-alpha.2", "0.1.5-rc.2", "0.1.5-rc.1"],
+    "minVersion": "0.1.5-rc.1",
+    "apiFace": "cordis-all-plugin+defineTool+dsh.bundle.patch"
+  }
+}
