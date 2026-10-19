@@ -13,6 +13,7 @@
     python local-agent/data/cli.py msg post --topic team.r1 --payload '{"n":1}'
     python local-agent/data/cli.py task add --id t1 --title 实现登录 --assignee 架构·开发
     python local-agent/data/cli.py tables                   # 查看当前表
+    python local-agent/data/cli.py status                   # 后端 / 事务态（诊断）
 """
 import argparse
 import json
@@ -22,7 +23,7 @@ import os
 # 使 `from data import ...` 可导入（把本文件上级目录加进 path）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data import admin, migrate, schema  # noqa: E402
+from data import admin, db, migrate, schema  # noqa: E402
 
 
 def main():
@@ -31,6 +32,7 @@ def main():
 
     sub.add_parser("init", help="建表 + 登记数据管理员")
     sub.add_parser("tables", help="查看当前表")
+    sub.add_parser("status", help="查看后端 / 当前线程事务态（诊断用）")
     pm = sub.add_parser("migrate", help="执行库结构/数据迁移（幂等，可重放）")
     pm.add_argument("--dry-run", action="store_true",
                     help="只报告待迁移项，不落任何写（大库迁移前先看代价）")
@@ -80,6 +82,15 @@ def main():
         print(json.dumps(migrate.migrate(dry_run=args.dry_run), ensure_ascii=False, indent=2))
     elif args.cmd == "tables":
         print("tables:", schema.list_tables())
+    elif args.cmd == "status":
+        # 事务态用只读探针 db.is_in_tx()（不看 conn.in_transaction：sqlite 常态为 True）
+        print(json.dumps({
+            "backend": db.backend(),
+            "is_remote": db.is_remote(),
+            "in_transaction": db.is_in_tx(),
+            "tx_depth": db._depth(),
+            "db_path": db.DB_PATH if not db.is_remote() else "(remote)",
+        }, ensure_ascii=False, indent=2))
     elif args.cmd == "agent":
         admin.register_agent(args.id, args.role, args.group)
         print(f"✅ 已登记 agent: {args.id} (role={args.role})")

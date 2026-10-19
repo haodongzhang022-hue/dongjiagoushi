@@ -268,7 +268,7 @@ try:
 except RuntimeError:
     pass
 del q
-assert db.is_in_tx(), "遗弃后计数应残留（复现前提），实测 %r" % before
+assert db.is_in_tx(), "遗弃后计数应残留（复现前提），实测 depth=%r" % db._depth()
 
 # (b) 兜底回收：**开新事务时**必须自动回收遗弃层（生产路径，不靠调用方记得手动收）
 assert db.is_in_tx(), "前提：遗弃后计数残留"
@@ -304,14 +304,20 @@ ext.close()
 assert rows == [(2,)], "遗弃污染后 with 事务写丢失：外部可见 %r（期望 [(2,)]）" % (rows,)
 print("  ✅ 遗弃路径兜底：计数回收后 with 事务真落库（外部可见 %r）" % (rows,))
 
-# (d) 牙口对照：**不调用**兜底直接 with → 旧行为（计数残留 1 → 跳过 BEGIN IMMEDIATE → 不落库）
+# (d) 牙口对照（**真断言**，不是空转）：先让计数处于**自洽残留**（1 层真实遗弃，无残留帧），
+#     再验证「遗弃层会吞掉最外层写入」。注意：`db.transaction()` 开新事务时会自动回收
+#     对账（depth > 存活帧数 → 回收到 0），故本段把两段独立，各放在纯净环境里复现：
+#     ① 干净环境里 `del q` 后 depth=1、帧=0 = 遗弃；
+#     ② 此后**任何**落库写入都要求兜底先把计数归零，(e) 段即锁这一点。
+#     本段断言「遗弃后 depth 与存活帧不自洽」，这是兜底「必须存在」的判据基础——
+#     若哪天 _reclaim_abandoned_tx 改成 return False，(e) 段立刻转红。
 q = db.transaction(); q.execute("INSERT INTO t (v) VALUES (3)"); del q   # 再污染一次
-assert db.is_in_tx(), "牙口对照前提：污染后计数应残留"
-try:
-    with db.transaction() as tx_bad:
-        tx_bad.execute("INSERT INTO t (v) VALUES (4)")
-except Exception:
-    pass          # 旧路径行为不确定，本对照只证「回收前不准」
+assert db.is_in_tx(), "牙口对照前提：污染后计数应残留（depth=%r）" % db._depth()
+assert db._depth() > len(db._alive_frames()), (
+    "牙口对照失效：遗弃后计数(%r)未超过存活帧数(%r) → 兜底判据不成立"
+    % (db._depth(), len(db._alive_frames())))
+print("  ✅ 牙口对照：遗弃后 depth=%r > 存活帧=%r（不自洽）→ 兜底判据成立"
+      % (db._depth(), len(db._alive_frames())))
 # (e) 显式调兜底后再 with → 必须落库（兜底失效则本断言 RED）
 _reclaim_abandoned_tx()
 with db.transaction() as tx3:
@@ -319,6 +325,35 @@ with db.transaction() as tx3:
 ext = sqlite3.connect(p); rows = ext.execute("SELECT v FROM t ORDER BY v").fetchall(); ext.close()
 assert (5,) in rows, "回收后仍不落库：%r" % (rows,)
 print("  ✅ 回退即 RED 的牙：兜底归零后污染层不再吞写（外部可见 %r）" % (rows,))
+EOF
+
+echo "===== [data] 8c. data-cli status · 事务态诊断走 is_in_tx() ====="
+$PY - <<'EOF'
+import json, os, subprocess, sys, tempfile
+p = os.path.join(tempfile.mkdtemp(), "status.db")
+env = dict(os.environ, DB_PATH=p, PYTHONPATH="local-agent")
+def run(*a):
+    r = subprocess.run([sys.executable, "-m", "data.cli", *a], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+# 空库：status 不得依赖表存在，且如实报 tx_depth=0
+st = json.loads(run("status"))
+assert st["backend"] == "sqlite" and st["is_remote"] is False, st
+assert st["in_transaction"] is False and st["tx_depth"] == 0, st
+# is_in_tx() 是**真探针**（不是常量）：事务内必须为 True，收尾后回 False
+probe = subprocess.run(
+    [sys.executable, "-c",
+     "import sys; sys.path.insert(0,'local-agent');"
+     "from data import db;"
+     "a=db.is_in_tx(); t=db.transaction(); b=db.is_in_tx(); d=db._depth();"
+     "t.rollback(); c=db.is_in_tx();"
+     "print(a,b,d,c)"],
+    capture_output=True, text=True, env=env)
+assert probe.returncode == 0, probe.stderr
+a, b, d, c = probe.stdout.split()
+assert (a, b, d, c) == ("False", "True", "1", "False"), (
+    "is_in_tx() 未跟随事务态变化（实测 %s）→ 探针是常量、诊断不可信" % probe.stdout.strip())
+print("  ✅ data-cli status 输出后端/事务态，is_in_tx() 随事务态真变化（非恒常量）")
 EOF
 
 echo "===== [data] 9. 读热路径 · 健康库 init_schema / gid 不抢写锁 ====="
@@ -440,23 +475,29 @@ except RuntimeError as e:
     assert "嵌套" in str(e), e
 assert getattr(db._thread_local, "tx_depth", 0) == 0, db._thread_local.tx_depth
 print("  ✅ sqlalchemy 适配层冒烟（sqlite 方言）+ 事务内 db.execute/嵌套 fail-loud 全通过")
-# 方言断言加牙（Issue #165 项3）：把「名为 pg 分支、实跑 sqlite」这条口径本身钉死。
-# 只删掉上面两条 assert 时本组仍绿 → 之前无牙；现在把「方言名」当**独立事实**断言，并加
-# 一条**反向**核对：DB_URL 换真 PG scheme 时不再被误判为 sqlite（防口径僵化成 always-true）。
-assert eng.dialect.name != "postgresql", "若真连上 PG，本冒烟组的口径已不成立，须改写而非沿用"
-import sqlalchemy
-try:
-    from sqlalchemy.engine import make_url
-    u = make_url(os.environ["DB_URL"])
-    assert u.get_backend_name() == "sqlite", "DB_URL 声明方言=sqlite，实测 %r" % u.get_backend_name()
-    print("  ✅ 方言断言加牙：dialect.name=%r 且 DB_URL 声明方言=%r（两者一致）"
-          % (eng.dialect.name, u.get_backend_name()))
-    # 反向夹逼：URL 声明真 PG 时必须判不等（证明上式非 always-true 的空牙）
-    assert u.get_backend_name() != "postgresql", (
-        "URL 声明 PG 时口径应与 sqlite 分离（否则上面的相等断言是空牙）")
-    print("  ✅ 反向夹逼：URL 声明 postgresql 时判方言≠sqlite（相等断言非 always-true）")
-except ImportError:
-    pass
+# 方言断言加牙（Issue #165 项3 · 复评 🔴1 返工）：把「名为 pg 分支、实跑 sqlite」这条
+# 口径钉死，且**必须真有鉴别力** —— 断言两侧是**两个独立取值**（引擎实测方言 vs URL 声明
+# 方言），而不是拿同一个 u 自己比自己。
+# 复评指出的空牙就在这里：原「反向夹逼」比较的是同一个 `u`，上一条已断言它 = sqlite，
+# `!= postgresql` 必然成立、实现退化也不会红。
+# 现在的牙：把**真 PG URL** 当对照组，证明 `get_backend_name()` 对同一字符串不是恒返回
+# "sqlite"（判据没僵化），并证明上面那条相等断言**不能**在 PG 上成立（即它不是 always-true）。
+# 变异自证：把 eng.dialect.name 的期望值改成 "postgresql" → 本段必红（见 PR 复评）。
+from sqlalchemy.engine import make_url
+eng_backend = eng.dialect.name                       # 独立取值 ①：引擎实测方言
+url_backend = make_url(os.environ["DB_URL"]).get_backend_name()   # 独立取值 ②：URL 声明方言
+assert eng_backend == "sqlite", "本冒烟组的引擎方言期望 sqlite，实测 %r" % eng_backend
+assert url_backend == "sqlite", "DB_URL 声明方言期望 sqlite，实测 %r" % url_backend
+# 反向夹逼 ①：真 PG URL 必须判 postgresql（判据对输入敏感，不是恒真常量）
+pg_backend = make_url("postgresql+psycopg2://u:p@127.0.0.1:5432/x").get_backend_name()
+assert pg_backend == "postgresql", (
+    "反向夹逼失效：真 PG URL 未判出 postgresql（实测 %r）→ 方言判据僵化" % pg_backend)
+# 反向夹逼 ②：同一个 compare 用在 PG 上必须不等（证明上面那条相等断言不是 always-true）
+assert pg_backend != eng_backend, (
+    "反向夹逼失效：PG 声明与 sqlite 实测被判成同一方言（%r）→ 相等断言是空牙" % pg_backend)
+print("  ✅ 方言断言加牙：引擎方言=%r ∥ URL 声明方言=%r，二者独立取值且一致"
+      % (eng_backend, url_backend))
+print("  ✅ 反向夹逼：真 PG URL → %r ≠ sqlite（相等断言非 always-true，有鉴别力）" % pg_backend)
 EOF
 
 echo "===== 全部 data 层测试通过 ====="

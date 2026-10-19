@@ -115,6 +115,9 @@ def is_in_tx():
 
     CPython sqlite3 在 `isolation_level=''` 下自己开隐式事务，`in_transaction`
     常态为 True，拿它判「是否在事务中」会把正常状态误判成遗弃。本函数只读计数。
+
+    生产用途：`data-cli status` 用它输出当前线程事务态（诊断「写没进事务 /
+    depth 是否泄漏」），而非只看 `in_transaction` 被常态 True 误导。
     """
     return _depth() > 0
 

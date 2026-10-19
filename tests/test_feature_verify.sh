@@ -680,8 +680,11 @@ reg = json.load(open('local-agent/hybrid/registry.json', encoding='utf-8'))
 dead, unnorm = [], []
 for tname, t in reg.get('tests', {}).items():
     for cf in t.get('covers', []):
-        # ① 路径必须能从仓库根解析：含 / 或本身就在根目录存在（如 AGENTS.md）
-        if '/' not in cf and not os.path.exists(cf):
+        # ① 归一化形态：**不带分隔符且能解析到仓库内**即合法（AGENTS.md / CONTEXT.md /
+        #    .cnb.yml 这类根目录单文件本来就该这么写，别把「根目录单文件」当违规）。
+        #    只有「裸名 + 仓库根/ local-agent/ 都不存在」才判未归一化（多为少写了前缀目录）。
+        if '/' not in cf and not os.path.exists(cf) \
+                and not os.path.exists(os.path.join('local-agent', cf)):
             unnorm.append('%s -> %s' % (tname, cf))
             continue
         # ② 归一化后仍不存在 → 真死条目 → 必红
@@ -723,6 +726,24 @@ PYREG
     ok "T25c: 注入死条目被抓出（牙齿在线，T25b 非空跑）"
   else
     bad "T25c: 注入死条目未被抓出（T25b 空跑，无牙）"
+  fi
+  # T25d 判据自证：根目录单文件（AGENTS.md 形态）不得被判「未归一化」，
+  # 裸名且处处不存在才判 —— 两条都要成立，否则 T25a 的判据本身就是错的（复评 🟡4）
+  T25D_OUT="$(python3 - <<'PYT25D'
+import os
+def unnorm(cf):
+    return ('/' not in cf and not os.path.exists(cf)
+            and not os.path.exists(os.path.join('local-agent', cf)))
+root_file = next((f for f in ('AGENTS.md', 'CONTEXT.md', 'README.md') if os.path.exists(f)), None)
+legit_ok = bool(root_file) and not unnorm(root_file)
+bogus_ok = unnorm('__definitely_not_a_file_anywhere__.py')
+print('LEGIT:%s|BOGUS:%s' % (legit_ok, bogus_ok))
+PYT25D
+)"
+  if [[ "$T25D_OUT" == *"LEGIT:True"* && "$T25D_OUT" == *"BOGUS:True"* ]]; then
+    ok "T25d: 判据自证 — 根目录单文件不误报、裸名+处处不存在必报（T25a 非恒真）"
+  else
+    bad "T25d: 判据自证失败（$T25D_OUT）→ T25a 判据把根目录单文件当违规 或 抓不住裸名死条目"
   fi
 else
   skip "T25: 本机无 python3 → 跳过 registry 体检"
