@@ -720,6 +720,22 @@
       "cpu_cost_est": 2.0,
       "time_est": 6.0,
       "kind": "cpu-dense"
+    },
+    "tests/test_model_role_assign.sh": {
+      "name": "test_model_role_assign",
+      "covers": [
+        "local-agent/model_routing/spec.py",
+        "local-agent/model_routing/engine.py",
+        "local-agent/model_routing/cli.py",
+        "local-agent/model_routing/models.yml",
+        "local-agent/llm/openai_compat.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_model_routing.sh"
+      ],
+      "cpu_cost_est": 1.2,
+      "time_est": 4.0,
+      "kind": "cpu-dense"
     }
   }
 }

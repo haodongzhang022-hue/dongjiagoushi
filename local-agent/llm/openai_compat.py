@@ -98,13 +98,8 @@ class OpenAICompatBackend(LLMBackend):
             # 无 model_routing 时退回单模型（保可用，不崩）
             return self._call_model(self.model, system_prompt, user_input, **kw)
         chain, _default_model = _resolve_backends(role)
-        # Issue #182：角色链里的模型名先过别名表（`xxx-1017` → 平台精确 ID），
-        # 别名只做映射不改语义；未登记的别名原样透传（后端会如实报 not in list）。
-        try:
-            from model_routing import spec as _spec
-            chain = [_spec.resolve_alias(m) for m in chain]
-        except Exception:  # noqa: BLE001
-            pass
+        # Issue #182 复评：模型别名（alias）已在 engine.resolve_models 内集中收口，
+        # 此处 chain 已是过映射后的真实模型名；未登记别名在解析期已显式报红（不放行）。
         callers = {m: (lambda sp, ui, **k: self._call_model(m, sp, ui, **k)) for m in chain}
         res = call_with_chain(callers, system_prompt=system_prompt,
                               user_input=user_input, role=role)

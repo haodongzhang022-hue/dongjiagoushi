@@ -45,12 +45,12 @@ def main(argv=None):
                          "chain": pol["chain"], "specified": pol["specified"]})
         print(json.dumps(rows, ensure_ascii=False, indent=2))
     elif cmd == "audit":
-        # 体检：`.cnb/settings.yml` 里声明的角色是否都逐个配了模型
-        missing = spec.audit_roles()
-        print(json.dumps({"ok": not missing, "missing": missing,
+        # 体检：全称 + 短名双体检（空壳链 / 别名断裂 / 缺链）
+        bad = spec.audit_roles()
+        print(json.dumps({"ok": not bad, "issues": bad,
                           "total_declared": len(spec.declared_roles())},
                          ensure_ascii=False, indent=2))
-        return 0 if not missing else 2
+        return 0 if not bad else 2
     elif cmd == "overview":
         print(json.dumps(trace_overview(), ensure_ascii=False, indent=2))
     elif cmd == "dryrun":

@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """模型路由规范 · 唯一事实源（Issue #147 · module model-routing v0.3.0-update）
 
-用户诉求（Issue #147 第三版 · Issue #182 收紧）：
+用户诉求（Issue #147 第三版 · Issue #182 复评收紧 · PR #184）：
   - 模型指定**收敛到一个配置文件**统一管理（`models.yml`）；
-  - **角色逐个指定（Issue #182 收紧）**：`.cnb/settings.yml` 里声明的每个角色
-    在 `roles` 下都必须显式写出自己的链；未写明的角色**不再悄悄继承 default**，
-    而是走 `fallback_chain` 且在 `role_policy()` 里标 `specified=False`（可审计）；
-  - **角色别名归一**：`role_aliases` 让「架构·开发」与「开发」指向同一条配置，
-    避免云端传全称、配置写短名而匹配不上；
+  - **角色按需指定（Issue #182 复评，不造假差异化）**：只有**真正需要不同链**的角色
+    才写进 `roles`；其余角色走 `fallback_chain`（= default.chain 的 YAML 锚点引用，
+    配置层禁止重复字面量）。不在配置里堆与 default 逐字相同的空壳链；
+  - **角色别名归一**：`role_aliases` 让「架构·开发」与「开发」双向可查，避免云端传全称、配置写短名而匹配不上；
+  - **模型版本别名（alias）实名登记**：`1017` 这类口语版本串只在人类确认平台真实 ID 后
+    才登记；未登记一律在解析期显式报红（不放行），不留伪配置；
   - **改配置必须长期生效**（非单次有效）：配置在**每次解析时**加载，不缓存死值；
   - **多级降级链**：主通道 → 二选备用 → 三选备用（如 v4.1-flash → codebuddy → glm-5.3-flash）。
 
@@ -17,6 +18,7 @@
 其他层（.cnb.yml / llm 后端 / 文档 / 测试）都从这里读取，禁止各自取名。
 """
 import os
+import re
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(_HERE, "models.yml")
@@ -89,19 +91,28 @@ def _chain_of(block):
 
 
 def resolve_alias(model):
-    """模型名别名归一（`deepseek-v4.1-flash-1017` → `deepseek-v4.1-flash`）。
+    """模型名别名归一（`deepseek-v4.1-flash-1017` → 平台真实 ID）。
 
-    Issue #182：用户口中的版本串（如 1017）与平台精确 ID 常不一致。
-    别名表 `alias` 是**唯一**的翻译处——右侧必须是平台可选列表里真实存在的 ID，
-    否则写错一个字符就是 `is not in the optional models list` → 整个 stage error，
-    评论 @ 角色整条唤醒链路静默失效（#177 事故）。所以这里只做映射，不臆造。
+    Issue #182 / PR #184 复评：别名表 `alias` 是**唯一**翻译处，右侧必须是平台
+    可选列表里真实存在的 ID。未登记别名**显式报红**（不放行）——后端拿到坏模型名
+    会静默 stage error（#177 事故），所以解析期就拦下，不沉默透传。
+
+    判定：模型名若带版本后缀（形如 `-<数字>`）但不在 alias 表登记，视为「未登记别名」
+    → 抛 RuntimeError（红灯），逼配置显式化；普通模型 ID（无版本后缀）原样返回。
     """
     if not model:
         return model
     table = _raw().get("alias") or {}
     if not isinstance(table, dict):
-        return model
-    return str(table.get(model, model))
+        table = {}
+    if model in table:
+        return str(table[model])
+    # 版本后缀型串（如 deepseek-v4.1-flash-1017）未登记 → 显式报红，不放行
+    if isinstance(model, str) and re.search(r"-\d{2,}$", model):
+        raise RuntimeError(
+            "未登记别名，解析期拦下（不放行）：%r —— 请在 models.yml 的 alias 下登记真实平台 ID" % model
+        )
+    return model
 
 
 def default_chain():
@@ -113,48 +124,27 @@ def default_chain():
 def fallback_chain():
     """继承兜底链（角色未显式指定时的去向，仍属 default 体系）。
 
-    设计意图（Issue #182）：`default.chain` 主档可能随全局调整，
-    但未在 `roles` 里逐个写明的角色，应走一条**明确声明过的兜底链**，
-    不再悄悄等同 default——否则"以为配了角色、其实全在走默认"无法被发现。
-    未配置时退回 default_chain。
+    Issue #182 复评收紧：fallback_chain 在配置层通过 YAML 锚点 *default_chain
+    **引用** default.chain，禁止重复字面量；改默认链只改一处即两链同步。
+    配置缺失时退回 default_chain（保证结构一致）。
     """
     c = _chain_of(_raw().get("fallback_chain"))
-    return c or default_chain()
+    if c:
+        return c
+    return default_chain()
 
 
 def role_aliases():
-    """角色别名表（`{规范名: [写法A, 写法B]}`，由配置唯一声明，不写死代码）。"""
+    """角色别名表（`{规范全名: [短名...]}`，由配置唯一声明，不写死代码）。"""
     aliases = _raw().get("role_aliases") or {}
     return aliases if isinstance(aliases, dict) else {}
 
 
-def role_candidates(role):
-    """该角色在配置里的候选名（规范名 + 全部写法，**含自身**）。
-
-    Issue #182 真实断点：别名表把「架构·开发」规一到短名 `开发`，
-    但 `roles` 里写的是全称 —— 单靠"归一后只查一个名"会两头对不上。
-    所以查配置时同时接受两种写法：自身优先，其次规范名。
-    """
-    if not role:
-        return []
-    alias = role_alias(role)          # 归一后的规范短名
-    out = [str(role)]
-    if alias and str(alias) not in out:
-        out.append(str(alias))
-    # 规范名 → 它的其它写法也一并认（配置可能写在任一写法下）
-    names = role_aliases().get(str(alias))
-    if isinstance(names, (list, tuple)):
-        for n in names:
-            if str(n) not in out:
-                out.append(str(n))
-    return out
-
-
 def role_alias(role):
-    """角色别名归一（`架构·开发` → 配置里声明的短名，如 `开发`）。
+    """角色别名归一（`架构·开发` ↔ `开发` 双向可查）。
 
-    解决「同一个角色两种写法」——云端 `@org/repo(架构·开发)` 传全称，
-    配置里若写短名就匹配不上。别名表由 `role_aliases` 唯一声明，不写死代码。
+    云端 `@org/repo(架构·开发)` 传全称，配置若用短名调用也能对上。
+    别名表由 `role_aliases` 唯一声明，不写死代码。
     """
     if not role:
         return role
@@ -168,8 +158,12 @@ def role_alias(role):
 def role_override(role):
     """取该角色的覆盖块（兼容全称/短名两种写法），未配置返回 {}。"""
     roles = _raw().get("roles") or {}
-    for name in role_candidates(role):
-        blk = roles.get(name)
+    canonical = role_alias(role)
+    # 规范全名优先，其次原始名（短名也可能直接写在 roles 下）
+    for name in (canonical, role):
+        if not name:
+            continue
+        blk = roles.get(str(name))
         if isinstance(blk, dict):
             return blk
     return {}
@@ -183,41 +177,46 @@ def is_role_specified(role=None):
 
 
 def role_at(role, idx=0):
-    """取某角色渠道链的第 idx 档模型（0=主档）。越界返回末档，永不返回空。"""
+    """取某角色渠道链的第 idx 档模型（0=主档）。越界返回末档，永不返回空。
+
+    Issue #182 复评：返回值一律过 `resolve_alias` 映射；若含未登记别名则显式报红
+    （不放行），不把坏模型名透传给后端。
+    """
     c = role_chain(role)
     if not c:
-        return _FALLBACK_CHAIN[0]
-    return c[idx] if idx < len(c) else c[-1]
+        base = list(fallback_chain()) or list(_FALLBACK_CHAIN)
+        m = base[idx] if idx < len(base) else base[-1]
+        return resolve_alias(m)
+    m = c[idx] if idx < len(c) else c[-1]
+    return resolve_alias(m)
 
 
 def role_chain(role=None):
-    """解析某角色的渠道链（**角色逐个指定 · 不再静默继承默认**）。
+    """解析某角色的渠道链（**仅真正差异化的角色显式列出**）。
 
     解析顺序（固定）：
-      1. 角色别名（`role_aliases`，含「架构·开发」→ `开发` 这类前缀归一）；
+      1. 角色别名（`role_aliases`，全称 ↔ 短名双向归一）；
       2. roles[角色] 整链 / 子链；
-      3. **default.fallback_chain**（继承兜底链，仍属 default 体系）；
+      3. **fallback_chain**（= default.chain 的引用，仍属 default 体系）；
       4. 内置兜底常量。
-    「未列出的角色」不再悄悄继承 default，而是继承 `fallback_chain`——
-    配置漂移会暴露成显式未指定（`is_role_specified()` 可查），而不是伪装成"已指定"。
+    「未列出的角色」走 fallback_chain——配置层不再堆与 default 逐字相同的空壳链
+    （Issue #182 复评：23/25 条空壳声明已撤销）。
 
-    - role 为空 → 直接走 default（「不指定就默认通用」只在 role 缺失时生效）；
+    - role 为空 → 走 default（「不指定就默认通用」只在 role 缺失时生效）；
     - roles[角色].chain 存在 → 整链覆盖；
-    - 只写 primary/fallback → 该子链覆盖后，用 fallback_chain **补全尾部**（不缩短降级链）。
+    - 只写 primary/fallback → 该子链覆盖头部，fallback_chain 补全尾部（不缩短降级链）。
     """
-    base = list(fallback_chain())
     if not role:
         return tuple(default_chain())
     ov = role_override(role)
-    if not isinstance(ov, dict):
-        return tuple(base)
+    if not isinstance(ov, dict) or not _chain_of(ov):
+        return tuple(fallback_chain())
     ov_chain = _chain_of(ov)
-    if not ov_chain:
-        return tuple(base)
     # 整链覆盖：ov 自带 chain（新写法）→ 直接用
     if isinstance(ov.get("chain"), (list, tuple)):
         return ov_chain
-    # 旧写法（primary/fallback 子链）→ 覆盖头部，default 链补全剩余档位
+    # 旧写法（primary/fallback 子链）→ 覆盖头部，fallback_chain 补全剩余档位
+    base = list(fallback_chain())
     merged = list(ov_chain)
     for m in base:
         if m not in merged:
@@ -234,8 +233,7 @@ def settings_path():
 def declared_roles():
     """`.cnb/settings.yml` 里声明的全部 NPC 角色名（`npc.roles[].name`）。
 
-    Issue #182：「角色逐个指定模型」要能机器体检——声明的角色一个都不能漏配，
-    否则又回到「以为是默认、其实没人管」。读不到 settings 时返回空（不误报）。
+    读不到 settings 时返回空（不误报）。
     """
     path = settings_path()
     if not os.path.exists(path):
@@ -250,9 +248,74 @@ def declared_roles():
     return [str(r.get("name")) for r in roles if isinstance(r, dict) and r.get("name")]
 
 
+_PREFIXES = ("架构·", "市场·")
+
+
+def short_names(role):
+    """某规范角色「应当」对应的全部短名写法（用于别名完整性审计）。
+
+    来源两份合并：
+      1. `role_aliases` 表里显式登记的短名；
+      2. 去掉已知前缀（架构·/市场·）得到的自然短名（如 架构·开发 → 开发）。
+    第 2 份保证：即使有人把 role_aliases 里对应条目**删掉**，审计仍能发现
+    「规范名有、短名没接上」的断裂（Issue #182 复评：断点②换位置复发防护）。
+    不含自身、不含已在 roles 里显式写出的同名（避免误报）。
+    """
+    role = str(role)
+    out = []
+    aliases = role_aliases()
+    names = aliases.get(role)
+    if names:
+        out.extend(str(n) for n in (names if isinstance(names, (list, tuple)) else [names]))
+    for pre in _PREFIXES:
+        if role.startswith(pre) and len(role) > len(pre):
+            out.append(role[len(pre):])
+    # 去重、去自身、去空
+    seen, uniq = set(), []
+    for n in out:
+        if n and n != role and n not in seen:
+            seen.add(n); uniq.append(n)
+    return uniq
+
+
 def audit_roles():
-    """体检：settings.yml 声明但 `roles` 未显式指定模型链的角色列表。"""
-    return [r for r in declared_roles() if not is_role_specified(r)]
+    """体检（Issue #182 复评 · 全称 + 短名双体检）：
+
+    返回所有**配置不健康**的角色条目，分三类，每条带原因：
+      1. 空壳链：roles 里显式列出但 chain 与 fallback_chain 逐字相同（应撤销，改用 fallback）；
+      2. 别名断裂：某规范角色的短名解析出的链 ≠ 该角色本身的链（别名没接上，短名会静默走 fallback）；
+      3. 缺链：声明角色解析出的链为空（配置彻底坏掉）。
+    注：未显式列出、自然走 fallback_chain 的角色**不算不健康**（那是预期行为，不是空壳）。
+    """
+    bad = []
+    declared = declared_roles()
+    fb = list(fallback_chain())
+    # ① 空壳链
+    for role, blk in (_raw().get("roles") or {}).items():
+        if not isinstance(blk, dict):
+            continue
+        if _chain_of(blk) == tuple(fb):
+            bad.append({"role": role, "reason": "shell_chain",
+                        "detail": "roles 里显式列出但链与 fallback_chain 逐字相同，属空壳，应删"})
+    # ②③ 全称 + 短名双体检
+    for role in declared:
+        rc = list(role_chain(role))
+        if not rc:
+            bad.append({"role": role, "reason": "empty_chain",
+                        "detail": "声明角色解析出空链"})
+            continue
+        for short in short_names(role):
+            sc = list(role_chain(short))
+            if sc != rc:
+                bad.append({"role": role, "reason": "alias_broken",
+                            "detail": "短名 %r 解析链 %r ≠ 规范名链 %r（别名断裂，短名会静默走 fallback）"
+                                      % (short, sc, rc)})
+    return bad
+
+
+def audit_roles_flat():
+    """audit_roles 的扁平角色名列表（兼容旧调用 / CLI）。"""
+    return [b["role"] for b in audit_roles()]
 
 
 def default_policy():
