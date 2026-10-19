@@ -234,6 +234,15 @@ main:
           # model: glm-5.3-flash      # 三选备用通道（用户指定）
           # model: hy3                # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
           # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
+          #
+          # ⚠️ 版本后缀不可臆造（Issue #182 用户问「指定 deepseek v4.1 flash 1017」）：
+          #   - 本仓规则里没有 `1017` 这个版本标识，models.yml 记的也是 `deepseek-v4.1-flash`；
+          #   - npc:go 的 model 只认组织「可选模型列表」里的**精确 ID**，写错整个 stage
+          #     直接 error（#177 的静默失效就是这么来的：deepseek-v4-flash 不在列表）；
+          #   - 故此处保持 `deepseek-v4.1-flash`，不擅自拼 `-1017` 后缀；
+          #     若平台确实提供带版本号的 ID，改 models.yml 一处 + 本行同步即可全局生效。
+          #   - 另：npc:go 的 model 只决定**云端这条执行体**用哪个模型；
+          #     它不影响任何模型的 tps（生成速度），别把速度问题归到它头上。
 
 # 看板自动化：基于 Issue 声明头自动刷新模块版本演进看板 + 里程碑表
 # 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md
