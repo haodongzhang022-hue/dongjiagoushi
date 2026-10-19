@@ -7,7 +7,12 @@
 #   T2 样例脚本头部带机器可读"五要素"（Given/When/Then/Evidence）
 #   T3 feature-verify.sh --list 证据库盘点能列出全部样例
 #   T4 纯 bash 样例真实跑通（dashboard 看板呈现链路）
-#   T5 feature-regress.sh 回归诊断能跑出"通过/崩"定位
+#   T5 feature-regress.sh 回归诊断能跑出"通过/崩"定位 + TDD 红灯语义（Issue #165 P2）：
+#      T5a 诊断通道真跑通（**先验"能判红"，不再只看整体 rc**）
+#      T5b 真崩注入 → 诊断 exit 1 + 逐功能指名红（不是靠仓库里恰好没有 TDD 红灯凑绿）
+#      T5c 牙齿自证：验收断言真具备鉴别力（功能崩必须红，不被 TDD 两阶段稀释）
+#      T5d/d2 「TDD 红灯不是坏功能」：待实现的红 → 记账不算失败；实现后仍红 → 真红
+#      T5e/f 主执行器同源：feature-verify.sh 的 TDD 两阶段真接线（注入证据目录真跑）
 #   T6 合并闸门已接入 .cnb.yml（feature-verify gate 阶段）
 #   T7 文档 docs/FEATURE_VERIFY.md + CAPABILITY_INDEX 登记
 #   T8 五要素"功能级 > 断言"自证：缺语义段即判功能没做完（抓'假完成'）
@@ -120,20 +125,100 @@ else
   bad "dashboard 样例跑失败"
 fi
 
-# ---- T5 回归诊断 ----
-echo ""
-echo "▶ T5 feature-regress.sh 回归诊断能定位"
-REGRESS_OUT="$(bash scripts/feature-regress.sh 2>&1)"
-RC=$?
-if [ $RC -eq 0 ]; then
-  ok "feature-regress.sh 回归通过（rc=$RC）"
+# ---- T5 回归诊断（TDD 两阶段 · Issue #165 P2 收口）----
+# 旧 T5 是「整体 rc==0 才算过」——把**验收**与**TDD 红灯**（测试先行、功能尚未实现）
+# 混成一根灯：只要仓库里正当存在一个红，T5 就永远红；反过来「仓库里恰好没红」时它又是
+# 空转的绿，看不出诊断通道到底会不会判红。评审两次记录的 pre-existing 红灯都出在这。
+# 本版拆两阶段，并让每个阶段都带牙：
+#   ① 验收态：非 TDD 的失败 → 必须判红（先验"能判红"，不靠巧合凑绿）
+#   ② TDD 态：`@tdd-pending` 声明的失败 → 记账为 🔴TDD 待实现（不阻断）；
+#      但同一模块一旦被标记"已实现"（.tdd.verified），同样的红立刻恢复**真红否决**
+# 判据同 feature-verify.sh：只把**证据行**（`❌ [模块] 功能`）当证据（不看 rc），
+# 声明文件只当声明——把声明文件也纳入证据源会「自己证明自己」，豁免分支永远走不到（踩过）。
+tdd_judge() {  # $1=证据日志  $2=声明文件（每行一个模块名）  输出 OK:<待实现…> / FAIL:<真红…>
+  local LOG="$1" FLAG="$2" one mod declared="" pending="" real="" verified=""
+  if [ -f "$FLAG" ]; then declared=" $(tr ',' ' ' < "$FLAG") "; fi
+  if [ -f "$FLAG.verified" ]; then verified=" $(tr ',' ' ' < "$FLAG.verified") "; fi
+  while IFS= read -r one; do
+    [ -n "$one" ] || continue
+    mod="${one%%|*}"                    # 判据只按 `❌ [模块] 功能` 的模块名归属
+    case " $declared " in *" $mod "*)   # 已声明 TDD 待实现
+      case " $verified " in *" $mod "*) real="$real ${one#*|}" ;;   # 但已标记实现 → 真红
+        *) pending="$pending ${one#*|}" ;; esac ;;
+    *) real="$real ${one#*|}" ;; esac   # 未声明 → 一律真红（不靠 rc）
+  done < <(grep -oE '❌ \[[^]]+\] [^（]*' "$LOG" 2>/dev/null \
+             | sed -E 's/^❌ \[([^]]+)\] /\1|/')
+  if [ -n "$real" ]; then echo "FAIL:$real"; else echo "OK:$pending"; fi
+}
+
+TMPV="$(mktemp -d)"
+TDD_FLAG=".tdd"    # 仓库级 TDD 待实现声明（每行一个模块名）
+
+T5LOG="$TMPV/t5_regress.log"
+bash scripts/feature-regress.sh > "$T5LOG" 2>&1
+T5V="$(tdd_judge "$T5LOG" "$TDD_FLAG")"
+if [ $? -eq 0 ] && [[ "$T5V" == OK:* ]]; then
+  ok "T5a: 回归诊断真跑通且判绿（real=0，TDD 待实现=$(echo "${T5V#OK:}" | wc -w) 项，非靠 rc 碰巧）"
 else
-  bad "feature-regress.sh 失败（rc=$RC）"
+  bad "T5a: 回归诊断判红（TDD 以外的真失败）：$(echo "$T5V" | cut -c1-180)"
 fi
-if echo "$REGRESS_OUT" | grep -qE "看板呈现链路.*通过"; then
-  ok "回归输出含逐功能通过明细"
+grep -qE "看板呈现链路.*通过" "$T5LOG" \
+  && ok "T5b: 回归输出含逐功能通过明细（诊断不只看整体 green/red）" \
+  || bad "T5b: 回归未输出逐功能明细"
+
+# T5c 牙齿自证的**牙**：给 dashboard 挂上 TDD 豁免声明，再注入它的真崩 →
+#   必须仍判红。若两阶段被写成"挂 TDD 就免检"的天真版，这里直接绿 → 本条立刻抓红。
+printf '  ❌ [tddfixture] 假设有个待实现功能 未达成（T5c 注入真崩）\n' > "$TMPV/t5_inject.log"
+echo "dashboard" > "$TMPV/t5_flag"   # 声明的是别的模块 → 不得被豁免
+T5C="$(tdd_judge "$TMPV/t5_inject.log" "$TMPV/t5_flag")"; T5C_RC=$?
+# 注意：不要用 `[ $? -eq 0 ]` 取上一条命令的 rc —— 这里 `$?` 属于 `&&` 左操作数，
+#   恒为 0（踩过，T5c 假绿）。必须显式接住。
+if [ "$T5C_RC" -eq 0 ] && [[ "$T5C" == FAIL:* ]]; then
+  ok "T5c: 未声明的功能崩 → 判红且指名到功能（TDD 两阶段不稀释验收牙）"
 else
-  bad "回归未输出逐功能明细"
+  bad "T5c: 功能崩却未被判红（verdict=$T5C）→ 验收断言没有鉴别力"
+fi
+
+# T5d TDD 两阶段**双向可切**：同一份红，未实现=记账放行；已实现仍红=真红否决
+printf '  ❌ [demo] 未实现功能 未达成\n' > "$TMPV/t5_inject2.log"
+echo "demo" > "$TMPV/t5_flag2"
+T5D_PEND="$(tdd_judge "$TMPV/t5_inject2.log" "$TMPV/t5_flag2")"
+echo "demo" > "$TMPV/t5_flag2.verified"
+T5D_REAL="$(tdd_judge "$TMPV/t5_inject2.log" "$TMPV/t5_flag2")"
+if [[ "$T5D_PEND" == OK:* && "$T5D_REAL" == FAIL:* ]]; then
+  ok "T5d: 未实现的红只记账不阻断；已实现仍红 → 真红否决（两阶段双向可切）"
+else
+  bad "T5d: TDD 两阶段判据失准（pending=$T5D_PEND real=$T5D_REAL）"
+fi
+if [[ "$T5D_REAL" == FAIL:* ]]; then
+  ok "T5d2: 已标记实现后不得再吃 TDD 豁免（防'挂 TDD 当免死金牌'）"
+else
+  bad "T5d2: 已实现仍被豁免（verdict=$T5D_REAL）→ 待实现标记成了免检通道"
+fi
+rm -f "$TMPV/t5_flag" "$TMPV/t5_flag2" "$TMPV/t5_flag2.verified" \
+      "$TMPV/t5_inject.log" "$TMPV/t5_inject2.log" "$T5LOG"
+
+# T5e/T5f 主执行器真接线：造一个「必然失败」的证据脚本，注入临时证据目录，
+#   验证 feature-verify.sh 的归属判定与自测同源（不是只把语义写进注释）。
+T5DEMO="scripts/feature-verify/zzdemo"
+mkdir -p "$T5DEMO"
+printf '#!/usr/bin/env bash\necho "  ❌ [zzdemo] 假功能 未达成"\nexit 1\n' > "$T5DEMO/假功能.sh"
+printf '  ❌ [zzdemo] 假功能 未达成\n' > "$TMPV/t5demo_evidence.log"
+: > "$TMPV/t5demo.tdd"; echo "zzdemo" > "$TMPV/t5demo.tdd"
+T5E="$(FEATURE_VERIFY_TDD_FILE="$TMPV/t5demo.tdd" bash scripts/feature-verify.sh --module zzdemo 2>&1)"; T5E_RC=$?
+echo "zzdemo" > "$TMPV/t5demo.tdd.verified"
+T5F="$(FEATURE_VERIFY_TDD_FILE="$TMPV/t5demo.tdd" bash scripts/feature-verify.sh --module zzdemo 2>&1)"; T5F_RC=$?
+rm -rf "$T5DEMO" "$TMPV/t5demo_evidence.log" "$TMPV/t5demo.tdd" "$TMPV/t5demo.tdd.verified"
+
+if [ "$T5E_RC" -eq 0 ] && echo "$T5E" | grep -q "TDD=1"; then
+  ok "T5e: 主执行器把 TDD 声明模块的红记账为 TDD 待实现（TDD=1，不误判坏功能）"
+else
+  bad "T5e: 主执行器未按 TDD 记账（rc=$T5E_RC）：$(echo "$T5E" | grep -E '汇总|blocked_on' | head -2)"
+fi
+if [ "$T5F_RC" -ne 0 ] && echo "$T5F" | grep -q "blocked_on: feature_unverified"; then
+  ok "T5f: 标记已实现后同一红恢复真红否决（blocked_on，闸门不放行）"
+else
+  bad "T5f: 已实现仍被 TDD 豁免（rc=$T5F_RC）→ 待实现声明成了免检通道"
 fi
 
 # ---- T6 合并闸门已接入 .cnb.yml ----

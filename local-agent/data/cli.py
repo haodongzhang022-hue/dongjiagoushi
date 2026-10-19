@@ -88,7 +88,7 @@ def main():
             "backend": db.backend(),
             "is_remote": db.is_remote(),
             "in_transaction": db.is_in_tx(),
-            "tx_depth": db._depth(),
+            "tx_depth": db.tx_depth(),
             "db_path": db.DB_PATH if not db.is_remote() else "(remote)",
         }, ensure_ascii=False, indent=2))
     elif args.cmd == "agent":

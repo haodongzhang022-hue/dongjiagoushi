@@ -254,7 +254,8 @@ p = os.path.join(tempfile.mkdtemp(), "abandon.db"); os.environ["DB_PATH"] = p
 from data import db, schema
 schema.init_schema()
 schema.init_schema()
-from data.db import _reclaim_abandoned_tx   # noqa: 直接验证兜底函数本身
+# 走**公开**探针/入口，不抠私有符号（Issue #165 复评 🟡1：私有名重构会碎）
+from data.db import reclaim_abandoned_tx, tx_depth
 
 cur = db.connect()
 cur.execute("CREATE TABLE IF NOT EXISTS t (v INTEGER)")
@@ -268,7 +269,7 @@ try:
 except RuntimeError:
     pass
 del q
-assert db.is_in_tx(), "遗弃后计数应残留（复现前提），实测 depth=%r" % db._depth()
+assert db.is_in_tx(), "遗弃后计数应残留（复现前提），实测 depth=%r" % tx_depth()
 
 # (b) 兜底回收：**开新事务时**必须自动回收遗弃层（生产路径，不靠调用方记得手动收）
 assert db.is_in_tx(), "前提：遗弃后计数残留"
@@ -304,6 +305,15 @@ ext.close()
 assert rows == [(2,)], "遗弃污染后 with 事务写丢失：外部可见 %r（期望 [(2,)]）" % (rows,)
 print("  ✅ 遗弃路径兜底：计数回收后 with 事务真落库（外部可见 %r）" % (rows,))
 
+# (b3) 返回值语义单一：真动了手就必须说 True，否则调用方无法凭返回值判断有没有回收
+#     （复评 🟡1：`force` 分支曾清理成功却 return False）
+assert reclaim_abandoned_tx() is False, "干净状态下不该声称回收过（返回值语义混了）"
+_qx = db.transaction(); _qx.execute("INSERT INTO t (v) VALUES (11)"); del _qx
+assert tx_depth() > 0, "前提：制造一层遗弃残留"
+assert reclaim_abandoned_tx() is True, "真回收了却返回 False → 返回值语义丢失"
+assert tx_depth() == 0, "返回值说回收了，计数却没归零"
+print("  ✅ 兜底返回值语义单一：干净=False / 真回收=True（调用方可凭返回值判断）")
+
 # (d) 牙口对照（**真断言**，不是空转）：先让计数处于**自洽残留**（1 层真实遗弃，无残留帧），
 #     再验证「遗弃层会吞掉最外层写入」。注意：`db.transaction()` 开新事务时会自动回收
 #     对账（depth > 存活帧数 → 回收到 0），故本段把两段独立，各放在纯净环境里复现：
@@ -312,14 +322,14 @@ print("  ✅ 遗弃路径兜底：计数回收后 with 事务真落库（外部�
 #     本段断言「遗弃后 depth 与存活帧不自洽」，这是兜底「必须存在」的判据基础——
 #     若哪天 _reclaim_abandoned_tx 改成 return False，(e) 段立刻转红。
 q = db.transaction(); q.execute("INSERT INTO t (v) VALUES (3)"); del q   # 再污染一次
-assert db.is_in_tx(), "牙口对照前提：污染后计数应残留（depth=%r）" % db._depth()
-assert db._depth() > len(db._alive_frames()), (
+assert db.is_in_tx(), "牙口对照前提：污染后计数应残留（depth=%r）" % tx_depth()
+assert tx_depth() > db.alive_tx_frames(), (
     "牙口对照失效：遗弃后计数(%r)未超过存活帧数(%r) → 兜底判据不成立"
-    % (db._depth(), len(db._alive_frames())))
+    % (tx_depth(), db.alive_tx_frames()))
 print("  ✅ 牙口对照：遗弃后 depth=%r > 存活帧=%r（不自洽）→ 兜底判据成立"
-      % (db._depth(), len(db._alive_frames())))
+      % (tx_depth(), db.alive_tx_frames()))
 # (e) 显式调兜底后再 with → 必须落库（兜底失效则本断言 RED）
-_reclaim_abandoned_tx()
+reclaim_abandoned_tx()
 with db.transaction() as tx3:
     tx3.execute("INSERT INTO t (v) VALUES (5)")
 ext = sqlite3.connect(p); rows = ext.execute("SELECT v FROM t ORDER BY v").fetchall(); ext.close()
@@ -345,7 +355,7 @@ probe = subprocess.run(
     [sys.executable, "-c",
      "import sys; sys.path.insert(0,'local-agent');"
      "from data import db;"
-     "a=db.is_in_tx(); t=db.transaction(); b=db.is_in_tx(); d=db._depth();"
+     "a=db.is_in_tx(); t=db.transaction(); b=db.is_in_tx(); d=db.tx_depth();"
      "t.rollback(); c=db.is_in_tx();"
      "print(a,b,d,c)"],
     capture_output=True, text=True, env=env)

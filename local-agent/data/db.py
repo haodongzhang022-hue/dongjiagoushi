@@ -122,6 +122,33 @@ def is_in_tx():
     return _depth() > 0
 
 
+def tx_depth():
+    """公开探针：当前线程事务嵌套深度（0 = 不在事务中）。
+
+    `is_in_tx()` 只回答"有没有"，回答不了"漏了几层"；诊断 tx_depth 泄漏要的是后者。
+    对外公开它，测试与 `data-cli status` 就不必去抠私有符号（重构私有名时不至于碎）。
+    """
+    return _depth()
+
+
+def alive_tx_frames():
+    """公开探针：当前线程**存活**事务对象数（遗弃判据的另一半）。
+
+    `tx_depth > alive_tx_frames()` 就是「有层被遗弃」的完整口径——诊断/测试据此判断
+    兜底是否成立，不必去读私有帧栈。
+    """
+    return len(_alive_frames())
+
+
+def reclaim_abandoned_tx(force=False):
+    """公开入口：回收遗弃事务残留（语义见 `_reclaim_abandoned_tx`）。
+
+    生产路径已自动调用（开新事务前 / 最外层收尾时），本函数给诊断与测试一个**公开**
+    抓手，避免外部为了验证兜底去 import 私有符号。返回 True = 本次真动了计数/清帧。
+    """
+    return _reclaim_abandoned_tx(force=force)
+
+
 def execute(sql, params=()):
     """执行一条写语句（insert/update/delete），返回受影响行数。
 
@@ -227,7 +254,10 @@ def _drop_frame(tx):
 
 
 def _reclaim_abandoned_tx(force=False):
-    """回收**遗弃事务**残留的事务计数（best-effort，返回是否发生回收）。
+    """回收**遗弃事务**残留的事务计数（best-effort）。
+
+    返回值语义**单一**：True = 本次真的动了计数/清了残帧，False = 什么都没改。
+    不再有"清理成功却返回 False"的分支（曾让调用方无法凭返回值判断有没有回收）。
 
     `_thread_local.tx_depth` 靠 tx 对象收尾递减，非 `with` 用法下若中途异常、
     对象被丢弃而未收尾，计数就永久残留：之后 `db.execute` 不再自动提交、
@@ -246,9 +276,10 @@ def _reclaim_abandoned_tx(force=False):
     stack = _alive_frames()
     if force:
         if depth <= 0:
-            if stack:
-                del _tx_stack()[:]    # 计数已归零、帧没摘 → 残留帧，清掉
-            return False
+            if not stack:
+                return False          # 无计数、无残帧 → 干净，没动手
+            del _tx_stack()[:]        # 计数已归零、帧没摘 → 残留帧，清掉
+            return True               # 动了手就要如实说（返回值语义统一）
         if not stack:
             # 帧全空而计数 > 0：唯一的解释是遗弃（活事务必有帧）
             try:
