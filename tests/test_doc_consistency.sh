@@ -251,6 +251,22 @@ contains "CAPABILITY_INDEX 登记阶段链门控" "$(cat docs/CAPABILITY_INDEX.m
 echo ""
 echo "▶ 八、写时状态中介（写路径原子化）一致性"
 file_exists "ADR-0013 存在（写路径原子化决策）" "docs/adr/0013-write-path-atomic-and-migration-sink.md"
+# 九、ADR 编号唯一性（PR #175 修复：合并后曾出现两个 ADR-0009 重号）
+echo ""
+echo "▶ 九、ADR 编号唯一性 / dsh 适配决策登记"
+ADR_DUP="$(ls docs/adr/ | grep -oE '^[0-9]{4}' | sort | uniq -d)"
+if [ -z "$ADR_DUP" ]; then
+  PASS=$((PASS+1)); echo "  ✅ ADR 编号无重号（全仓 00NN 唯一）"
+else
+  FAIL=$((FAIL+1)); FAILED_ITEMS+=("[ADR] 存在重号编号: $ADR_DUP")
+  echo "  ❌ ADR 编号重号: $ADR_DUP"
+fi
+file_exists "ADR-0014 存在（dsh 适配独立模块决策）" "docs/adr/0014-dsh-adapter-new-version.md"
+contains "ADR README 登记 ADR-0014" "$(cat docs/adr/README.md)" "0014-dsh-adapter-new-version"
+contains "CAPABILITY_INDEX 登记 dsh 适配 ADR-0014" "$(cat docs/CAPABILITY_INDEX.md)" "ADR-0014-dsh"
+# 索引行编号须与文件编号一致（防"文件改名了、索引行没改"）
+contains "ADR README 索引行编号与文件编号一致" "$(grep 'dsh-adapter-new-version' docs/adr/README.md)" "| [0014-dsh"
+
 contains "ADR README 登记 ADR-0013" "$(cat docs/adr/README.md)" "0013-write-path-atomic"
 contains "CAPABILITY_INDEX 登记写时状态中介" "$(cat docs/CAPABILITY_INDEX.md)" "写时状态中介"
 contains "AGENTS.md 登记写路径原子化规则" "$(cat AGENTS.md)" "写路径原子化"

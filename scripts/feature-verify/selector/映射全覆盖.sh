@@ -36,6 +36,33 @@ cd "$REPO_ROOT"
 
 PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); echo "  ✅ $1"; }
+
+# ------------------------------------------------------------
+# hermetic git fixture 助手（Issue #175 · CI 假红根因修复）
+# fixture 仓库**不继承宿主 git 配置**：CI/开发机的系统级 gitconfig 常带
+# `commit.gpgsign=true`（本仓 CNB runner 即如此，gpg.program=cnb-gpgsign），
+# 若宿主签名工具不可用，`git commit` 会失败但 **stdout 被丢弃、rc 未检查**，
+# 于是 fixture 里根本没有 commit —— 而 `git rev-parse HEAD` 在空仓库里
+# **打印字面量 "HEAD" 且 rc=0**（不输出 SHA，只有 --verify 才失败），
+# 下游断言全被误导成"目标路径没走到"的假红。
+# 故：① 显式关掉签名/钩子（不依赖宿主配置）；② 提交后真核对 HEAD，
+#     没提交成功就 `exit 1`（fail-loud，绝不让 fixture 静默空壳）。
+# ------------------------------------------------------------
+fixture_git() {  # 在 fixture 仓库内固定 git 行为
+  git init -q -b work
+  git config user.email t@t; git config user.name t
+  git config commit.gpgsign false
+  git config tag.gpgsign false
+  git config core.hooksPath /dev/null
+  # 清掉可能残留的 gc/维护进程对仓库的干扰（fixture 极小，无需自动维护）
+  git config gc.auto 0
+}
+fixture_commit() {  # $1=message  —— 真提交 + 真核对，失败即 fail-loud
+  git add -A >/dev/null 2>&1
+  git commit -qm "$1" >/dev/null 2>&1 || { echo "❌ fixture 提交失败（$1）：宿主 git 配置不可用" >&2; exit 1; }
+  git rev-parse --verify --quiet HEAD >/dev/null 2>&1 || { echo "❌ fixture 无 HEAD（$1）" >&2; exit 1; }
+}
+
 bad(){ FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
 FV="scripts/feature-verify.sh"
@@ -128,15 +155,18 @@ echo ""
 # 造最小仓库（单提交，无 main/HEAD~1）→ 全部 diff 来源落空。
 # ⚠️ `git init -q -b work` 显式钉死非 main 分支名：否则 init.defaultBranch=main
 #    的环境自带可解析 main，前提失效（Issue #162 复评 R2）。
+# ⚠️ fixture 用 `fixture_git` / `fixture_commit`：宿主 commit.gpgsign=true 时
+#    裸 `git commit` 会静默失败、空仓库 `git rev-parse HEAD` 又回显字面量 HEAD（rc=0），
+#    假红就这么来的（Issue #175 CI 根因）。
 T7REPO="$(mktemp -d)"
 (
   cd "$T7REPO" || exit 1
-  git init -q -b work; git config user.email t@t; git config user.name t
+  fixture_git
   mkdir -p scripts/feature-verify/foo
   printf '#!/usr/bin/env bash\necho ok; exit 0\n' > scripts/feature-verify/foo/a.sh
   printf 'foo: scripts/x.py: scripts/x\\.py\n' > scripts/feature-verify/modules.map
   cp "$OLDPWD/$FV" scripts/feature-verify.sh
-  git add -A >/dev/null 2>&1; git commit -qm init >/dev/null 2>&1
+  fixture_commit init
 )
 # ① 不带 CNB_COMMIT
 t7out="$(cd "$T7REPO" && CNB_PULL_REQUEST_TARGET_SHA=0000000000000000000000000000000000000000 \
