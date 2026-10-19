@@ -2,7 +2,7 @@
 
 > **唯一配置文件**：`local-agent/model_routing/models.yml`（改模型只改这一处）
 > **读配置代码层**：`local-agent/model_routing/spec.py`
-> **演进线**：Issue #147 · module model-routing **v0.3.0-update**
+> **演进线**：Issue #147 · module model-routing **v0.3.0-update** → **v0.3.0-fix（Issue #182 · 角色逐个指定）**
 > **触发词**：模型/主模型/备用模型/降级/渠道不通/统一配置/角色指定/v4.1 flash/codebuddy/glm/接线/按角色
 
 ## 一、用户诉求（Issue #147）
@@ -45,11 +45,52 @@ roles: {}
 unavailable_signals: [unavailable, timeout, connection_error, rate_limit, "429", "503", ...]
 ```
 
-**解析顺序（确定性）**：`roles[角色]` → `default` → 内置兜底常量（配置缺失时不崩）。
+**解析顺序（确定性 · Issue #182 收紧后）**：
+`role_candidates(角色全称/短名)` → `roles[角色]` → **`fallback_chain`** → 内置兜底常量。
 
-- 角色**未在 roles 中列出** → 继承 `default`（「不指定就默认通用」）；
-- 角色**在 roles 中列出** → 覆盖：写 `chain` 整链覆盖；写 `primary/fallback` 子链则**头部覆盖、default 补全尾部**（不缩短降级链）；
+- 角色**显式列出** → 用它的链（写 `chain` 整链覆盖；写 `primary/fallback` 子链则头部覆盖、`fallback_chain` 补全尾部）；
+- 角色**未列出** → 走 `fallback_chain`，且 `role_policy()['specified'] == False`（**可审计**），
+  不再"悄悄等于 default"——历史上"以为配了角色、其实全在走默认"就是这么发生的；
+- `role_aliases` 让全称与短名指向同一条配置（`架构·开发` ↔ `开发`），云端传全称也匹配得上；
 - 支持 `MODEL_ROUTING_CONFIG` 环境变量指向自定义配置文件（多环境部署用）。
+
+### 2.1 角色逐个指定（Issue #182 · 本版核心）
+
+用户原话：「我记得有对哪个角色用哪个模型的那部分的配置的定义，你检查一下，所以不是默认，
+其实有额外的文件指定了的」。**配置确实在**，但两个原因让它像"没生效"：
+
+| 断点 | 真相 | 修法 |
+|---|---|---|
+| ① `roles: {}` 是空的 | 没有一条按角色的指定，全部落到 default | 把 `.cnb/settings.yml` 声明的角色**逐个写进** `roles` |
+| ② 全称/短名匹配不上 | 云端传 `架构·开发`，配置若写短名就查不到 → 静默回落默认 | `role_aliases` 归一 + `role_candidates` 双写法查询 |
+
+写进代码的约束：
+
+```bash
+python3 -m model_routing.cli audit      # 体检：settings.yml 声明的角色是否都配了（缺即退出码 2）
+python3 -m model_routing.cli roles      # 逐角色实际生效主档 + specified
+```
+
+信号灯：`bash tests/test_model_role_assign.sh`（7 组，含"摘掉一个角色 → 审计立刻报红"的反向验证）。
+
+**按岗位差异化的依据**（不是拍脑袋，是「这岗一轮要吞多少 token / 跑多少步」）：
+
+| 角色类型 | 主档倾向 | 理由 |
+|---|---|---|
+| 写长文/长代码（总师、开发、评审） | 长上下文强模型优先 | 一轮要吃 AGENTS.md + skill + diff，上下文规模是 tps 的主导因素 |
+| 短任务高频（进度推手、客服） | 快档模型优先（`glm-5.3-flash`） | 打标/百分比/短答，不需要长上下文，要的是回合快 |
+
+### 2.2 版本别名（用户说的 `deepseek v4.1 flash 1017`）
+
+```yaml
+alias:
+  deepseek-v4.1-flash-1017: deepseek-v4.1-flash   # 左侧=口头/平台版本串，右侧=配置认可的精确 ID
+```
+
+- **只做映射，不臆造**：右侧必须是配置链里真实出现的 ID（信号灯 ⑤ 会校验，指向不存在的 ID 直接红）；
+- 用户口中的 `1017` 若就是平台可选列表里的正式 ID，**改 `alias` 右侧一处**即可让全角色生效，不用逐角色改；
+- 若右侧写错 → `model ... is not in the optional models list` → 整个 stage error，
+  评论 @ 角色的唤醒链路静默失效（#177 事故）。所以这里宁可报红，也不猜。
 
 ## 三、为什么需要独立模块 + 统一配置
 
