@@ -60,13 +60,13 @@ assert tuple(spec.role_chain("开发")) == tuple(spec.role_chain("架构·开发
 print("  ✅ 进度推手==架构·进度推手；开发==架构·开发（短名不断裂）")
 PY
 
-echo "---- ⑤ 审计双体检（全称+短名）：当前无问题；摘掉短名别名立刻报红 ----"
+echo "---- ⑤ 审计双体检（全称+短名）：当前无问题；别名缺失即报红（仅在有差异化链时才可检出） ----"
 python3 - <<'PY'
 import os, sys, tempfile, yaml; sys.path.insert(0, '.')
 from model_routing import spec
 assert not spec.audit_roles(), f"当前配置审计应无问题: {spec.audit_roles()}"
-# 反向：临时把「架构·进度推手」的短名从 role_aliases 摘掉 → 短名静默走 fallback，审计必须报红
-raw = yaml.safe_load(open(spec.config_path(), encoding='utf-8')) or {}
+# 反向 A：显式差异化角色的短名被摘掉 → 短名静默走 fallback，审计必须报 alias_broken
+raw = yaml.safe_load(open(spec.config_path(), encoding="utf-8")) or {}
 ra = raw.get("role_aliases") or {}
 ra["架构·进度推手"] = [n for n in (ra.get("架构·进度推手") or []) if n != "进度推手"]
 fd, tmp = tempfile.mkstemp(suffix=".yml"); os.close(fd)
@@ -74,11 +74,28 @@ yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
 os.environ["MODEL_ROUTING_CONFIG"] = tmp
 try:
     issues = spec.audit_roles()
-    assert any(i["role"] == "架构·进度推手" and i["reason"] == "alias_broken" for i in issues), \
-        f"摘掉短名别名后审计未报红: {issues}"
+    assert any(i["role"] == "架构·进度推手" and i["reason"] == "alias_broken" for i in issues), issues
 finally:
     os.environ.pop("MODEL_ROUTING_CONFIG", None); os.unlink(tmp)
-print("  ✅ 当前审计全绿；摘掉短名别名 → 审计立即报 alias_broken（断点②不再复发）")
+# 反向 B：非差异化角色的整条别名缺失（架构·运维）——今日走 fallback 与全称同链，断不断都看不出来；
+#         一旦它将来被差异化指定，缺别名就静默回落。这里把运维临时差异化，验证缺别名必报红。
+raw = yaml.safe_load(open(spec.config_path(), encoding="utf-8")) or {}
+raw.setdefault("roles", {})["架构·运维"] = {"chain": ["glm-5.3-flash", "deepseek-v4.1-flash"]}
+raw["role_aliases"] = {k: v for k, v in (raw.get("role_aliases") or {}).items() if k != "架构·运维"}
+fd, tmp = tempfile.mkstemp(suffix=".yml"); os.close(fd)
+yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
+os.environ["MODEL_ROUTING_CONFIG"] = tmp
+try:
+    issues = spec.audit_roles()
+    assert any(i["role"] == "架构·运维" and i["reason"] == "alias_broken" for i in issues), issues
+finally:
+    os.environ.pop("MODEL_ROUTING_CONFIG", None); os.unlink(tmp)
+# 正向 C：声明角色（含 架构·数据管理 与 架构·数据管理员 同短名这对）逐一可反查，不落空、不静默走 fallback 后失联
+declared = spec.declared_roles()
+missing = [r for r in declared if not spec.role_chain(r)]
+assert missing == [], f"声明角色解析出空链: {missing}"
+assert set(declared) - set(spec.role_aliases()) == set(), (set(declared) - set(spec.role_aliases()))
+print("  ✅ 审计全绿；摘短名 / 缺整条别名（差异化后）均报 alias_broken；24 声明角色全部可反查")
 PY
 
 echo "---- ⑥ 模型别名实名（issue #182 复评）：未登记版本后缀别名显式报红，不留伪配置 ----"
