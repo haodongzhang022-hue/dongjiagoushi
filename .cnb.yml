@@ -223,7 +223,9 @@ main:
         #     ① deepseek-v4.1-flash  主通道
         #     ② codebuddy            二选备用（主渠道不通时启用）
         #     ③ glm-5.3-flash        三选备用
-        #   roles（按角色单独指定）= 可选，默认不启用定制，未列出的角色自动继承 default
+        #   roles（角色按需指定，Issue #182 复评）= 只在角色真正需要不同链时显式列出；
+        #     其余角色走 fallback_chain（= default.chain 的锚点引用），不在配置堆空壳链。
+        #   alias（版本别名，如 1017）= 实名登记，未确认真实平台 ID 不留伪配置。
         # 说明：改模型只改 models.yml 一处，无需跨文件检查/修改，改完即长期生效。
         #   npc:go 只接受单个 model 字段；多档降级由 llm 后端
         #   （local-agent/model_routing/engine.py）运行时接管——

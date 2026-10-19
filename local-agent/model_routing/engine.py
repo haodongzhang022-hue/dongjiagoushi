@@ -57,10 +57,12 @@ def _tier_role(idx):
 
 
 def resolve_models(policy=None, role=None):
-    """解析目标渠道顺序（主 → 二选 → 三选 …）。
+    """解析目标渠道顺序（主 → 二选 → 三选 …），并集中过模型别名映射。
 
     优先级：显式 policy > role 覆盖（roles[role]→default）> 通用默认。
     未指定角色（role=None）→ 走 default（「不指定就默认通用」）。
+    Issue #182 复评：模型别名（alias）统一在此收口——每个模型名过 `_spec.resolve_alias`，
+    未登记别名（版本后缀型）在此显式报红（不放行），不再散落在 openai_compat 里各自映射。
     """
     if policy is None:
         policy = _spec.role_policy(role)
@@ -75,7 +77,11 @@ def resolve_models(policy=None, role=None):
     # 兜底：策略缺字段时退回 spec 规范顺序
     if not order:
         order = _spec.channel_order(role)
-    return order
+    # 集中过别名映射（未登记别名在此报红）
+    out = []
+    for m in order:
+        out.append(_spec.resolve_alias(m))
+    return out
 
 
 def route_call(caller, system_prompt="", user_input="", policy=None, role=None, **kw):
