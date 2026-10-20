@@ -26,12 +26,20 @@ default:
 #    通过 YAML 锚点 *default_chain 直接引用 default.chain —— 配置层零重复字面量。
 fallback_chain: *default_chain
 
-# ③ 版本别名（Issue #182 · 用户说的「deepseek v4.1 flash 1017」）
+# ③ 版本别名（Issue #182 · 用户说的「deepseek v4.1 flash 1017」/「minimax 3.1 flash」）
 #    左侧是平台/用户口语里的版本串，右侧是本配置认可的精确 ID。
-#    ★ 右侧必须是平台「可选模型列表」里真实存在的 ID 才能登记；
-#      写错 = 整链静默失效（#177 事故）。当前人类尚未确认 1017 对应哪个真实 ID，
-#      **故意留空**——不留伪配置，未登记别名一律在解析时显式报红（不放行）。
-#    ★ 人类确认后：只在 alias 下补一行 `deepseek-v4.1-flash-1017: <真实ID>` 即可全角色生效。
+#    ★ 铁律：右侧必须是平台「可选模型列表」里**真实存在**的 ID 才能登记；
+#      写错 = 整链静默失效（#177 事故：model ... is not in the optional models list → stage error）。
+#      所以本表**只接受实跑探针成功的 ID**（`python -m model_routing.cli probe <模型ID>`），
+#      不接受「听说/按说/应该」。
+#    ★ 未登记的版本串（带 -<数字> 后缀）在解析期**显式报红不放行**，不静默透传。
+#
+#    当前两个候选（用户 2026-10-20 在 PR #185 提出，待人类给真实 ID）：
+#      deepseek-v4.1-flash-1017 → ?   （1017 = 版本批次口径，平台真实 ID 待确认）
+#      minimax-3.1-flash        → ?   （minimax 3.1 flash，平台真实 ID 待确认）
+#    确认后各补一行即可**全角色生效**，不用逐角色改：
+#      # deepseek-v4.1-flash-1017: "<平台可选列表里的真实 ID>"
+#      # minimax-3.1-flash:        "<平台可选列表里的真实 ID>"
 alias: {}
 
 # ④ 角色别名归一（云端传全称，配置写短名也能对上）
@@ -86,3 +94,23 @@ unavailable_signals:
   - "502"
   - "503"
   - "504"
+
+# ⑦ 平台侧可控参数（CNB `npc:go` options · 文档 zh/build/internal-steps/npc/go.md）
+#    背景（PR #185）：用户感觉「架构·开发」慢，问「直接指定模型按说也会快」。
+#    真相：模型 ID 只是其中一档；npc:go 还有一组**和模型绑定的能力参数**，
+#    不显式指定时会继承平台默认模型配置，一旦换了自定义 model 就回落到内置默认值。
+#    ★ 铁律：`model` 这一项仍是 `default.chain[0]` 的派生物，本文件不重复写字面量
+#      （tests 里断言两者一致）；下面只声明**不派生于渠道链**的推理/上下文档位。
+#    ★ 改完须同步到 `.cnb.yml` 的 `.npc_task`（npc:go 只认流水线 options，不读本文件），
+#      一致性由 tests/test_model_role_assign.sh 第 ⑧ 组机器核验，不靠自觉。
+npc_go:
+  # 推理深度：off / minimal / low / medium / high / xhigh / max
+  #   显式指定自定义 model 时平台回落到 medium；这里写死期望值，避免「以为设了其实没设」。
+  thinkingLevel: medium
+  # 上下文窗口：128k ~ 1m；显式指定 model 时平台回落到 1m。
+  #   降它有实际收益——单轮上下文变小，溢出压缩更少触发（这是「慢」的真实主因之一）。
+  contextWindow: 1m
+  # 单次输出上限；显式指定 model 时平台回落到 48k。
+  maxTokens: 48k
+  # 最大对话轮次；显式指定 model 时平台回落到 500。
+  maxTurns: 500

@@ -4,7 +4,7 @@
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/local-agent"
-echo "==== 角色按需指定模型信号灯（Issue #182 复评 · PR #184） ===="
+echo "==== 角色按需指定模型信号灯（Issue #182 复评 · PR #184/#185） ===="
 
 echo "---- ① 两链一致：fallback_chain 引用 default.chain（配置层零重复字面量） ----"
 python3 - <<'PY'
@@ -139,4 +139,59 @@ assert m.group(1) == spec.default_chain()[0], (m.group(1), spec.default_chain()[
 print("  ✅ .cnb.yml model ==", m.group(1), "== models.yml default.chain[0]")
 PY
 
-echo "==== ✅ 角色按需指定模型信号灯全绿（7/7 · 含两链一致 + 别名/链一致） ===="
+echo "---- ⑧ 平台参数 + 别名键（PR #185）：npc_go/.cnb.yml 一致、家族号不误伤、空登记报红 ----"
+python3 - <<'PY'
+import os, sys, re, tempfile, yaml; sys.path.insert(0, '.')
+from model_routing import spec
+
+# ⑧-1 平台可控参数：models.yml npc_go 与 .cnb.yml .npc_task 必须逐项一致
+#     （npc:go 只认流水线 options，不读 models.yml；两边漂移 = 配置看着对、线上不生效）
+params = spec.npc_go_params()
+assert params, "models.yml 缺 npc_go 块（平台参数无人声明）"
+text = open("../.cnb.yml", encoding="utf-8").read()
+for k, v in params.items():
+    m = re.search(r"^\s*%s:\s*(\S+)" % re.escape(k), text, re.M)
+    assert m, f".cnb.yml 缺 {k}（与 models.yml npc_go 不一致）"
+    got = m.group(1).strip().rstrip("#").strip()
+    assert got == str(v), f"{k} 不一致：.cnb.yml={got!r} models.yml={v!r}"
+# 平台合法域（文档 zh/build/internal-steps/npc/go.md）——写错平台直接报错
+assert params.get("thinkingLevel") in {"off", "minimal", "low", "medium", "high", "xhigh", "max"}, params
+cw = str(params.get("contextWindow"))
+assert re.fullmatch(r"\d+k|\d+m|\d+", cw.lower()), f"contextWindow 写法非法: {cw}"
+
+# ⑧-2 版本串判据不误伤模型家族号（minimax-3 / glm-5 是家族号，不是版本串）
+assert spec.resolve_alias("minimax-3.1-flash") == "minimax-3.1-flash", "minimax 家族号被判成未登记别名"
+assert spec.resolve_alias("glm-5.3-flash") == "glm-5.3-flash"
+try:
+    spec.resolve_alias("minimax-3.1-flash-1017")
+    raise AssertionError("版本串未报红（应显式拦截）")
+except RuntimeError as e:
+    assert "未登记别名" in str(e), str(e)
+
+# ⑧-3 别名**键**体检：登记了却没接线 → 报 alias_unused（右值写坏也测不出来）
+raw = yaml.safe_load(open(spec.config_path(), encoding="utf-8"))
+raw["alias"] = {"minimax-3.1-flash": "some-unverified-id"}
+fd, tmp = tempfile.mkstemp(suffix=".yml"); os.close(fd)
+yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
+os.environ["MODEL_ROUTING_CONFIG"] = tmp
+try:
+    issues = spec.audit_roles()
+    assert any(i["reason"] == "alias_unused" for i in issues), f"登记未接线未报红: {issues}"
+    # 真接线后（写进角色链）→ 不该再报
+    raw["roles"] = dict(raw.get("roles") or {},
+                        **{"架构·测试": {"chain": ["minimax-3.1-flash", "deepseek-v4.1-flash"]}})
+    yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
+    issues2 = [i for i in spec.audit_roles() if i["reason"] == "alias_unused"]
+    assert not issues2, f"接线后仍报 alias_unused: {issues2}"
+finally:
+    os.environ.pop("MODEL_ROUTING_CONFIG", None); os.unlink(tmp)
+
+# ⑧-4 CLI 真跑
+import subprocess
+out = subprocess.run([sys.executable, "-m", "model_routing.cli", "params"],
+                     capture_output=True, text=True, check=True).stdout
+assert "npc_go" in out and "thinkingLevel" in out, out
+print("  ✅ npc_go 与 .cnb.yml 逐项一致；家族号不误伤；空登记报 alias_unused；接线后自愈；cli params 通")
+PY
+
+echo "==== ✅ 角色按需指定模型信号灯全绿（8/8 · 含平台参数一致性 + 别名键体检） ===="
