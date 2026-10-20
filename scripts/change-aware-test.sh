@@ -157,6 +157,9 @@ declare -a MODULE_MAP=(
   "local-agent/roles/reviewer.py|local-agent/tests/test_review_efficiency.sh,local-agent/tests/test_dual_axis_review.sh"
   "local-agent/hybrid/bus.py|local-agent/tests/test_review_efficiency.sh,local-agent/tests/test_hybrid_bus.sh"
 
+  # ---- 云端承接侧（承接卡/交接单/回传核对 · Issue #177）----
+  "local-agent/intent/|local-agent/tests/test_inbound_take.sh"
+
   # ---- 全局 gid/ops ----
   "local-agent/gid.py|local-agent/tests/test_ops_sim.sh"
   "local-agent/ops.py|local-agent/tests/test_ops_sim.sh"
