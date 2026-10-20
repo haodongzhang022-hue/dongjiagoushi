@@ -155,3 +155,17 @@ PYTHONPATH=local-agent python3 -m model_routing.cli dryrun       # 本地演练�
   **改 `models.yml` 一处即可全仓生效**（单点收敛，不散改）。
 - `codebuddy` / `glm-5.3-flash` 作为备用档，走同一 OpenAI 兼容端点（网关侧路由到对应模型）；
   若网关不支持某档模型名，该档调用失败即自动降级下一档，行为仍正确。
+
+## 八、模型 ID 纪律（Issue #182）
+
+- **不臆造版本后缀**：本仓规范里的模型 ID 只有 `deepseek-v4.1-flash` 这一个写法，
+  没有 `1017` / 日期码之类的版本标识。`npc:go` 的 `model` 只认组织「可选模型列表」里的
+  **精确 ID**，写错即整 stage `error`（#177 的静默失效正是 `deepseek-v4-flash` 不在列表）。
+  平台若确实提供带版本号的 ID，以平台选择器显示为准，改 `models.yml` 一处 + `.cnb.yml` 一行同步。
+- **模型 ≠ 速度**：`npc:go` 的 `model` 只决定「云端这条执行体用哪个模型」，
+  **不决定 tps / 生成速度**，也不决定单次执行要写多少 token。以「某角色只有 65 tps」
+  为由改模型，是按错的地方下药：速度感受主要由**单轮上下文规模**（AGENTS.md + skill +
+  角色 prompt + Issue 全量评论）与**工具步数**决定——上下文越长、步数越多，单轮耗时越久，
+  摊出来的 tps 越低。
+- **按角色调优的正确姿势**：先量（`model_routing_trace.jsonl` / 执行日志的实际 token 与耗时），
+  再决定是减上下文（读材料只读必要段、评论流显式分页）、减步数，还是真换模型。
