@@ -42,3 +42,7 @@ local-agent/review_cycle/state/
 # 曾被 git 跟踪 → 去重门记忆跨机器"继承"，加剧误跳过；现 gitignore + 移出版本库。
 local-agent/hybrid/.bus_queue.json
 local-agent/hybrid/.quota_ledger.json
+
+# dsh-adapter 离线 stub / 依赖目录（dsh-adapter/.gitignore 已忽略，但根层 git add -f 会绕过
+# 子目录规则把离线桩提交进来 —— Issue #170 台账 PR 曾误提交 4 个文件，此处根层兜底）
+dsh-adapter/node_modules/
