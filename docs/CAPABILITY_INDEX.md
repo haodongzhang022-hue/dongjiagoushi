@@ -14,7 +14,7 @@
 | **入口** | 架构·秘书（强制入口+路由）| 秘书/入口/接待/先看看 | `.cnb/settings.yml` + `AGENTS.md·默认入口协议` | docs/SECRETARY_SENSE.md | module_version 声明头 |
 | **入口** | 三入口归一化（platform-adapter）| 三入口/入口归一化/网页对话/cnb/local/多宿主/谁当入口 | `local-agent/entries/` | docs/PLATFORM_ADAPTERS.md | Issue #105 · module platform-adapter v0.2.0 |
 | **桥接闭环** | 本地⇄云端桥接闭环（entries.bridge）| 最常用链路/本地deepseek harness/网页gemini工具桥/云开发请求/异步句柄/跨对话/跨PR/跨仓库/本地数据对齐/本地测试先行/云端建环境贵 | `local-agent/entries/bridge.py` | docs/PLATFORM_ADAPTERS.md 三.6 | Issue #105 · module platform-adapter v0.3.0 |
-| **模型** | 模型路由（统一配置文件 + 多级降级链 + 真实接线 + **角色按需指定**）| 模型/统一配置/配置文件/角色按需指定/角色别名/主模型/备用模型/多级备选/降级/渠道不通/配置生效/非单次有效/按角色/v4.1 flash/1017/alias/codebuddy/glm/audit/两链一致/fallback_chain | `local-agent/model_routing/models.yml`（唯一配置文件）| docs/MODEL_ROUTING.md | Issue #147 · module model-routing v0.3.0-update → v0.3.0-fix（Issue #182 复评 · PR #184）|
+| **模型** | 模型路由（统一配置文件 + 多级降级链 + 真实接线 + **角色按需指定** + **三档语义·显性降级**）| 模型/统一配置/配置文件/角色按需指定/角色别名/主模型/备用模型/多级备选/降级/渠道不通/配置生效/非单次有效/按角色/v4.1 flash/1017/minimax/alias/codebuddy/glm/audit/两链一致/fallback_chain/**三档/指定档/兜底档/last_resort_model/显性降级/degraded/tiers/快档** | `local-agent/model_routing/models.yml`（唯一配置文件）| docs/MODEL_ROUTING.md | Issue #147 · module model-routing v0.3.0-update → v0.3.0-fix（Issue #182 复评 · PR #184）→ v0.3.0-tier（PR #185 · 三档语义 + 显性降级）|
 | **聚合控制页** | 跨端聚合控制页（entries.dashboard）| 聚合控制/fastapi聚合页/状态显示/每端面板/跨端交互/控制台/健康灯/一键控制/overview/panel | `local-agent/entries/dashboard.py` | docs/PLATFORM_ADAPTERS.md 三.7 | Issue #105 · module platform-adapter v0.5.0 |
 | **真实通道** | 真实 cnb.cool 传输（entries.cnb_live）| 模拟数据不可信/本地实测/真实传输/发信号配合/通道探测/默认真实/mock仅单测兜底/真实闭环 | `local-agent/entries/cnb_live.py` | docs/PLATFORM_ADAPTERS.md 三.8 | Issue #105 · module platform-adapter v0.5.0 |
 | **宿主传输** | 三宿主真实传输注册表（entries.host_transport）| 三宿主/真实宿主传输/本地deepseek harness/网页gemini工具桥/local-harness真实relay/web-bridge真实HTTP/别名归一/bridge via/三宿主可达矩阵 | `local-agent/entries/host_transport.py` | docs/PLATFORM_ADAPTERS.md 三.9 | Issue #105 · module platform-adapter v0.6.0 |
@@ -114,6 +114,7 @@
 | 我想知道某个架构取舍为什么这么做 | docs/adr/（决策记录）|
 | 我想推进度/打标/调优先级 | LabelAbility / 进度推手 |
 | 我要改模型/想知道某角色用哪个模型/想知道配置有没有真生效 | model-routing（改 `local-agent/model_routing/models.yml` 一处：default.chain 通用链 + roles 按角色覆盖；角色名已接进调用链，改配置即长期生效；`PYTHONPATH=local-agent python3 -m model_routing.cli chain [角色]`）|
+| 我想给某角色上快档 / 想知道降级去了哪 / 怕降级被静默瞒掉 | model-routing 三档（`roles[角色].chain` 首档=指定、与 fallback_chain 同名的档位=和其他角色一样、末档= `last_resort_model` 兜底；降级每跳留 `model.call.degraded`、结果带 `degraded`，绝不静默；`PYTHONPATH=local-agent python3 -m model_routing.cli tiers [角色]`）|
 | 评审每轮都要我复述整个大项目 | 评审增量上下文（review-context：冻结骨架摘要 + 本轮变化）|
 | 评审/开发反复触发、CPU 构建损耗大 | 评审段调度器（review-cycle：攒批 + 同指纹不重复触发 + 一次构建摊全批）|
 | 开发还没完就跑测试/评审、链条乱了/进度失衡 | 阶段链门控（stage-gate：开发→评审→测试，上游未收口不抢跑 + 同阶段不重复触发，驳回即零构建 + 非放行 `blocked`）|

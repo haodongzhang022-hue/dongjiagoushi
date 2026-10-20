@@ -82,7 +82,37 @@ python3 -m model_routing.cli roles      # 逐角色实际生效主档 + specifie
 | 角色 | 主档 | 理由 |
 |---|---|---|
 | 架构·进度推手 / 市场·客服 | `glm-5.3-flash`（快档优先） | 打标/百分比/短答，不需长上下文，要回合快 |
+| 架构·开发 | `glm-5.3-flash`（快档优先） | 主力读写码、回合最多，要的是「回合快」（PR #185） |
 | 其余角色 | 走 `fallback_chain`（= default） | 未显式指定即走默认，specified=False，可审计 |
+
+### 2.1.1 三档语义 + 显性降级（PR #185 · 用户定调）
+
+用户原话：「**给他 3 个档**，一个是指定的，降级是和其他一样的，再降低再到现在的兜底。
+只是注意**降级要显性，不要静默降级**」。落地为：
+
+| 档 | 语义 | 配置写法 | 说明 |
+|---|---|---|---|
+| 档1 `fast` | **指定** | `roles[角色].chain[0]` | 该角色专属快档。真实快档 ID（`deepseek-v4.1-flash-1017` / `minimax-3.1-flash`）待人类确认并 `probe` 验真后改这一处 |
+| 档2 `same` | **和其他角色一样** | chain 里与 `fallback_chain` 同名的档位 | 不另造名字、不重复字面量，直接是通用链那套模型 |
+| 档3 `last_resort` | **现在的兜底** | `last_resort_model`（顶层单值） | `npc:go` 只接受单 model，平台侧一定跑得起来的那一道 |
+
+```bash
+python3 -m model_routing.cli tiers 架构·开发   # 三档语义俯瞰（fast / same / last_resort）
+```
+
+**显性降级（本版核心纪律）**——降级不是「悄悄换了个模型」：
+
+- `engine.route_call` 每一跳失败都写 `model.call.fail` 且带 `degraded=1 / fallback_from / next`；
+  降级成功后再补一条 `model.call.degraded`（监控/巡检 grep 一条就够，不用回读整条链）；
+- 结果里带 `degraded / from_model / used_tier`，调用方一眼看到「本轮不是主档答的」；
+- `llm/openai_compat` 把它记进 `last_degraded` + 打 warning 日志；全挂时异常文案也带 `degraded=True`；
+- 审计项 `no_degrade_target`：显式列出的角色链若**没有「和其他角色一样」的档位**就报红——
+  单档链 = 主档一挂整条断，等于把静默失败写进配置。
+
+**顺手修掉一个真 bug（PR #185 实测命中）**：`openai_compat.call()` 里构造每档 caller 时写的是
+`{m: (lambda sp, ui, **k: self._call_model(m, ...)) for m in chain}`——闭包捕获的是**循环变量**，
+循环结束后所有档都指向链尾模型：降级链形同虚设，还伪装成「每档都试过了」。现已改为
+`model=ch` 逐个绑定，并由信号灯 ⑬ 断言 `calls == chain[:2]`（真换模型，不是重复打同一个）。
 
 ### 2.2 版本别名（用户说的 `deepseek v4.1 flash 1017` · 实名登记，不留伪配置）
 
@@ -109,14 +139,17 @@ alias: {}   # 故意为空：1017 对应哪个平台真实 ID 尚未由人类确
 | `spec.py` | 加载配置 + 解析（default / role 覆盖）+ 稳定接口（**不硬编码模型 ID**；**每次解析实时读文件**）|
 | `engine.py` | 多级降级路由 + 留痕（确定性逻辑，非 LLM 判断），支持 `role=` 按角色解析 + `call_with_chain` 多后端分派 |
 | `ability.py` | `ModelRoutingAbility`（全员可调用）|
-| `cli.py` | MCP 管线（`config`/`models`/`chain`/`overview`/`dryrun`）|
+| `cli.py` | MCP 管线（`config`/`models`/`chain`/`tiers`/`params`/`probe`/`audit`/`overview`/`dryrun`）|
 
 ## 四、降级规则（确定性）
 
 1. 按解析出的渠道链取**第一档**调用；
 2. 该档返回 **不可用 / 超时 / 限流 / 5xx**（`unavailable_signals`）→ **自动降级下一档**；
 3. 逐档降级直到成功；**全链耗尽** → **显式失败** `all_channels_unavailable`，**不静默、不假装成功**；
-4. 每次路由决策写 `model_routing_trace.jsonl`，供监控俯瞰。
+4. **降级必须显性**：每跳写 `degraded=1 / fallback_from / next`，成功降级补写
+   `model.call.degraded`，结果带 `degraded/from_model/used_tier`，后端记 `last_degraded` + warning 日志
+   ——绝不静默换模型（用户 PR #185 明确要求）；
+5. 每次路由决策写 `model_routing_trace.jsonl`，供监控俯瞰。
 
 ## 五、接线点（★本版核心：配置真正生效）
 
@@ -137,11 +170,12 @@ alias: {}   # 故意为空：1017 对应哪个平台真实 ID 尚未由人类确
 
 ```bash
 bash local-agent/tests/test_model_routing.sh          # 12 组信号灯（含接线核验）
-bash tests/test_model_role_assign.sh                 # 7 组信号灯（角色按需指定 / 两链一致 / 别名双体检）
+bash tests/test_model_role_assign.sh                 # 14 组信号灯（角色按需指定 / 两链一致 / 别名双体检 / 三档语义 / 显性降级）
 # 仓库根目录运行 CLI（加 PYTHONPATH，避免 ModuleNotFoundError）：
 PYTHONPATH=local-agent python3 -m model_routing.cli config       # 唯一配置文件路径 + 生效内容
 PYTHONPATH=local-agent python3 -m model_routing.cli chain        # 通用默认渠道链
 PYTHONPATH=local-agent python3 -m model_routing.cli chain 架构·开发  # 某角色渠道链（未列出 → 默认）
+PYTHONPATH=local-agent python3 -m model_routing.cli tiers 架构·开发  # 三档语义（指定 / 和其他角色一样 / 兜底）
 PYTHONPATH=local-agent python3 -m model_routing.cli dryrun       # 本地演练：主通道挂→逐档降级
 ```
 

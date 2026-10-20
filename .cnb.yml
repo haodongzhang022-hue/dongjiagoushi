@@ -231,6 +231,16 @@ main:
         #   （local-agent/model_routing/engine.py）运行时接管——
         #   当前档返回不可用/超时/限流/5xx 时自动切下一档并留痕。
         model: deepseek-v4.1-flash   # 与 models.yml default.chain[0] 保持一致
+        #
+        # 与模型绑定的能力参数（Issue #182「换模型≠提速」）——★显式指定自定义 model 时，
+        # 平台**不再继承**默认模型配置，回落到内置默认（medium / 1m / 48k / 500）；
+        # 写死期望值防「以为设了其实没设」。取值以 models.yml 的 npc_go 块为准，
+        # 两边一致性由 tests/test_model_role_assign.sh ⑧ 机器核验。
+        # contextWindow 有实际收益：单轮上下文变小 → 溢出压缩少触发（这才是「慢」的主因之一）。
+        thinkingLevel: medium
+        contextWindow: 1m
+        maxTokens: 48k
+        maxTurns: 500
           # 其他可选模型（按需切换，建议改 models.yml 统一管理）：
           # model: codebuddy          # 二选备用通道（用户指定）
           # model: glm-5.3-flash      # 三选备用通道（用户指定）
