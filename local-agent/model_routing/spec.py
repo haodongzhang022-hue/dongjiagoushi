@@ -33,6 +33,17 @@ _FALLBACK_SIGNALS = (
 
 _MISSING = object()
 
+# 版本串判据（单一事实源）：带 -<两位以上数字> 后缀的模型名，如
+#   `deepseek-v4.1-flash-1017` / `glm-5.3-flash-1017`。
+# ★ 注意只认 ≥2 位数字：`-5`/`-3`（glm-5 / minimax-3）属模型家族号，**不是**版本串，
+#   否则会把合法模型 ID 误判成未登记别名（误伤比漏判更糟）。
+_VERSION_SERIAL = re.compile(r"-\d{2,}$")
+
+
+def _is_version_serial(model):
+    """是否「口语版本串」形态（需要 alias 登记才能放行）。"""
+    return isinstance(model, str) and bool(_VERSION_SERIAL.search(model))
+
 
 def _load_raw():
     """加载配置文件（YAML）；失败返回 None（走兜底）。
@@ -107,12 +118,60 @@ def resolve_alias(model):
         table = {}
     if model in table:
         return str(table[model])
-    # 版本后缀型串（如 deepseek-v4.1-flash-1017）未登记 → 显式报红，不放行
-    if isinstance(model, str) and re.search(r"-\d{2,}$", model):
+    # 登记过的**左值**（口语版本串，如 minimax-3.1-flash）本身也必须是合法 ID：
+    #   否则「登记了但没人用、右值写坏」会一直静默潜伏（键校验，见 alias_key_issues）。
+    if isinstance(model, str) and _is_version_serial(model):
         raise RuntimeError(
             "未登记别名，解析期拦下（不放行）：%r —— 请在 models.yml 的 alias 下登记真实平台 ID" % model
         )
     return model
+
+
+def alias_table():
+    """版本别名表（`{口语版本串: 平台真实 ID}`），由配置唯一声明。"""
+    table = _raw().get("alias") or {}
+    return table if isinstance(table, dict) else {}
+
+
+def alias_key_issues():
+    """别名**键**体检：登记了左值却没人会用它 = 配置垃圾，且右值坏掉不会被发现。
+
+    场景：`alias: {minimax-3.1-flash: <真实ID>}` —— 若 `minimax-3.1-flash` 既不在
+    任何角色链里、也不是 default/fallback 的成员，这条登记就永远不会被 `resolve_alias`
+    走到；右值写成错 ID 也没人能测出来（#177 事故的静默版）。
+    这类条目要么是「登记了忘接线」（应写进角色链），要么是「名字打错」（应修键）。
+
+    返回 [{key, value, reason, detail}]。
+    """
+    table = alias_table()
+    if not table:
+        return []
+    used = set()
+    for m in list(default_chain()) + list(fallback_chain()):
+        used.add(m)
+    for role in role_overrides():
+        used.update(role_chain(role))
+    bad = []
+    for key in table:
+        if key not in used:
+            bad.append({
+                "key": key, "value": table[key], "reason": "alias_unused",
+                "detail": "alias 键 %r 未被任何角色链引用（登记了但接线不到，右值写坏也测不出来）"
+                          % key,
+            })
+    return bad
+
+
+def npc_go_params():
+    """平台 `npc:go` 可控参数（推理深度 / 上下文窗口 / 输出上限 / 轮次）。
+
+    为什么不和 `model` 放一起：`model` 是 `default.chain[0]` 的**派生物**（唯一事实源在
+    default.chain，配置里不重复字面量）；而这几项**不派生于渠道链**——显式指定自定义
+    model 时平台会回落到内置默认（medium / 1m / 48k / 500），把期望值写死才防「以为设了
+    其实没设」。配置缺失返回 {}（不臆造平台默认值）。
+    """
+    blk = _raw().get("npc_go")
+    return dict(blk) if isinstance(blk, dict) else {}
 
 
 def default_chain():
@@ -310,6 +369,9 @@ def audit_roles():
                 bad.append({"role": role, "reason": "alias_broken",
                             "detail": "短名 %r 解析链 %r ≠ 规范名链 %r（别名断裂，短名会静默走 fallback）"
                                       % (short, sc, rc)})
+    # ④ 模型别名键体检（登记了但没人用 = 接线不到，右值坏掉也测不出来）
+    for item in alias_key_issues():
+        bad.append({"role": item["key"], "reason": item["reason"], "detail": item["detail"]})
     return bad
 
 

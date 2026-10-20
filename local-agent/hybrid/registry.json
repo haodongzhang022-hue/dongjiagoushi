@@ -728,7 +728,8 @@
         "local-agent/model_routing/engine.py",
         "local-agent/model_routing/cli.py",
         "local-agent/model_routing/models.yml",
-        "local-agent/llm/openai_compat.py"
+        "local-agent/llm/openai_compat.py",
+        ".cnb.yml"
       ],
       "depends_on": [
         "local-agent/tests/test_model_routing.sh"

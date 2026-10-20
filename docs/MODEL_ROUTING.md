@@ -2,7 +2,7 @@
 
 > **唯一配置文件**：`local-agent/model_routing/models.yml`（改模型只改这一处）
 > **读配置代码层**：`local-agent/model_routing/spec.py`
-> **演进线**：Issue #147 · module model-routing **v0.3.0-update** → **v0.3.0-fix（Issue #182 · 角色逐个指定）**
+> **演进线**：Issue #147 · module model-routing v0.3.0-update → v0.3.0-fix（Issue #182）→ **v0.3.0-fix（PR #185 · 平台参数与别名键）**
 > **触发词**：模型/主模型/备用模型/降级/渠道不通/统一配置/角色指定/v4.1 flash/codebuddy/glm/接线/按角色
 
 ## 一、用户诉求（Issue #147）
@@ -90,13 +90,55 @@ python3 -m model_routing.cli roles      # 逐角色实际生效主档 + specifie
 alias: {}   # 故意为空：1017 对应哪个平台真实 ID 尚未由人类确认，不留伪配置
 ```
 
-- **未确认不登记**：`1017` 这类口语版本串只在人类确认平台真实 ID 后，才补一行
-  `deepseek-v4.1-flash-1017: <真实ID>`（改 `alias` 右侧一处即全角色生效，不用逐角色改）；
+- **未确认不登记**：`1017` / `minimax 3.1 flash` 这类口语版本串只在**探针（`cli probe`）实跑通过**
+  后才补一行（改 `alias` 右侧一处即全角色生效，不用逐角色改）。当前待确认候选：
+  `deepseek-v4.1-flash-1017`、`minimax-3.1-flash`；
+- **别名键也受体检（`alias_unused`）**：登记了但没有任何角色链引用它 = 接线不到，
+  右值写成错 ID 也没人测得出（#177 静默版）→ 审计报红，须写进角色链或删掉；
 - **未登记 alias 显式报红（不放行）**：`resolve_alias` 对带版本后缀（`-<数字>`）却未登记的
   模型名，在解析期直接抛 `未登记别名` 异常——不再静默透传给后端（否则
   `model ... is not in the optional models list` → 整个 stage error，#177 事故）。别名映射
   统一收口在 `engine.resolve_models`（含 `role_at`），不在 `openai_compat` 散落；
 - 普通模型 ID（无版本后缀）原样返回，不影响正常链路。
+
+### 2.3 换模型 ≠ 提速：`npc:go` 还有一组和模型绑定的参数（PR #185）
+
+用户问「minimax 3.1 flash / deepseek v4.1 flash 1017 能直接用吗，直接指定按说也会快」。
+结论分两半，必须拆开说，否则又会把「模型选谁」和「跑多快」糊成一个数：
+
+**① 能不能用 = 平台可选列表说了算，不由本配置决定。**
+`npc:go` 的 `model` 只传一个模型 ID，认不认由平台判。写错的表现是
+`model ... is not in the optional models list` → **整个 stage error**（#177 事故，
+链路静默失效）。所以唯一可信的判定方式是**真调用探针**，不是"按说应该行"：
+
+```bash
+python3 -m model_routing.cli probe minimax-3.1-flash      # → ok:true 才能登记
+python3 -m model_routing.cli probe deepseek-v4.1-flash-1017
+```
+
+探针没 key 时**明确返回 `skipped` + 退出码 2**，不假装成功（「会返回空但显示通过」是我们要绝掉的假象）。
+
+**② 平台参数的默认值随 `model` 变，必须写死。**
+文档（`zh/build/internal-steps/npc/go.md`）写明：显式指定自定义 `model` 时，平台**不再继承**
+默认模型配置，回落到内置默认：
+
+| 参数 | 显式指定 model 后的内置默认 | 说明 |
+|---|---|---|
+| `thinkingLevel` | `medium` | 推理深度，`off`~`max` 七档 |
+| `contextWindow` | `1m` | 128k~1m；降它能减少溢出压缩触发 |
+| `maxTokens` | `48k` | 单次输出上限 |
+| `maxTurns` | `500` | 最大对话轮次 |
+
+这几项**不派生于渠道链**（不是「换个模型就自动对」），所以在 `models.yml` 的 `npc_go:` 块
+声明期望值，`.cnb.yml` 的 `.npc_task` 同步落地，两边一致性由
+`tests/test_model_role_assign.sh` ⑧ **机器核验**（npc:go 只认流水线 options，不读 models.yml，
+不核验就是"配置看着对、线上没生效"）。
+
+**③ 「慢」的主因不在模型名。** 单轮上下文体积（AGENTS.md + skill 全文 + 全量评论流）和工具步数
+才是量级主因；换模型只动「每秒吐字」。真要提速走 `contextWindow` 收敛 + 上下文瘦身，不是换 ID。
+
+> 边界：`tps` 在本仓库**零痕迹**（模型链路、`models.yml`、`call()` 里没有吞吐限流或速率分档），
+> 所以平台实测的 46 tps 与「配置里写哪个模型」之间没有因果，别把两个问题混成一个。
 
 ## 三、为什么需要独立模块 + 统一配置
 
@@ -143,6 +185,8 @@ PYTHONPATH=local-agent python3 -m model_routing.cli config       # 唯一配置�
 PYTHONPATH=local-agent python3 -m model_routing.cli chain        # 通用默认渠道链
 PYTHONPATH=local-agent python3 -m model_routing.cli chain 架构·开发  # 某角色渠道链（未列出 → 默认）
 PYTHONPATH=local-agent python3 -m model_routing.cli dryrun       # 本地演练：主通道挂→逐档降级
+PYTHONPATH=local-agent python3 -m model_routing.cli params       # 平台 npc:go 可控参数
+PYTHONPATH=local-agent python3 -m model_routing.cli probe <ID>   # 真实探针：平台认不认这个模型 ID
 ```
 
 > 也可 `cd local-agent` 后直接 `python3 -m model_routing.cli ...`。
