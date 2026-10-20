@@ -45,3 +45,6 @@ local-agent/hybrid/.quota_ledger.json
 
 # 云端承接侧运行时账本（承接卡本地累积，不进版本库 · Issue #177）
 local-agent/intent/_ledger/
+# dsh-adapter 离线 stub / 依赖目录（dsh-adapter/.gitignore 已忽略，但根层 git add -f 会绕过
+# 子目录规则把离线桩提交进来 —— Issue #170 台账 PR 曾误提交 4 个文件，此处根层兜底）
+dsh-adapter/node_modules/
