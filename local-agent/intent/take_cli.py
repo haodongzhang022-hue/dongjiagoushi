@@ -48,6 +48,8 @@ def main(argv=None):
     c.add_argument("--test-output", default="")
     c.add_argument("--changed-file", action="append", default=[])
     c.add_argument("--evidence", default="{}")
+    c.add_argument("--reopen", action="store_true",
+                   help="已交付的卡确需重跑重判时显式放行（原回执进 receipt_history）")
 
     s = sub.add_parser("show", help="看承接卡")
     s.add_argument("--card", required=True)
@@ -86,7 +88,7 @@ def main(argv=None):
             ev = {"note": a.evidence}
         r = take.collect(card, {"test_output": a.test_output,
                                 "changed_files": a.changed_file,
-                                "evidence": ev})
+                                "evidence": ev}, reopen=a.reopen)
         print(json.dumps(r, ensure_ascii=False, indent=2))
         return 0 if r.get("passed") else 4
     if a.cmd == "show":

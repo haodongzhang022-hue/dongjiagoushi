@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-云端承接侧能力（intent.inbound · module inbound-take v0.1.0）
+云端承接侧能力（intent.inbound · module inbound-take v0.1.1）
 =============================================================
 定位：**运行时在用户本地电脑，云端只做「承接端」**——云端的职责是
 「接得住、不丢件、说清楚」，而不是把活自己跑完。
@@ -43,4 +43,4 @@
 from . import take  # noqa: F401
 
 __all__ = ["take"]
-__version__ = "v0.1.0"
+__version__ = "v0.1.1"

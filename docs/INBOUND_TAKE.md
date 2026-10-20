@@ -1,6 +1,6 @@
 # 云端承接侧（INBOUND_TAKE）
 
-> module: **inbound-take** · 版本：**v0.1.0** · Issue #177 · 唯一事实源：`local-agent/intent/take.py`
+> module: **inbound-take** · 版本：**v0.1.1** · Issue #177 · 唯一事实源：`local-agent/intent/take.py`
 >
 > 一句话：**运行时在用户本地电脑，云端只负责「接得住」**——承接卡是承接凭证，
 > 交接单是把活交给本地跑的契约，回传核对是按验收标准收口。云端不代跑、不假装跑过。
@@ -91,7 +91,33 @@ state            awaiting_local_run
 - 其他 → `evidence` 里要能命中该项关键词。
 
 失败计数识别仓库信号灯的统一收尾 `N 通过 / M 失败`，取 **M**；正文出现「失败」二字不算失败
-（否则 `0 失败` 这种全绿收尾会被误判）。真崩了（`Traceback` / `ERROR:`）另算硬错误。
+（否则 `0 失败` 这种全绿收尾会被误判）。真崩了（`Traceback` / `ERROR:` / 非零退出）另算硬错误。
+
+**v0.1.1 修掉的假绿漏洞（评审必修 1）**：v0.1.0 的判据是「有输出 + 没写失败计数 = 通过」，
+于是 `FAILED` 满屏但没写计数器的回传、`ok all pass` 这种无计数措辞，全被判绿——而本模块自己
+就是「回传核对是唯一事实源」，这条漏了等于自证不成立。现在 `_judge_test_output()` 三层判：
+
+1. 缺内容 → 不通过；
+2. 硬错误 / 零散失败信号（`FAILED` `FAIL=3` `not ok` `✗` `XX` `N failed`）/ 失败计数 >0 → 不通过；
+3. **没看到带数字的通过计数（`N 通过` / `N passed` / `PASS=N`）→ 无合格信号，判不通过**；
+   计数为 0 也判不通过。
+
+一句话：**不能证明通过 = 不算通过**。回传方必须给统一收尾，而不是"看着挺绿"。
+
+### 入参严格性（v0.1.1 · 必修 2）
+
+`acceptance` / `scope_done` / `scope_not` 只收 list/tuple：传字符串以前会被按字符拆成
+`['有','文','档']`，三条验收各去 evidence 匹配单字、静默判通过。现在字符串直接 `ValueError`，
+其他类型 `TypeError`——**静默错比报错危险得多**。
+
+### 三条同轮收口（建议 3/4/5）
+
+- **半承接 deliverable 强制带「未验证」**：`judge(kind='code', runtime='cloud',
+  deliverable='patch（已验证）')` 也压不掉标记，不再是入参一句话就抹掉边界；
+- **坏账本不静默吞**：`_load()` 遇损坏 JSON 改名 `.bad` 留证 + stderr 报警，不再 `except: pass`
+  后让下一次 `_save` 覆盖掉全部历史承接卡；
+- **`parent_issue` 归一 + 已交付守卫**：`issue#177` / `#181` 归一成纯编号；卡已 `delivered`
+  时默认拒绝被一次更差的回传冲回 `stuck`，确需重跑要 `reopen=True`，原回执压进 `receipt_history`。
 
 结论走处置标签：通过 → `proceed` / `delivered`；不通过 → `fix_bug` / `stuck`。
 **本模块不会给 `merge`**——运行时在本地，合并得等本地跑通。
@@ -162,12 +188,14 @@ python -m intent tally
 
 ## 六、信号灯
 
-`local-agent/tests/test_inbound_take.sh` —— **20 通过 / 0 失败**：
+`local-agent/tests/test_inbound_take.sh` —— **31 通过 / 0 失败**：
 
 judge 三态（本地/云端/未知）· 承接卡缺验收标准拒建 · 交接单 `ran_remotely=False` ·
 拒接卡不出交接单 · 回传缺测试输出判不通过 · 含失败计数判不通过 · 齐全回传自 `proceed` ·
 同输入两次结论一致（确定性）· Markdown 承接卡 · `tally` 四态分开 · 幂等不漂移 ·
-`capability` 边界声明 · CLI 四项可调。
+`capability` 边界声明 · **假绿反例 4 组**（FAILED 无计数器 / ok all pass / 硬错误与非零退出 /
+中英计数只有合格收尾才过，且 0 通过仍判不通过）· **非 list 入参拒绝 2 组** ·
+**半承接未验证标记 2 组** · **坏账本/编号归一/已交付守卫 3 组** · CLI 四项可调。
 
 ---
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-承接侧核心（intent.take · module inbound-take v0.1.0）
+承接侧核心（intent.take · module inbound-take v0.1.1）
 ======================================================
 云端接件 → 判承接 → 出承接卡 → 出交接单（本地跑）→ 本地回收核对 → 结论留痕。
 
@@ -25,7 +25,7 @@ __all__ = ["TASK_KINDS", "RUNTIMES", "make_card", "judge", "handoff", "collect",
            "verify", "render_md", "tally", "capability", "ledger"]
 
 MODULE = "inbound-take"
-VERSION = "v0.1.0"
+VERSION = "v0.1.1"
 
 STATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_ledger")
 _LEDGER_FILE = os.path.join(STATE_DIR, "cards.json")
@@ -55,6 +55,21 @@ STATUS_STUCK = "stuck"            # 接了但没收件/超期未回传
 STATUS_REJECTED = "rejected"      # 明确拒接（带替代动作）
 
 
+UNVERIFIED_MARK = "（未验证，须本地跑通才算完）"
+
+
+def _unverified(deliverable):
+    """半承接交付形态：强制带「未验证」标记。
+
+    云端不跑运行时，出的补丁/计划一律没验证过——这个标记是事实，不是可选措辞，
+    不能被调用方用 deliverable 入参覆盖掉（否则一句"patch（已验证）"就把边界抹了）。
+    """
+    text = str(deliverable or "").strip() or "patch"
+    if "未验证" in text:
+        return text
+    return text + UNVERIFIED_MARK
+
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -64,19 +79,68 @@ def _ensure_dir():
 
 
 def _load():
+    """读账本。坏文件**不静默吞**：改名 .bad 留证后重开空账本（否则下次 _save 直接覆盖 = 历史承接卡全丢）。"""
+    if not os.path.exists(_LEDGER_FILE):
+        return {}
     try:
-        if os.path.exists(_LEDGER_FILE):
-            with open(_LEDGER_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:  # noqa: BLE001
-        pass
-    return {}
+        with open(_LEDGER_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:  # noqa: BLE001
+        bad = _LEDGER_FILE + ".bad"
+        try:
+            os.replace(_LEDGER_FILE, bad)
+        except OSError:
+            bad = _LEDGER_FILE
+        print(f"[inbound-take] 账本损坏（{type(e).__name__}: {e}），已另存 {bad}，"
+              f"本次从空账本重开——请人工确认历史承接卡", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        bad = _LEDGER_FILE + ".bad"
+        try:
+            os.replace(_LEDGER_FILE, bad)
+        except OSError:
+            bad = _LEDGER_FILE
+        print(f"[inbound-take] 账本结构非法（非 dict），已另存 {bad}", file=sys.stderr)
+        return {}
+    return data
 
 
 def _save(data):
     _ensure_dir()
     with open(_LEDGER_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _seq(name, value):
+    """列表型入参严格校验：只收 list/tuple，**拒绝字符串按字符拆开**（静默错会毁掉验收判定）。
+
+    S01 错误处理不吞异常：`acceptance='有文档'` 这种传参以前会被拆成 ['有','文','档']，
+    三条验收各自去 evidence 匹配单字、静默判通过——现在直接 ValueError 说清楚。
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raise ValueError(
+            f"{name} 须传列表（如 ['信号灯全绿']），收到字符串 {value!r}——"
+            f"按字符拆开会静默破坏验收判定，故显式拒绝")
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(
+            f"{name} 须传 list/tuple，收到 {type(value).__name__}（{value!r}）")
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+_ISSUE_NO_RE = None
+
+
+def _issue_no(value):
+    """从 `issue#177` / `#177` / `177` / PR 链接里抽出纯编号，抽不出返回空串。"""
+    global _ISSUE_NO_RE
+    if _ISSUE_NO_RE is None:
+        _ISSUE_NO_RE = re.compile(r"(?:#|^(?:issue|issues|pull|pulls)[/:#-]?)\s*(\d+)", re.I)
+    m = _ISSUE_NO_RE.search(str(value or "").strip())
+    if m:
+        return m.group(1)
+    return ""
 
 
 def _card_id(title, origin):
@@ -96,7 +160,7 @@ def judge(kind="unknown", runtime="local", deliverable=None):
       accept      True=接；False=拒接
       mode        full（全套，含代码改动）/ partial（只出方案+判定标准）/
                   reject（接不了，需换承接方）
-      deliverable 实际交付形态（不越界：云端不出未验证的代码）
+      deliverable 实际交付形态（半承接强制追加「未验证」标记，不可被入参覆盖）
       reasons     判定理由（人可读）
       alternative 拒接时的替代动作（拒接必须给，不静默吞件）
     """
@@ -127,8 +191,10 @@ def judge(kind="unknown", runtime="local", deliverable=None):
     if k in ("code", "test"):
         reasons.append(f"{spec['desc']} 必须由本地运行时执行（云端建环境贵，见 CLOUD_LOCAL_COOP.md）")
         reasons.append("云端只承接：出改动方案/补丁 + 验收标准，代码与测试结果由本地跑出来")
+        dv = _unverified(deliverable or spec["deliverable"])
+        reasons.append(f"交付形态 = {dv}（未验证标记为强制，不可被入参覆盖）")
         return {"accept": True, "mode": "partial",
-                "deliverable": deliverable or "patch（未验证，须本地跑通才算完）",
+                "deliverable": dv,
                 "reasons": reasons,
                 "alternative": "本地 runtime 跑通后回传，云端按验收标准核对并收口"}
 
@@ -151,10 +217,12 @@ def make_card(title, origin="issue", kind="unknown", runtime="local",
     """
     if not title or not str(title).strip():
         raise ValueError("title 必填：承接卡必须说清接的是哪件活")
-    acceptance = [a for a in (acceptance or []) if str(a).strip()]
+    acceptance = _seq("acceptance", acceptance)
     if not acceptance:
         raise ValueError(
             "acceptance 必填：没有验收标准就不算承接得住（退回补标准）")
+    scope_done = _seq("scope_done", scope_done)
+    scope_not = _seq("scope_not", scope_not)
 
     decision = judge(kind=kind, runtime=runtime, deliverable=deliverable)
     cid = _card_id(title, origin)
@@ -165,7 +233,7 @@ def make_card(title, origin="issue", kind="unknown", runtime="local",
         "card_id": cid,
         "title": str(title).strip(),
         "origin": origin,
-        "parent_issue": parent_issue or origin,
+        "parent_issue": _issue_no(parent_issue or origin) or str(parent_issue or origin),
         "kind": (kind or "unknown").lower(),
         "runtime": (runtime or "local").lower(),
         "owner": owner,
@@ -177,8 +245,8 @@ def make_card(title, origin="issue", kind="unknown", runtime="local",
             "reasons": decision["reasons"],
             "alternative": decision["alternative"],
         },
-        "scope_done": [s for s in (scope_done or []) if str(s).strip()],
-        "scope_not": [s for s in (scope_not or []) if str(s).strip()],
+        "scope_done": scope_done,
+        "scope_not": scope_not,
         "acceptance": acceptance,
         "status": STATUS_OPEN if decision["accept"] else STATUS_REJECTED,
         "ran_remotely": False,          # 诚实性硬约束：云端从不假装跑过
@@ -267,7 +335,9 @@ def verify(card, result):
     """逐条核对本地回传是否满足验收标准。
 
     验收标准判定规则（确定性）：
-      - 标准含「测试/信号灯/跑」→ 要有 test_output 且非空、无失败字样；
+      - 标准含「测试/信号灯/跑」→ 见 `_judge_test_output()`：要有合格信号
+        （统一收尾 `N 通过 / M 失败` 且 M=0），**输不出合格信号即判不通过**，
+        绝不因"没写失败"就默认绿；
       - 标准含「文件/模块/PR/补丁」→ 要有 changed_files；
       - 其他一律要求有 evidence 里对上该项的键或文本命中关键词。
     返回 (ok: bool, report: list[{criterion, ok, why}])。
@@ -285,15 +355,8 @@ def verify(card, result):
         hit = False
         why = ""
         if any(w in c for w in ("测试", "信号灯", "跑", "回归")):
-            fcount = _fail_count(test_output)
-            if not test_output.strip():
-                why = "缺 test_output（没跑别说过）"
-            elif fcount:
-                why = f"test_output 报告 {fcount} 条失败，别当通过"
-            elif _has_hard_error(test_output):
-                why = "test_output 含未处理错误（Traceback/Error）"
-            else:
-                hit, why = True, "有测试输出且无失败记录"
+            verdict = _judge_test_output(test_output)
+            hit, why = verdict["ok"], verdict["why"]
         elif any(w in c for w in ("文件", "模块", "PR", "补丁", "改动")):
             hit = bool(changed)
             why = "有改动文件清单" if hit else "缺 changed_files"
@@ -308,19 +371,36 @@ def verify(card, result):
 
 
 _FAIL_COUNT_RE = None
-
+_PASS_COUNT_RE = None
 
 def _fail_count(text):
     """识别仓库信号灯的统一收尾格式 `N 通过 / M 失败`，取 M。
 
-    只认「数字 + 失败」的计数写法；正文里出现「失败」二字不算失败
+    只认「数字 + 失败/不通过/✗」的计数写法；正文里出现「失败」二字不算失败
     （否则 `0 失败` 这种全绿收尾会被误判为不通过）。
     """
     global _FAIL_COUNT_RE
     if _FAIL_COUNT_RE is None:
-        _FAIL_COUNT_RE = re.compile(r"(\d+)\s*(?:条)?\s*(?:个)?失败")
+        _FAIL_COUNT_RE = re.compile(r"(\d+)\s*(?:条|个)?\s*(?:失败|不通过)")
     hits = [int(m) for m in _FAIL_COUNT_RE.findall(text or "")]
     return max(hits) if hits else 0
+
+
+def _pass_count(text):
+    """统一收尾里的通过计数：`N 通过` / `N passed` / `PASS=97`；没有返回 None。
+
+    只认**带数字**的通过计数——`ok all pass` / `all PASS` 这种不含数字的措辞不算合格信号，
+    因为"看起来全绿"和"实际跑了几个通过"是两件事。
+    """
+    global _PASS_COUNT_RE
+    if _PASS_COUNT_RE is None:
+        _PASS_COUNT_RE = re.compile(
+            r"(?<![\w-])(\d+)\s*(?:条|个)?\s*(?:通过|passed\b|pass\b)|\bPASS\s*[=:]\s*(\d+)",
+            re.I)
+    hits = []
+    for m in _PASS_COUNT_RE.finditer(text or ""):
+        hits.append(int(m.group(1) or m.group(2)))
+    return max(hits) if hits else None
 
 
 def _has_hard_error(text):
@@ -329,7 +409,72 @@ def _has_hard_error(text):
         return False
     if "Traceback (most recent call last)" in text:
         return True
-    return bool(re.search(r"^\s*(?:bash: .*)?(?:ERROR|Error): ", text, re.M))
+    if re.search(r"^\s*(?:bash: .*)?(?:ERROR|Error|FAILED|FAIL): ", text, re.M):
+        return True
+    if re.search(r"exit(?:ed)? (?:code|status)\s*[:=]?\s*[1-9]", text, re.I):
+        return True
+    return False
+
+
+def _fail_signals(text):
+    """补认零散失败信号（统一计数器之外的常见写法），返回命中列表。
+
+    关键：`N 通过 / M 失败` 里的计数由 `_fail_count` 负责，这里只找**非计数**写法。
+    """
+    body = _FAIL_ZERO_RE.sub(" ", text or "")   # 先把显式 0 失败抹掉，再找信号
+    hits = []
+    for pat, label in _FAIL_SIGNAL_PATTERNS:
+        if pat.search(body):
+            hits.append(label)
+    return hits
+
+
+_FAIL_SIGNAL_PATTERNS = [
+    (re.compile(r"\bFAILED\b"), "FAILED"),
+    (re.compile(r"\bFAIL(=|[1-9]\d*)\b"), "FAIL"),
+    (re.compile(r"\bnot ok\b", re.I), "not ok"),
+    (re.compile(r"[✗✘×✖]"), "✗/×"),
+    (re.compile(r"(?m)^[\s\-]*XX\b"), "XX"),
+    (re.compile(r"(?<!\d)[1-9]\d*\s*(?:条|个)?\s*(?:失败|不通过)"), "失败计数>0"),
+    (re.compile(r"(?<!\d)[1-9]\d*\s+(?:failed|failures?)\b", re.I), "N failed"),
+]
+
+# 失败信号的反向白名单：`FAIL=0` / `0 FAILED` 这类显式清零不是失败
+_FAIL_ZERO_RE = re.compile(r"\bFAIL(?:ED)?\s*[=:]\s*0\b|\b0\s+(?:FAILED|failed|failures?)\b")
+
+
+def _judge_test_output(text):
+    """判定一段测试回传是否给出**合格信号**（确定性，唯一事实源）。
+
+    三层判定，宁严不松：
+      1. 缺内容 → 不通过（没跑别说过）；
+      2. 硬错误 / 零散失败信号 / 失败计数>0 → 不通过；
+      3. 没看到统一收尾 `N 通过 / M 失败`（或全绿 PASS/OK 收尾）→ **无合格信号，判不通过**。
+
+    第 3 条是 v0.1.1 的关键修补：以前"有输出且没写失败"就算过，
+    结果纯 `FAILED` 文本、`ok all pass` 这类没有计数器的回传全被判绿。
+    现在缺计数器不再默认绿，而是要求回传方补统一收尾（不能证明通过 = 不算通过）。
+    """
+    text = text or ""
+    if not text.strip():
+        return {"ok": False, "why": "缺 test_output（没跑别说过）"}
+
+    fcount = _fail_count(text)
+    if fcount:
+        return {"ok": False, "why": f"test_output 报告 {fcount} 条失败，别当通过"}
+    if _has_hard_error(text):
+        return {"ok": False, "why": "test_output 含未处理错误（Traceback/Error/非零退出）"}
+    signals = _fail_signals(text)
+    if signals:
+        return {"ok": False, "why": "test_output 含失败信号：" + "、".join(signals)}
+
+    pcount = _pass_count(text)
+    if pcount is None:
+        return {"ok": False,
+                "why": "无合格信号：未见统一收尾 `N 通过 / M 失败`（缺计数不算通过）"}
+    if pcount <= 0:
+        return {"ok": False, "why": "通过计数为 0（一条都没跑过通过，不算通过）"}
+    return {"ok": True, "why": f"统一收尾 {pcount} 通过 / 0 失败，无失败信号"}
 
 
 def _keywords(text):
@@ -339,13 +484,22 @@ def _keywords(text):
     return segs[:6]
 
 
-def collect(card, result, run_at="local"):
-    """收本地回传结果 → 核对 → 出结论（不通过就明说，不当成功）。"""
+def collect(card, result, run_at="local", reopen=False):
+    """收本地回传结果 → 核对 → 出结论（不通过就明说，不当成功）。
+
+    **已交付守卫**：卡已 `delivered` 时，默认**拒绝**用一次更差的回传把它冲回 stuck
+    （好结果不该被后一次的烂结果覆盖）；确需重跑重判时显式 `reopen=True`，原回执
+    压进 `receipt_history` 留痕，不静默覆盖。
+    """
     card_id = card["card_id"] if isinstance(card, dict) else card
     cards = _load()
     c = cards.get(card_id)
     if not c:
         return {"ok": False, "error": f"承接卡不存在: {card_id}"}
+    if c.get("status") == STATUS_DELIVERED and not reopen:
+        return {"ok": False, "error": "该卡已交付（delivered），拒绝用新回传覆盖",
+                "hint": "确需重跑重判请显式 reopen=True，原回执会进 receipt_history",
+                "status": STATUS_DELIVERED}
 
     ok, report = verify(c, result)
     receipt = {
@@ -357,6 +511,8 @@ def collect(card, result, run_at="local"):
                 "test_output_len": len(str(result.get("test_output") or "")),
                 "evidence_keys": list((result.get("evidence") or {}).keys())},
     }
+    if c.get("receipt"):
+        c.setdefault("receipt_history", []).append(c["receipt"])
     c["receipt"] = receipt
     c["status"] = STATUS_DELIVERED if ok else STATUS_STUCK
     c["updated_at"] = _now()

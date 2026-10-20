@@ -42,3 +42,6 @@ local-agent/review_cycle/state/
 # 曾被 git 跟踪 → 去重门记忆跨机器"继承"，加剧误跳过；现 gitignore + 移出版本库。
 local-agent/hybrid/.bus_queue.json
 local-agent/hybrid/.quota_ledger.json
+
+# 云端承接侧运行时账本（承接卡本地累积，不进版本库 · Issue #177）
+local-agent/intent/_ledger/

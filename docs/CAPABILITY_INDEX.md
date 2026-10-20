@@ -14,7 +14,7 @@
 | **入口** | 架构·秘书（强制入口+路由）| 秘书/入口/接待/先看看 | `.cnb/settings.yml` + `AGENTS.md·默认入口协议` | docs/SECRETARY_SENSE.md | module_version 声明头 |
 | **入口** | 三入口归一化（platform-adapter）| 三入口/入口归一化/网页对话/cnb/local/多宿主/谁当入口 | `local-agent/entries/` | docs/PLATFORM_ADAPTERS.md | Issue #105 · module platform-adapter v0.2.0 |
 | **桥接闭环** | 本地⇄云端桥接闭环（entries.bridge）| 最常用链路/本地deepseek harness/网页gemini工具桥/云开发请求/异步句柄/跨对话/跨PR/跨仓库/本地数据对齐/本地测试先行/云端建环境贵 | `local-agent/entries/bridge.py` | docs/PLATFORM_ADAPTERS.md 三.6 | Issue #105 · module platform-adapter v0.3.0 |
-| **承接** | 云端承接侧（inbound-take：承接卡/交接单/回传核对）| 承接/接单卡/承接卡/运行时在本地/云端只承接/交接单/回传核对/接不住拒接/半承接/ran_remotely | `local-agent/intent/take.py` | docs/INBOUND_TAKE.md | Issue #177 · module inbound-take v0.1.0 |
+| **承接** | 云端承接侧（inbound-take：承接卡/交接单/回传核对）| 承接/接单卡/承接卡/运行时在本地/云端只承接/交接单/回传核对/接不住拒接/半承接/ran_remotely | `local-agent/intent/take.py` | docs/INBOUND_TAKE.md | Issue #177 · module inbound-take v0.1.1 |
 | **模型** | 模型路由（统一配置文件 + 多级降级链 + 真实接线 + **角色按需指定**）| 模型/统一配置/配置文件/角色按需指定/角色别名/主模型/备用模型/多级备选/降级/渠道不通/配置生效/非单次有效/按角色/v4.1 flash/1017/alias/codebuddy/glm/audit/两链一致/fallback_chain | `local-agent/model_routing/models.yml`（唯一配置文件）| docs/MODEL_ROUTING.md | Issue #147 · module model-routing v0.3.0-update → v0.3.0-fix（Issue #182 复评 · PR #184）|
 | **聚合控制页** | 跨端聚合控制页（entries.dashboard）| 聚合控制/fastapi聚合页/状态显示/每端面板/跨端交互/控制台/健康灯/一键控制/overview/panel | `local-agent/entries/dashboard.py` | docs/PLATFORM_ADAPTERS.md 三.7 | Issue #105 · module platform-adapter v0.5.0 |
 | **真实通道** | 真实 cnb.cool 传输（entries.cnb_live）| 模拟数据不可信/本地实测/真实传输/发信号配合/通道探测/默认真实/mock仅单测兜底/真实闭环 | `local-agent/entries/cnb_live.py` | docs/PLATFORM_ADAPTERS.md 三.8 | Issue #105 · module platform-adapter v0.5.0 |

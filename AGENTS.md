@@ -250,7 +250,7 @@
 **定位纠正（rules 固定）**：运行时在**用户本地电脑**，云端是**承接端**不是执行端。
 云端职责 = 接得住、不丢件、说清楚；不是把活自己跑完。接单卡不是回执仪式，而是
 **便于承接的凭证**——把「承了哪件活、按什么形态交、验什么才算完」收敛成可核验结构。
-承载：`local-agent/intent/take.py`（module **inbound-take** v0.1.0）+ `docs/INBOUND_TAKE.md`。
+承载：`local-agent/intent/take.py`（module **inbound-take** v0.1.1）+ `docs/INBOUND_TAKE.md`。
 
 - **① 四件事且只做四件**：`judge`（接得住/半接/拒接）→ `make_card`（承接卡）→
   `handoff`（交接单交本地跑）→ `collect`（本地回传按验收核对）。
@@ -261,6 +261,14 @@
 - **④ 不假装跑过**：`ran_remotely` 恒 `False`；「已发卡/已派发」不等于「已跑通/已交付」。
 - **⑤ 回传按验收核对，不通过就明说**：`collect` 逐条核对，缺测试输出 / 失败计数>0 /
   硬错误 → `fix_bug` + `stuck`，**不给 `merge`**（合并闸门归人类 CP3）。
+  **「不能证明通过 = 不算通过」（v0.1.1 假绿修补）**：判据不是"没写失败就算过"——必须有
+  **带数字的通过计数**（`N 通过` / `N passed` / `PASS=N`）且失败计数为 0 才算合格信号；
+  `FAILED` / `FAIL=3` / `not ok` / `✗` / `XX` / 非零退出 / 无计数的 `ok all pass` 一律判不通过。
+  回传方要交统一收尾，不许拿"看着挺绿"冒充跑过。
+- **⑤′ 入参严格不静默**：`acceptance` / `scope_done` / `scope_not` 只收 list/tuple，
+  传字符串直接 `ValueError`（被按字符拆成 `['有','文','档']` 会静默判绿）；
+  坏账本改名 `.bad` 留证报警不静默吞；卡已 `delivered` 时默认拒绝被差回传覆盖（需 `reopen=True`）；
+  半承接 `deliverable` 强制带「未验证」标记，不可被入参覆盖掉。
 - **⑥ 三态分开**：`delivered` / `awaiting_local_run` / `stuck` / `rejected` 不混成一个总数
   ——一个要催、一个要换承接方，混了就没法处置。
 - **⑦ 与相邻机制不重复**：格式校验归 `relay_card`，跨对话/跨 PR 产出归集归 `entries.bridge`，

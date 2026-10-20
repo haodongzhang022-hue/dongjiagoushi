@@ -11,6 +11,10 @@
 #   7. tally 三态分开（delivered / awaiting / stuck / rejected）
 #   8. 幂等：同一 (origin,title) 二次取回同一张卡，不漂移
 #   9. capability 边界声明：run_remotely=False
+#  10. 假绿反例（v0.1.1 必修 1）：无统一计数器的回传不得判通过（FAILED / ok all pass / 硬错误）
+#  11. acceptance 非 list 显式拒绝（v0.1.1 必修 2：字符串被按字符拆开的静默错）
+#  12. 半承接 deliverable 强制带「未验证」，不可被入参覆盖（建议 3）
+#  13. 坏账本不静默吞（建议 4）+ parent_issue 归一 + 已交付守卫（建议 5）
 set -e
 cd "$(dirname "$0")/.."
 PY=python3
@@ -161,7 +165,7 @@ import sys; sys.path.insert(0,'.')
 from intent import take
 c = take.make_card(title='确定性', origin='issue#177', kind='code', runtime='local',
                    acceptance=['信号灯全绿'])
-res = {'test_output':'ok all pass','changed_files':['x.py']}
+res = {'test_output':'18 通过 / 0 失败','changed_files':['x.py']}
 a = take.verify(c, res); b = take.verify(c, res)
 assert a == b and a[0] is True
 print('ok 两次结论一致（确定性）')
@@ -187,7 +191,7 @@ import sys, shutil, os; sys.path.insert(0,'.')
 from intent import take
 shutil.rmtree(take.STATE_DIR, ignore_errors=True)
 c1 = take.make_card(title='T1', origin='o', kind='code', runtime='local', acceptance=['信号灯全绿'])
-take.collect(c1, {'test_output':'pass','changed_files':['a']})
+take.collect(c1, {'test_output':'18 通过 / 0 失败','changed_files':['a']})
 c2 = take.make_card(title='T2', origin='o', kind='code', runtime='local', acceptance=['信号灯全绿'])
 take.collect(c2, {'changed_files':['a']})              # 缺测试 → stuck
 take.make_card(title='T3', origin='o', kind='code', runtime='local', acceptance=['信号灯全绿'])  # awaiting
@@ -218,6 +222,140 @@ assert cap['run_remotely'] is False
 assert '不建云端运行时' in cap['boundary']
 assert cap['module']=='inbound-take'
 print('ok capability module=%s run_remotely=False' % cap['module'])
+EOF
+"
+
+echo "===== [inbound] 10. 假绿反例（无合格信号不得判通过） ====="
+t "FAILED 无计数器 → 不通过（v0.0 曾判绿）" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+c = take.make_card(title='假绿A', origin='issue#177', kind='test', runtime='local',
+                   acceptance=['信号灯全绿'])
+ok, rep = take.verify(c, {'test_output':'test_a.sh FAILED\ntest_b.sh FAILED\n(no counter)'})
+assert ok is False, rep
+print('ok FAILED 无计数器 → 不通过：', rep[0]['why'])
+EOF
+"
+t "ok all pass（无计数）→ 不通过" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+c = take.make_card(title='假绿B', origin='issue#177', kind='test', runtime='local',
+                   acceptance=['信号灯全绿'])
+ok, rep = take.verify(c, {'test_output':'ok all pass'})
+assert ok is False, rep
+print('ok 无合格信号 → 不通过：', rep[0]['why'][:18])
+EOF
+"
+t "硬错误 / 非零退出 → 不通过" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+c = take.make_card(title='假绿C', origin='issue#177', kind='test', runtime='local',
+                   acceptance=['信号灯全绿'])
+for txt in ['Traceback (most recent call last):\n  File x',
+            'bash: line 3: python3: command not found\nexit code 1',
+            'not ok 1 - foo', '14 通过 / 2 失败', 'PASS=97  FAIL=3']:
+    ok, rep = take.verify(c, {'test_output': txt})
+    assert ok is False, (txt, rep)
+print('ok 五种失败形态全部判不通过（含英文 FAIL=3 计数）')
+EOF
+"
+t "合格收尾才判通过（中英两种计数写法）" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+c = take.make_card(title='真绿', origin='issue#177', kind='test', runtime='local',
+                   acceptance=['信号灯全绿'])
+for txt in ['18 通过 / 0 失败', 'PASS=97  FAIL=0', '12 passed, 0 failed', '0 通过 / 0 失败']:
+    ok, rep = take.verify(c, {'test_output': txt})
+    want = '0 通过' not in txt          # 0 通过不算跑过
+    assert ok is want, (txt, rep)
+print('ok 中英计数可认；0 通过仍判不通过')
+EOF
+"
+
+echo "===== [inbound] 11. acceptance 非 list 显式拒绝（不按字符拆） ====="
+t "acceptance 传字符串 → ValueError（不再拆成单字）" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+try:
+    take.make_card(title='字符串验收', origin='issue#177', kind='doc', runtime='cloud',
+                   acceptance='有文档')
+except ValueError as e:
+    assert 'acceptance' in str(e) and '列表' in str(e)
+    print('ok 字符串入参显式拒建：', str(e)[:30]); raise SystemExit(0)
+raise AssertionError('应拒建')
+EOF
+"
+t "scope_done 传字符串同样拒绝 + 传非序列报 TypeError" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+for kw, val, exc in [('scope_done', '做A', ValueError), ('scope_not', 123, TypeError)]:
+    try:
+        take.make_card(title='X'+kw, origin='issue#177', kind='doc', runtime='cloud',
+                       acceptance=['有文档'], **{kw: val})
+    except exc as e:
+        continue
+    raise AssertionError('应拒绝 ' + kw)
+print('ok scope_done/scope_not 非法入参被拒')
+EOF
+"
+
+echo "===== [inbound] 12. 半承接 deliverable 强制未验证标记 ====="
+t "deliverable 传「patch（已验证）」也压不住未验证标记" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+d = take.judge(kind='code', runtime='cloud', deliverable='patch（已验证）')
+assert d['mode']=='partial' and '未验证' in d['deliverable'], d
+assert '已验证' in d['deliverable'] and '未验证' in d['deliverable']
+print('ok 云端 code 交付形态 =', d['deliverable'])
+EOF
+"
+t "本地 full 不受影响（未验证标记只在半承接加）" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+d = take.judge(kind='code', runtime='local')
+assert d['mode']=='full' and '未验证' not in d['deliverable']
+print('ok 本地 full =', d['deliverable'])
+EOF
+"
+
+echo "===== [inbound] 13. 坏账本不静默吞 / parent_issue 归一 / 已交付守卫 ====="
+t "坏账本改名 .bad 并报警，不静默覆盖" "$PY - <<'EOF'
+import sys, os, json; sys.path.insert(0,'.')
+from intent import take
+os.makedirs(take.STATE_DIR, exist_ok=True)
+open(take._LEDGER_FILE,'w').write('{ this is not json')
+data = take._load()
+assert data == {}
+assert os.path.exists(take._LEDGER_FILE + '.bad'), '坏文件应另存留证'
+print('ok 坏账本 → 另存 .bad，未静默覆盖')
+EOF
+"
+t "parent_issue 归一成纯编号" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+c1 = take.make_card(title='归一A', origin='issue#177', kind='doc', runtime='cloud', acceptance=['有文档'])
+c2 = take.make_card(title='归一B', origin='auto/x', parent_issue='#181', kind='doc', runtime='cloud', acceptance=['有文档'])
+assert c1['parent_issue']=='177', c1['parent_issue']
+assert c2['parent_issue']=='181', c2['parent_issue']
+print('ok parent_issue 归一 177 / 181')
+EOF
+"
+t "已交付卡拒绝被差回传覆盖，reopen 才放行且留痕" "$PY - <<'EOF'
+import sys; sys.path.insert(0,'.')
+from intent import take
+c = take.make_card(title='收口守卫', origin='issue#177', kind='code', runtime='local',
+                   acceptance=['信号灯全绿'])
+good = {'test_output':'18 通过 / 0 失败','changed_files':['a.py']}
+r1 = take.collect(c, good)
+assert r1['status']=='delivered'
+r2 = take.collect(c, {'changed_files':['a.py']})
+assert r2['ok'] is False and r2.get('status')=='delivered', r2
+assert take.load_card(c['card_id'])['status']=='delivered'
+r3 = take.collect(c, {'changed_files':['a.py']}, reopen=True)
+assert r3['status']=='stuck'
+hist = take.load_card(c['card_id'])['receipt_history']
+assert len(hist)==1 and hist[0]['passed'] is True
+print('ok 已交付不被烂回传覆盖；reopen 放行且原回执留痕')
 EOF
 "
 
