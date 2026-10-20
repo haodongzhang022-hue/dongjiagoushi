@@ -2,7 +2,7 @@
 
 > **唯一配置文件**：`local-agent/model_routing/models.yml`（改模型只改这一处）
 > **读配置代码层**：`local-agent/model_routing/spec.py`
-> **演进线**：Issue #147 · module model-routing **v0.3.0-update**
+> **演进线**：Issue #147 · module model-routing **v0.3.0-update** → **v0.3.0-fix（Issue #182 · 角色逐个指定）**
 > **触发词**：模型/主模型/备用模型/降级/渠道不通/统一配置/角色指定/v4.1 flash/codebuddy/glm/接线/按角色
 
 ## 一、用户诉求（Issue #147）
@@ -45,11 +45,58 @@ roles: {}
 unavailable_signals: [unavailable, timeout, connection_error, rate_limit, "429", "503", ...]
 ```
 
-**解析顺序（确定性）**：`roles[角色]` → `default` → 内置兜底常量（配置缺失时不崩）。
+**解析顺序（确定性 · Issue #182 复评收紧 · PR #184）**：
+`role_alias(全称↔短名双向归一)` → `roles[角色]` → **`fallback_chain`**（= `default.chain` 的 YAML 锚点引用）→ 内置兜底常量。
 
-- 角色**未在 roles 中列出** → 继承 `default`（「不指定就默认通用」）；
-- 角色**在 roles 中列出** → 覆盖：写 `chain` 整链覆盖；写 `primary/fallback` 子链则**头部覆盖、default 补全尾部**（不缩短降级链）；
+- 角色**真正需要不同链**才显式写进 `roles`；**未列出的角色走 `fallback_chain`**（= default.chain），
+  不在配置里堆与 default 逐字相同的「空壳链」（Issue #182 复评：23/25 条空壳已撤销）；
+- `role_policy()['specified']` 标该角色是否显式指定（`False` = 走 fallback，是预期行为，非异常）；
+- `role_aliases` 让全称与短名**双向**可查（`架构·开发` ↔ `开发`），云端传全称也匹配得上；
 - 支持 `MODEL_ROUTING_CONFIG` 环境变量指向自定义配置文件（多环境部署用）。
+
+### 2.1 角色按需指定（Issue #182 复评 · PR #184 · 不造假差异化）
+
+用户原话：「我记得有对哪个角色用哪个模型的那部分的配置的定义，你检查一下，所以不是默认，
+其实有额外的文件指定了的」。**配置确实在**，但初版把 `.cnb/settings.yml` 声明的角色
+**逐字复制**成 25 条与 default 相同的链——那是空壳声明，并非真差异化。
+复评（PR #184）改为：
+
+| 项 | 真相 / 修法 |
+|---|---|
+| 初版断点① | 25 条角色链 23 条与 `default.chain` 逐字相同，属空壳声明 |
+| 复评修法① | **撤销空壳**：只在角色**真正需要不同链**时写进 `roles`（当前仅 进度推手/客服 主档换快档）；其余角色走 `fallback_chain` |
+| 初版断点② | 全称/短名匹配不上 → 摘掉 `role_aliases` 后短名静默走 fallback，审计一条不报 |
+| 复评修法② | `audit_roles()` **全称 + 短名双体检**（`short_names` 含去前缀自然短名）；摘掉别名立即报 `alias_broken`，断点不再换位置复发 |
+
+写进代码的约束：
+
+```bash
+python3 -m model_routing.cli audit      # 体检：空壳链 / 别名断裂 / 缺链（有即退出码 2）
+python3 -m model_routing.cli roles      # 逐角色实际生效主档 + specified
+```
+
+信号灯：`bash tests/test_model_role_assign.sh`（7 组，含「两链一致」「摘掉短名别名 → 审计立刻报红」反向验证）。
+
+**真正差异化的依据**（只列确实不同的，不堆空壳）：
+
+| 角色 | 主档 | 理由 |
+|---|---|---|
+| 架构·进度推手 / 市场·客服 | `glm-5.3-flash`（快档优先） | 打标/百分比/短答，不需长上下文，要回合快 |
+| 其余角色 | 走 `fallback_chain`（= default） | 未显式指定即走默认，specified=False，可审计 |
+
+### 2.2 版本别名（用户说的 `deepseek v4.1 flash 1017` · 实名登记，不留伪配置）
+
+```yaml
+alias: {}   # 故意为空：1017 对应哪个平台真实 ID 尚未由人类确认，不留伪配置
+```
+
+- **未确认不登记**：`1017` 这类口语版本串只在人类确认平台真实 ID 后，才补一行
+  `deepseek-v4.1-flash-1017: <真实ID>`（改 `alias` 右侧一处即全角色生效，不用逐角色改）；
+- **未登记 alias 显式报红（不放行）**：`resolve_alias` 对带版本后缀（`-<数字>`）却未登记的
+  模型名，在解析期直接抛 `未登记别名` 异常——不再静默透传给后端（否则
+  `model ... is not in the optional models list` → 整个 stage error，#177 事故）。别名映射
+  统一收口在 `engine.resolve_models`（含 `role_at`），不在 `openai_compat` 散落；
+- 普通模型 ID（无版本后缀）原样返回，不影响正常链路。
 
 ## 三、为什么需要独立模块 + 统一配置
 
@@ -90,6 +137,7 @@ unavailable_signals: [unavailable, timeout, connection_error, rate_limit, "429",
 
 ```bash
 bash local-agent/tests/test_model_routing.sh          # 12 组信号灯（含接线核验）
+bash tests/test_model_role_assign.sh                 # 7 组信号灯（角色按需指定 / 两链一致 / 别名双体检）
 # 仓库根目录运行 CLI（加 PYTHONPATH，避免 ModuleNotFoundError）：
 PYTHONPATH=local-agent python3 -m model_routing.cli config       # 唯一配置文件路径 + 生效内容
 PYTHONPATH=local-agent python3 -m model_routing.cli chain        # 通用默认渠道链
@@ -107,3 +155,17 @@ PYTHONPATH=local-agent python3 -m model_routing.cli dryrun       # 本地演练�
   **改 `models.yml` 一处即可全仓生效**（单点收敛，不散改）。
 - `codebuddy` / `glm-5.3-flash` 作为备用档，走同一 OpenAI 兼容端点（网关侧路由到对应模型）；
   若网关不支持某档模型名，该档调用失败即自动降级下一档，行为仍正确。
+
+## 八、模型 ID 纪律（Issue #182）
+
+- **不臆造版本后缀**：本仓规范里的模型 ID 只有 `deepseek-v4.1-flash` 这一个写法，
+  没有 `1017` / 日期码之类的版本标识。`npc:go` 的 `model` 只认组织「可选模型列表」里的
+  **精确 ID**，写错即整 stage `error`（#177 的静默失效正是 `deepseek-v4-flash` 不在列表）。
+  平台若确实提供带版本号的 ID，以平台选择器显示为准，改 `models.yml` 一处 + `.cnb.yml` 一行同步。
+- **模型 ≠ 速度**：`npc:go` 的 `model` 只决定「云端这条执行体用哪个模型」，
+  **不决定 tps / 生成速度**，也不决定单次执行要写多少 token。以「某角色只有 65 tps」
+  为由改模型，是按错的地方下药：速度感受主要由**单轮上下文规模**（AGENTS.md + skill +
+  角色 prompt + Issue 全量评论）与**工具步数**决定——上下文越长、步数越多，单轮耗时越久，
+  摊出来的 tps 越低。
+- **按角色调优的正确姿势**：先量（`model_routing_trace.jsonl` / 执行日志的实际 token 与耗时），
+  再决定是减上下文（读材料只读必要段、评论流显式分页）、减步数，还是真换模型。

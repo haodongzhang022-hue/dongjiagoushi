@@ -6,6 +6,8 @@
   python -m model_routing.cli models [角色]     # 打印渠道顺序（不传角色 → 通用默认）
   python -m model_routing.cli overview          # 打印路由留痕统计
   python -m model_routing.cli dryrun [角色]     # 本地演练：主通道挂 → 降级到备用
+  python -m model_routing.cli roles             # 逐角色实际生效模型（含是否显式指定）
+  python -m model_routing.cli audit             # 体检：settings.yml 声明的角色是否都配了
 """
 import sys
 import json
@@ -34,6 +36,21 @@ def main(argv=None):
     elif cmd == "chain":
         print(json.dumps({"role": arg, "chain": list(spec.role_chain(arg))},
                          ensure_ascii=False, indent=2))
+    elif cmd == "roles":
+        # 逐角色俯瞰：主档模型 / 是否显式指定 / 降级链（人类一眼看完）
+        rows = []
+        for role in sorted(spec.role_overrides()):
+            pol = spec.role_policy(role)
+            rows.append({"role": role, "primary": pol["primary"],
+                         "chain": pol["chain"], "specified": pol["specified"]})
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+    elif cmd == "audit":
+        # 体检：全称 + 短名双体检（空壳链 / 别名断裂 / 缺链）
+        bad = spec.audit_roles()
+        print(json.dumps({"ok": not bad, "issues": bad,
+                          "total_declared": len(spec.declared_roles())},
+                         ensure_ascii=False, indent=2))
+        return 0 if not bad else 2
     elif cmd == "overview":
         print(json.dumps(trace_overview(), ensure_ascii=False, indent=2))
     elif cmd == "dryrun":

@@ -80,7 +80,7 @@
 - 好处：并发写从「撞键 / 锁死」变为确定性判冲突；冲突不再污染主线、不再静默丢失；
   旧库经任意入口自动升级；事务 API 自洽（`tx_depth` 无泄漏）。
   已由 `test_collab.sh` 第 7 组、`test_data_layer.sh` 第 8/9/10 组、
-  feature-verify `collab/写时状态中介`（Then-1~5）锁死。第 9 组 / Then-5 专门锁
+  feature-verify `collab/写时状态中介`（Then-1~6，含 1b/2b/5b）锁死。第 9 组 / Then-5 专门锁
   「健康库读热路径不取写锁」：另一连接持写锁时纯读 gid / `init_schema()` 必须成功，
   去掉快路径即转红。
 - 代价：写路径串行化（`BEGIN IMMEDIATE`），高并发下冲突方要重试/rebase——

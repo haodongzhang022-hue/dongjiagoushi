@@ -16,7 +16,7 @@
 | **对接** | 角色名册与派单接入（roster）| 角色列表/名册/roster/派单/对接/握手/跨仓派活/role_id/本地发请求过来开发/roster webhook | `local-agent/roster/` + `local-agent/dispatcher/webhook.py`(`/webhook/<src>/roster`) | docs/ROSTER.md | Issue #171 · module roster v0.2.0 |
 | **对接** | MCP 汇聚注册表（mcp_hub）| MCP/mcp 收录/MCP注册表/端点清单/3092/统一入口/mcp服务/端口/前端形态/jsonrpc/sse | `local-agent/mcp_hub/specs.py` | docs/MCP_HUB.md | Issue #171 · module mcp-hub v0.1.0 |
 | **桥接闭环** | 本地⇄云端桥接闭环（entries.bridge）| 最常用链路/本地deepseek harness/网页gemini工具桥/云开发请求/异步句柄/跨对话/跨PR/跨仓库/本地数据对齐/本地测试先行/云端建环境贵 | `local-agent/entries/bridge.py` | docs/PLATFORM_ADAPTERS.md 三.6 | Issue #105 · module platform-adapter v0.3.0 |
-| **模型** | 模型路由（统一配置文件 + 多级降级链 + 真实接线）| 模型/统一配置/配置文件/角色指定(默认不启用定制)/主模型/备用模型/多级备选/降级/渠道不通/配置生效/非单次有效/按角色/v4.1 flash/codebuddy/glm | `local-agent/model_routing/models.yml`（唯一配置文件）| docs/MODEL_ROUTING.md | Issue #147 · module model-routing v0.3.0-update |
+| **模型** | 模型路由（统一配置文件 + 多级降级链 + 真实接线 + **角色按需指定**）| 模型/统一配置/配置文件/角色按需指定/角色别名/主模型/备用模型/多级备选/降级/渠道不通/配置生效/非单次有效/按角色/v4.1 flash/1017/alias/codebuddy/glm/audit/两链一致/fallback_chain | `local-agent/model_routing/models.yml`（唯一配置文件）| docs/MODEL_ROUTING.md | Issue #147 · module model-routing v0.3.0-update → v0.3.0-fix（Issue #182 复评 · PR #184）|
 | **聚合控制页** | 跨端聚合控制页（entries.dashboard）| 聚合控制/fastapi聚合页/状态显示/每端面板/跨端交互/控制台/健康灯/一键控制/overview/panel | `local-agent/entries/dashboard.py` | docs/PLATFORM_ADAPTERS.md 三.7 | Issue #105 · module platform-adapter v0.5.0 |
 | **真实通道** | 真实 cnb.cool 传输（entries.cnb_live）| 模拟数据不可信/本地实测/真实传输/发信号配合/通道探测/默认真实/mock仅单测兜底/真实闭环 | `local-agent/entries/cnb_live.py` | docs/PLATFORM_ADAPTERS.md 三.8 | Issue #105 · module platform-adapter v0.5.0 |
 | **宿主传输** | 三宿主真实传输注册表（entries.host_transport）| 三宿主/真实宿主传输/本地deepseek harness/网页gemini工具桥/local-harness真实relay/web-bridge真实HTTP/别名归一/bridge via/三宿主可达矩阵 | `local-agent/entries/host_transport.py` | docs/PLATFORM_ADAPTERS.md 三.9 | Issue #105 · module platform-adapter v0.6.0 |
@@ -29,6 +29,7 @@
 | **全员** | 派发能力（DispatchAbility）| 派发/接单/分发 | `local-agent/dispatch/` | docs/DISPATCH_ABILITY.md | Issue #33 |
 | **全员** | 深度能力（DepthAbility L1-L7）| 唤醒/协作深度/到结果 | `local-agent/depth/` | docs/DEPTH_MODEL.md | Issue #47 |
 | **全员** | 真实唤醒校验（dispatch_verify）| 假装分配/未唤醒/待回执 | `dispatch_engine.py` + `dispatch/` | docs/DISPATCH_DEPTH.md §八 | Issue #100 |
+| **全员** | 评论流统一读取（comment_stream · 默认全量）| 评论流/读评论/回执/悬空/分页/page_size/截断/静默/链悬空| `local-agent/comment_stream/` | docs/COMMENT_STREAM.md | Issue #166 · module dispatch-verify v0.1.0 |
 | **全员** | @ 定位能力（HandleAbility）| 跨仓库/@ 格式/权限 | `local-agent/handle/` | docs/HANDLE_ABILITY.md | 通用 |
 | **全员** | 标签能力（LabelAbility）| 打标/进度/优先级/标签 | `local-agent/label/` | docs/LABEL_AUTOMATION.md | Issue #51 |
 | **全员** | 开发规范能力（StandardAbility）| 合规/规范/检查/标准 | `local-agent/dev-standard/` | docs/DEV_STANDARD.md | Issue #83 |
@@ -38,7 +39,7 @@
 | **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote/blocked | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 · #150 |
 | **质量** | 有效性度量模型 | 度量/有效性/解决度/缺陷/稳定性/通用性/一致性 | `local-agent/review_metrics/` | docs/REVIEW_METRICS.md | Issue #100 决策⑤ |
 | **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
-| **质量** | 功能级校验（feature-verify）| 功能校验/功能做完/feature-verify/feature-regress/坏功能定位/模块映射/未映射即RED | `scripts/feature-verify/`（+ `modules.map` 唯一事实源）+ `scripts/feature-verify.sh` | docs/FEATURE_VERIFY.md | Issue #109 · #162 |
+| **质量** | 功能级校验（feature-verify）| 功能校验/功能做完/feature-verify/feature-regress/坏功能定位/模块映射/未映射即RED/TDD红灯/待实现 | `scripts/feature-verify/`（+ `modules.map` 唯一事实源）+ `scripts/feature-verify.sh`（+ `.tdd` / `.tdd.verified` 两阶段判据） | docs/FEATURE_VERIFY.md | Issue #109 · #162 · #165 |
 | **效率** | 评审增量上下文（review-context）| 评审复述/增量上下文/冻结骨架/免复述/上下文复用 | `local-agent/review_context/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-context v0.2.0 |
 | **效率** | 评审段调度器（review-cycle）| 评审段/攒批/异步收集/同指纹不重复构建/减CPU损耗 | `local-agent/review_cycle/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-cycle v0.2.0 |
 | **协作** | 阶段链门控（stage-gate）| 阶段链/抢跑/重复触发/乱序/链条按序推进/进度失衡 | `local-agent/review_cycle/gate.py` | docs/REVIEW_EFFICIENCY.md §二.④ | Issue #150 · module review-cycle v0.3.2 |
