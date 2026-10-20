@@ -2,7 +2,7 @@
 
 > **唯一配置文件**：`local-agent/model_routing/models.yml`（改模型只改这一处）
 > **读配置代码层**：`local-agent/model_routing/spec.py`
-> **演进线**：Issue #147 · module model-routing **v0.3.0-update** → **v0.3.0-fix（Issue #182 · 角色逐个指定）**
+> **演进线**：Issue #147 · module model-routing **v0.3.0-update** → **v0.3.0-fix（Issue #182 · 角色逐个指定）** → **v0.3.1-tier（Issue #199 · 快档档序落定 + 兜底归 glm）**
 > **触发词**：模型/主模型/备用模型/降级/渠道不通/统一配置/角色指定/v4.1 flash/codebuddy/glm/接线/按角色
 
 ## 一、用户诉求（Issue #147）
@@ -19,19 +19,25 @@
 
 | 档位 | 模型 | 说明 |
 |---|---|---|
-| ① 一选主通道 | `deepseek-v4.1-flash` | 首选 |
-| ② 二选备用 | `codebuddy` | 主渠道不通时启用 |
-| ③ 三选备用 | `glm-5.3-flash` | 前两档均不通时启用 |
+| ① 快档第一优先 | `deepseek-v4.1-flash` | 主通道（人类 2026-10-20 Issue #199 定档序） |
+| ② 快档第二优先 | `minimax-3.1-flash` | 一档不通时启用 |
+| ③ @CodeBuddy 通道 | `codebuddy` | 前两档均不通时启用 |
+| ④ 快档第三优先 / 兜底 | `glm-5.3-flash` | 前三档均不通时启用；同时是 `last_resort_model` |
+
+> **档序来源**：Issue #199 人类拍板 ——「第一优先 deepseek v4.1 flash，第二 minimax 3.1 flash，
+> 第三 glm 5.3 flash」。兜底档随之由 `claude-3-5-sonnet`（AI 代选）改为 `glm-5.3-flash`。
 
 ## 二、唯一配置文件（models.yml）
 
 ```yaml
 # ① 通用默认（不指定角色时用这个）
 default:
-  chain:                       # 渠道链，按优先级 1→N；主通道不通自动降级下一档
+  chain: &default_chain        # 渠道链，按优先级 1→N；主通道不通自动降级下一档
     - deepseek-v4.1-flash
+    - minimax-3.1-flash
     - codebuddy
     - glm-5.3-flash
+last_resort_model: glm-5.3-flash
   # 兼容字段（由 chain 派生；改模型建议只改上面的 chain）
   primary: deepseek-v4.1-flash
   fallback: glm-5.3-flash
@@ -92,9 +98,9 @@ python3 -m model_routing.cli roles      # 逐角色实际生效主档 + specifie
 
 | 档 | 语义 | 配置写法 | 说明 |
 |---|---|---|---|
-| 档1 `fast` | **指定** | `roles[角色].chain[0]` | 该角色专属快档。真实快档 ID（`deepseek-v4.1-flash-1017` / `minimax-3.1-flash`）待人类确认并 `probe` 验真后改这一处 |
+| 档1 `fast` | **指定** | `roles[角色].chain[0]` | 该角色专属快档。带版本后缀的真实平台 ID（如 `deepseek-v4.1-flash-1017`）待人类给出原文并 `probe` 验真后登记 `alias`（Issue #199：人类给的是档序优先级，不是 ID 原文） |
 | 档2 `same` | **和其他角色一样** | chain 里与 `fallback_chain` 同名的档位 | 不另造名字、不重复字面量，直接是通用链那套模型 |
-| 档3 `last_resort` | **现在的兜底** | `last_resort_model`（顶层单值） | `npc:go` 只接受单 model，平台侧一定跑得起来的那一道 |
+| 档3 `last_resort` | **现在的兜底** | `last_resort_model`（顶层单值，现为 `glm-5.3-flash`） | `npc:go` 只接受单 model，平台侧一定跑得起来的那一道 |
 
 ```bash
 python3 -m model_routing.cli tiers 架构·开发   # 三档语义俯瞰（fast / same / last_resort）
@@ -187,7 +193,7 @@ PYTHONPATH=local-agent python3 -m model_routing.cli dryrun       # 本地演练�
   ① 仓库内一切模型默认值 ② `npc:go` 兜底路径 ③ 本地 harness 后端（角色名已真实贯通）。
 - 模型 ID 是否被平台识别的最终解释权在平台；若平台不接受某个 ID，
   **改 `models.yml` 一处即可全仓生效**（单点收敛，不散改）。
-- `codebuddy` / `glm-5.3-flash` 作为备用档，走同一 OpenAI 兼容端点（网关侧路由到对应模型）；
+- `minimax-3.1-flash` / `codebuddy` / `glm-5.3-flash` 作为备用档，走同一 OpenAI 兼容端点（网关侧路由到对应模型）；
   若网关不支持某档模型名，该档调用失败即自动降级下一档，行为仍正确。
 
 ## 八、模型 ID 纪律（Issue #182）

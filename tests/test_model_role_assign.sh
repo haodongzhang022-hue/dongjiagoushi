@@ -176,7 +176,9 @@ except RuntimeError as e:
 
 # ⑧-3 别名**键**体检：登记了却没接线 → 报 alias_unused（右值写坏也测不出来）
 raw = yaml.safe_load(open(spec.config_path(), encoding="utf-8"))
-raw["alias"] = {"minimax-3.1-flash": "some-unverified-id"}
+# ★ Issue #199 起 minimax-3.1-flash 已是 default.chain 成员（快档第二优先），
+#   再拿它做「登记了没接线」的反例就验不出东西了 —— 换一个确实不在任何链上的键。
+raw["alias"] = {"unused-ver-1017": "some-unverified-id"}
 fd, tmp = tempfile.mkstemp(suffix=".yml"); os.close(fd)
 yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
 os.environ["MODEL_ROUTING_CONFIG"] = tmp
@@ -185,7 +187,7 @@ try:
     assert any(i["reason"] == "alias_unused" for i in issues), f"登记未接线未报红: {issues}"
     # 真接线后（写进角色链）→ 不该再报
     raw["roles"] = dict(raw.get("roles") or {},
-                        **{"架构·测试": {"chain": ["minimax-3.1-flash", "deepseek-v4.1-flash"]}})
+                        **{"架构·测试": {"chain": ["unused-ver-1017", "deepseek-v4.1-flash"]}})
     yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
     issues2 = [i for i in spec.audit_roles() if i["reason"] == "alias_unused"]
     assert not issues2, f"接线后仍报 alias_unused: {issues2}"
@@ -232,14 +234,15 @@ def caller(model, s, u, **k):
         raise RuntimeError("timeout: channel unavailable")
     return f"ok:{model}"
 res = engine.route_call(caller, system_prompt="s", user_input="u")
-assert res["ok"] and res["model"] == "codebuddy", res
+# 档序（Issue #199 人类拍板）：deepseek → minimax → codebuddy → glm
+assert res["ok"] and res["model"] == "minimax-3.1-flash", res
 assert res["degraded"] is True, res
 assert res["from_model"] == "deepseek-v4.1-flash", res
 assert res["used_tier"] == "fallback", res
 lines = [json.loads(l) for l in open(tf, encoding='utf-8').read().splitlines()[before:]]
 assert any(e.get("event") == "model.call.degraded" for e in lines), [e.get("event") for e in lines]
 fails = [e for e in lines if e.get("event") == "model.call.fail"]
-assert fails and fails[0].get("degraded") == 1 and fails[0].get("next") == "codebuddy", fails
+assert fails and fails[0].get("degraded") == 1 and fails[0].get("next") == "minimax-3.1-flash", fails
 print("  ✅ 降级显性：结果 degraded=True /", res["from_model"], "→", res["model"], "；留痕含 model.call.degraded")
 PY
 

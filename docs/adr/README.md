@@ -49,6 +49,7 @@
 | [0014-dsh适配作为独立模块](0014-dsh-adapter-new-version.md) | dsh 适配独立模块化 + 版本闸门前置（不静默放行），loader 只 import 构建产物 | Accepted |
 | [0015-降级链逐档绑定+显性](0015-degrade-chain-binding-and-visible.md) | 闭包按档绑定变量、降级写 last_degraded 不断言静默换模型 | Accepted |
 | [0016-模型三档语义+降级显性](0016-model-fast-tier-and-explicit-degrade.md) | 模型按「档1 指定 / 档2 与其他角色一样 / 档3 兜底」配置，降级必须留痕可见（不静默换模型） | Accepted |
+| [0017-快档档序落定+兜底归glm](0017-model-fast-tier-ordering.md) | 快档档序 deepseek→minimax→codebuddy→glm 由人类拍板；兜底由 AI 代选的 claude 改为 glm-5.3-flash；alias 仍留空（未验真不登记） | Accepted |
 
 ## 维护纪律
 

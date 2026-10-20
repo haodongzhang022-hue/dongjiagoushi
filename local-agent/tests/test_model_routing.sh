@@ -12,7 +12,7 @@ from model_routing import spec
 assert os.path.exists(spec.config_path()), f"配置文件不存在: {spec.config_path()}"
 assert spec.config_path().endswith("models.yml"), spec.config_path()
 c = spec.default_chain()
-assert c == ("deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"), c
+assert c == ("deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy", "glm-5.3-flash"), c
 print("  ✅ 唯一配置文件:", spec.config_path(), "chain =", list(c))
 PY
 
@@ -20,8 +20,8 @@ echo "---- ② 不指定角色 → 走通用默认（default 三级链） ----"
 python3 - <<'PY'
 import sys; sys.path.insert(0, '.')
 from model_routing import resolve_models
-assert resolve_models() == ["deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"], resolve_models()
-assert resolve_models(role=None) == ["deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"]
+assert resolve_models() == ["deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy", "glm-5.3-flash"], resolve_models()
+assert resolve_models(role=None) == ["deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy", "glm-5.3-flash"]
 print("  ✅ 不指定 → default:", resolve_models())
 PY
 
@@ -30,7 +30,7 @@ python3 - <<'PY'
 import sys; sys.path.insert(0, '.')
 from model_routing import spec, resolve_models
 assert spec.role_policy("架构·开发没有列过")["chain"] == spec.default_policy()["chain"]
-assert resolve_models(role="架构·未列出") == ["deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"]
+assert resolve_models(role="架构·未列出") == ["deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy", "glm-5.3-flash"]
 print("  ✅ 未列出角色继承 default")
 PY
 
@@ -67,7 +67,7 @@ assert res["role"] == "primary", res
 print("  ✅ 使用主通道", res["model"])
 PY
 
-echo "---- ⑥ 主渠道不通 → 自动降级二选（codebuddy） ----"
+echo "---- ⑥ 主渠道不通 → 逐档降级，第一站是快档第二优先 minimax（Issue #199 人类拍板档序） ----"
 python3 - <<'PY'
 import sys; sys.path.insert(0, '.')
 from model_routing import route_call
@@ -76,25 +76,40 @@ def caller(model, s, u, **k):
         raise RuntimeError("connection error: channel unavailable")
     return f"ok:{model}"
 res = route_call(caller, system_prompt="s", user_input="u")
-assert res["ok"] and res["model"] == "codebuddy", res
+assert res["ok"] and res["model"] == "minimax-3.1-flash", res
 assert res["role"] == "fallback", res
 assert res["attempts"][0]["unavailable"] is True
 print("  ✅ 降级到二选", res["model"])
 PY
 
-echo "---- ⑦ 主+二选均不通 → 降级三选（glm-5.3-flash） ----"
+echo "---- ⑦ 一、二档均不通 → 降级三选（codebuddy 通道） ----"
 python3 - <<'PY'
 import sys; sys.path.insert(0, '.')
 from model_routing import route_call
 def caller(model, s, u, **k):
-    if model in ("deepseek-v4.1-flash", "codebuddy"):
+    if model in ("deepseek-v4.1-flash", "minimax-3.1-flash"):
+        raise RuntimeError("timeout: channel unavailable")
+    return f"ok:{model}"
+res = route_call(caller, system_prompt="s", user_input="u")
+assert res["ok"] and res["model"] == "codebuddy", res
+assert res["role"] == "fallback2", res
+print("  ✅ 降级到三选", res["model"])
+PY
+
+echo "---- ⑦' 前三档均不通 → 落末档 glm-5.3-flash（= 兜底档） ----"
+python3 - <<'PY'
+import sys; sys.path.insert(0, '.')
+from model_routing import route_call
+def caller(model, s, u, **k):
+    if model in ("deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy"):
         raise RuntimeError("timeout: channel unavailable")
     return f"ok:{model}"
 res = route_call(caller, system_prompt="s", user_input="u")
 assert res["ok"] and res["model"] == "glm-5.3-flash", res
-assert res["role"] == "fallback2", res
-print("  ✅ 降级到三选", res["model"])
+assert res["role"] == "fallback3", res
+print("  ✅ 降级到末档", res["model"])
 PY
+
 
 echo "---- ⑧ 三级链全挂 → 显式失败（不静默） ----"
 python3 - <<'PY'
@@ -105,7 +120,7 @@ def caller(model, s, u, **k):
 res = route_call(caller, system_prompt="s", user_input="u")
 assert res["ok"] is False, res
 assert res["reason"] == "all_channels_unavailable", res
-assert len(res["attempts"]) == 3, res
+assert len(res["attempts"]) == 4, res
 print("  ✅ 全挂显式失败:", res["reason"])
 PY
 
@@ -146,7 +161,7 @@ os.write(fd, ("default:\n  chain: [deepseek-v4.1-flash, codebuddy, glm-5.3-flash
 os.close(fd)
 os.environ["MODEL_ROUTING_CONFIG"] = path
 import llm.openai_compat as oc
-assert oc._resolve_backends("架构·开发")[0] == ["deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"]
+assert oc._resolve_backends("架构·开发")[0] == ["deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"]  # 临时配置文件的 default 链
 assert oc._resolve_backends("架构·评审")[0] == ["glm-5.3-flash", "deepseek-v4.1-flash"]
 os.remove(path); os.environ.pop("MODEL_ROUTING_CONFIG", None)
 print("  ✅ 后端按 role 解析渠道链正确")
@@ -198,20 +213,21 @@ assert b.seen == ["deepseek-v4.1-flash"], "主档通却打了多档: %s" % b.see
 assert b.last_degraded is None, b.last_degraded
 
 # ② 主档挂 → 逐档真试，顺序与链一致（修复前这里是 ['glm-5.3-flash' x3]）
+#    档序（Issue #199 人类拍板）：deepseek → minimax → codebuddy → glm
 b = Probe(fail_models={"deepseek-v4.1-flash"})
-assert b.call("s", "u") == "by:codebuddy", b.seen
-assert b.seen == ["deepseek-v4.1-flash", "codebuddy"], b.seen
+assert b.call("s", "u") == "by:minimax-3.1-flash", b.seen
+assert b.seen == ["deepseek-v4.1-flash", "minimax-3.1-flash"], b.seen
 assert b.last_degraded and b.last_degraded["from_model"] == "deepseek-v4.1-flash", b.last_degraded
-assert b.last_degraded["used_model"] == "codebuddy", b.last_degraded
+assert b.last_degraded["used_model"] == "minimax-3.1-flash", b.last_degraded
 
-# ③ 前两档挂 → 落三选，留痕能说出试过哪几档
-b = Probe(fail_models={"deepseek-v4.1-flash", "codebuddy"})
+# ③ 前三档挂 → 落末档，留痕能说出试过哪几档
+b = Probe(fail_models={"deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy"})
 assert b.call("s", "u") == "by:glm-5.3-flash", b.seen
-assert b.seen == ["deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"], b.seen
-assert b.last_degraded["attempts"] == ["deepseek-v4.1-flash", "codebuddy"], b.last_degraded
+assert b.seen == ["deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy", "glm-5.3-flash"], b.seen
+assert b.last_degraded["attempts"] == ["deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy"], b.last_degraded
 
 # ④ 全挂 → 显式失败，不静默返回
-b = Probe(fail_models={"deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"})
+b = Probe(fail_models={"deepseek-v4.1-flash", "minimax-3.1-flash", "codebuddy", "glm-5.3-flash"})
 try:
     b.call("s", "u"); raise AssertionError("全链挂却返回了成功")
 except RuntimeError as e:
