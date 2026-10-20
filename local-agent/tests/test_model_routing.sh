@@ -172,4 +172,66 @@ assert m == spec.default_chain()[0], ".cnb.yml(%s) != models.yml default.chain[0
 print("  ✅ .cnb.yml model == models.yml default.chain[0] ==", m)
 PY
 
-echo "==== ✅ 模型路由信号灯全绿（12/12） ===="
+echo "---- ⑬ 真后端降级链逐档绑定（Issue #192：闭包捕获循环变量 → 全指向链尾） ----"
+python3 - <<'PY'
+import sys; sys.path.insert(0, '.')
+import llm.openai_compat as oc
+
+class Probe(oc.OpenAICompatBackend):
+    def __init__(self, fail_models=()):
+        self.api_key = "probe"          # 跳过 available() 短路
+        self.model = "deepseek-v4.1-flash"
+        self.last_degraded = None
+        self.seen = []
+        self.fail_models = set(fail_models)
+
+    def _call_model(self, model, sp, ui, **kw):
+        self.seen.append(model)
+        if model in self.fail_models:
+            raise RuntimeError("connection error: channel unavailable")
+        return "by:%s" % model
+
+# ① 全通 → 只该调主档
+b = Probe()
+assert b.call("s", "u") == "by:deepseek-v4.1-flash", b.seen
+assert b.seen == ["deepseek-v4.1-flash"], "主档通却打了多档: %s" % b.seen
+assert b.last_degraded is None, b.last_degraded
+
+# ② 主档挂 → 逐档真试，顺序与链一致（修复前这里是 ['glm-5.3-flash' x3]）
+b = Probe(fail_models={"deepseek-v4.1-flash"})
+assert b.call("s", "u") == "by:codebuddy", b.seen
+assert b.seen == ["deepseek-v4.1-flash", "codebuddy"], b.seen
+assert b.last_degraded and b.last_degraded["from_model"] == "deepseek-v4.1-flash", b.last_degraded
+assert b.last_degraded["used_model"] == "codebuddy", b.last_degraded
+
+# ③ 前两档挂 → 落三选，留痕能说出试过哪几档
+b = Probe(fail_models={"deepseek-v4.1-flash", "codebuddy"})
+assert b.call("s", "u") == "by:glm-5.3-flash", b.seen
+assert b.seen == ["deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"], b.seen
+assert b.last_degraded["attempts"] == ["deepseek-v4.1-flash", "codebuddy"], b.last_degraded
+
+# ④ 全挂 → 显式失败，不静默返回
+b = Probe(fail_models={"deepseek-v4.1-flash", "codebuddy", "glm-5.3-flash"})
+try:
+    b.call("s", "u"); raise AssertionError("全链挂却返回了成功")
+except RuntimeError as e:
+    assert "all model channels unavailable" in str(e), e
+assert b.last_degraded and b.last_degraded["used_model"] is None, b.last_degraded
+print("  ✅ 降级链逐档绑定正确，降级显性可见（试过 %s）" % b.seen)
+PY
+
+echo "---- ⑭ 闭包写法回归核验（源码级，防退回捕获循环变量） ----"
+python3 - <<'PY'
+import re
+src = open('llm/openai_compat.py', encoding='utf-8').read()
+m = re.search(r"callers\s*=\s*\{.*?\n", src, re.S)
+assert m, "未找到 callers 构造段（结构变了，本信号灯需同步）"
+seg = m.group(0)
+assert re.search(r"self\._call_model\(\s*m\s*,", seg) is None, \
+    "callers 闭包仍在捕获循环变量 m，会全部指向链尾：\n" + seg
+assert re.search(r"model\s*=\s*\w+", seg), "未见到逐档绑定（model=ch）：\n" + seg
+print("  ✅ callers 逐档绑定，未退回闭包捕获循环变量")
+PY
+
+echo "==== ✅ 模型路由信号灯全绿（14/14） ===="
+
