@@ -443,6 +443,10 @@ def deliver(task_key, agent_id, output, issue_ref="", role="架构·开发"):
 #   - _has_receipt()    ：某任务的对端 agent 是否有真实接单回执（accepted/awake_ack）
 #   - dispatch_verify() ：派发方/哨兵在一站式 dispatch() 后核验真实唤醒状态，
 #                         无回执的任务会显式暴露 awaiting_receipt，绝不假装到 L4。
+#   - _cloud_receipt()  ：云端语境读取侧——读 Issue/PR **评论流**判 [接单] 回执，
+#                         必须走 comment_stream 统一入口（默认全量 + 分页），
+#                         否则接口默认 page_size=10 会静默截断、把「已回执」误判成
+#                         「链悬空」（Issue #166 · PR #161 真实踩坑）。
 # ============================================================
 def _has_receipt(task_id, agent_id):
     """检测某任务的对端 agent 是否有真实接单回执（accepted / awake_ack）。
@@ -462,6 +466,72 @@ def _has_receipt(task_id, agent_id):
         (task_id, agent_id),
     )
     return row is not None
+
+
+def _cloud_receipt(assignments, since=None, role_keys=None):
+    """云端语境：从 Issue/PR **评论流**核验 [接单] 回执（读取侧补充 · Issue #166）。
+
+    与 `_has_receipt()`（本地 progress 事件）双轨互补：云端真实唤醒以平台可见的
+    `[接单]` 回执为准。**必须经 `comment_stream.read_comments()` 统一入口读全量**——
+    裸调评论接口默认 `page_size=10` 会静默截断，只看到前 10 条就断言"未回执/链悬空"，
+    从而触发无效派发（PR #161 真实踩坑）。
+
+    Args:
+        assignments: 分发记录清单，每条可带 `issue`/`issue_number`、`role`、
+                     `kind`（pull/issue）、`repo`
+        since: 可选，只认该时间点之后的评论（ISO 串）
+        role_keys: 可选，只认提及这些角色名的回执
+    Returns:
+        dict: verified_all_awake / awaiting_receipt / degraded / detail
+              （degraded 非空 = 评论流没读全，判据可能假阴性，须显式暴露）
+    """
+    from comment_stream import read_comments
+
+    detail, awaiting, degraded = [], [], []
+    for a in assignments or []:
+        number = a.get("issue_number") or a.get("issue") or ""
+        role = a.get("role") or ""
+        if not number:
+            continue
+        try:
+            stream = read_comments(
+                kind="pull" if a.get("kind") == "pull" else "issue",
+                number=int(str(number).lstrip("#")),
+                repo=a.get("repo") or os.environ.get("CNB_REPO"))
+        except Exception as e:  # noqa: BLE001 - 读取失败显式暴露，绝不静默判"未回执"
+            degraded.append({"issue": number, "role": role, "error": str(e)[:200]})
+            detail.append({"issue": number, "role": role, "receipt": False,
+                           "error": str(e)[:200]})
+            continue
+
+        comments = stream["comments"]
+        if since is not None:
+            comments = [c for c in comments if (c.get("created_at") or "") >= str(since)]
+        bodies = [c.get("body") or c.get("content") or "" for c in comments]
+        keys = role_keys or ([role] if role else [])
+        got = any("[接单]" in b and (not keys or any(k in b for k in keys))
+                  for b in bodies)
+        row = {"issue": number, "role": role, "receipt": got,
+               "count": len(comments), "complete": stream["complete"],
+               "pages": stream["pages"], "source": stream["source"]}
+        detail.append(row)
+        if not got:
+            awaiting.append(dict(row))
+        if not stream["complete"]:
+            degraded.append({"issue": number, "role": role,
+                             "reason": "评论流未读全（分页未取尽），回执判据可能假阴性"})
+    return {
+        "verified_all_awake": len(awaiting) == 0 and not degraded,
+        "total": len(detail),
+        "awake_count": len(detail) - len(awaiting),
+        "awaiting_receipt_count": len(awaiting),
+        "awaiting_receipt": awaiting,
+        "degraded": degraded,
+        "detail": detail,
+        "note": ("评论流读全 + 已见 [接单] 回执" if not awaiting and not degraded else
+                 "存在未读全的评论流或未见 [接单] 回执——不得据此断言链悬空/未回执，"
+                 "先修读取侧（comment_stream 默认全量）再判"),
+    }
 
 
 def dispatch_verify(assignments):
