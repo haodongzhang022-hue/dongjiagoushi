@@ -307,9 +307,10 @@ PY
 #    Issue #195：所有 caller 指向链尾 → 降级静默退化，还伪装成「每档都试过」。
 #    本项由 PR #196（llm 模块）落地，它在 main 之后合入；此处只在源码已修时断言，
 #    未修时明确报「待 #196」，不制造假绿。
-_OC="$(dirname "$0")/../local-agent/llm/openai_compat.py"
+_OC="$ROOT/local-agent/llm/openai_compat.py"   # 脚本已 cd 到 local-agent，改用绝对 ROOT，避免路径解析错位
 if grep -q 'model=ch' "$_OC" 2>/dev/null; then
-  grep -qE 'lambda [^:]+: self\._call_model\(m,' "$_OC" \
+  # 只看代码行，忽略注释：修复处的注释本身就写有反例写法，注释误判会假红
+  grep -vE '^[[:space:]]*#' "$_OC" | grep -qE 'lambda [^:]+: self\._call_model\(m,' \
     && { echo "  ❌ caller 退回闭包捕获循环变量（Issue #195 回归）"; exit 1; }
   echo "  ✅ 源码级：caller 逐档绑定 model=ch（闭包回归防护）"
 else
