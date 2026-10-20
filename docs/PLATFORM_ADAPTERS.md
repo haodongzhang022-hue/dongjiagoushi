@@ -222,6 +222,13 @@ channel 受限则 probe 如实降级暴露，不假装成功。
   | `revert(card, to, reason)` / `interrupt(card, progress, next)` | 打回 / 续跑 | `[回转]` / `[打断]` |
 - **要点**：MCP 把「接力卡」映射为「会话上下文 / 资源」，把「DAG / 分形」映射为「工具调用」，蜂群 agent 各司其职、通过工具协作，天然契合本体系的「多角色 + 并行 + 分形」。
 - **落地节奏**：先统一活动规则（本文件），后续按需用官方 MCP SDK 包一层（作为 M19+ 迭代）。
+- **当前落地状态（Issue #171 · module mcp-hub v0.1.0）**：本仓已有的四个 MCP 面
+  （`dsh-adapter` 桥 / `dev_standard/host.py` / `dispatcher/webhook.py` 的 roster / `label`、
+  `relay_card` 的 CLI 管线）已收口到 `local-agent/mcp_hub/`——**一张端点登记表 + 一个统一入口**：
+  `catalog()` 说清「哪个端点、哪些工具、跑没跑起来」，`launch()` 一次调用拉起服务并回探活回执，
+  服务同时提供三前端（`POST /message` / `GET /sse` / `POST /jsonrpc`）而**能力集合完全一致**。
+  未接线的能力如实返回 `not_wired` / `http_only` / `external_host` / `operator_required`，
+  不代调、不回假绿。详见 `docs/MCP_HUB.md`。
 
 ---
 
@@ -253,3 +260,4 @@ scale_swarm(tasks, n)    # 分形扩展到 n 个小组
 | 真实 cnb.cool 传输通道（live） | `local-agent/entries/cnb_live.py` |
 | 跨端聚合控制页（含 --serve） | `local-agent/entries/dashboard.py` |
 | 三宿主真实传输注册表（v0.6.0） | `local-agent/entries/host_transport.py` |
+| MCP 汇聚注册表（端点+h工具统一入口） | `local-agent/mcp_hub/specs.py` + `docs/MCP_HUB.md` |

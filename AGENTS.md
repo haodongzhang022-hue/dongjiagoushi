@@ -706,6 +706,12 @@ local-agent/dev-standard/              # 开发规范体系（StandardAbility �
   ├── cli.py                          # CLI 接口（MCP 管线）
   ├── rules.md                        # AGENTS.md 引用的规范规则
   └── README.md                       # 模块使用说明
+local-agent/mcp_hub/                   # MCP 汇聚注册表（module mcp-hub v0.1.0 · Issue #171）
+  ├── specs.py                        # 端点登记表（唯一事实源：id/端口建议/前端/工具/转发方式）
+  ├── dispatch.py                     # 工具转发（自己不实现业务，未接如实 not_wired）
+  ├── server.py                       # 统一入口，三前端一处语义（http/sse/jsonrpc）
+  ├── registry.py                     # 握手 catalog() + 拉起即探活 launch()
+  └── cli.py                          # CLI（catalog/tools/call/serve/launch/status）
 local-agent/review_context/           # 评审增量上下文（冻结骨架+本轮变化 · Issue #150）
   ├── spec.py                         # 稳定/变化分段规范（唯一事实源）
   ├── paths.py                        # 仓库根解析（唯一事实源 · S8，评审/调度器同口径）
