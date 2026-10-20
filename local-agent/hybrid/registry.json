@@ -1,7 +1,7 @@
 {
   "$schema": "https://cnb.cool/dongdongxiaozu/dongjiagoushi/-/raw/main/local-agent/hybrid/registry.schema.json",
   "version": "v2.1",
-  "generated_at": "2026-08-29T00:41:53Z",
+  "generated_at": "2026-10-20T00:00:00Z",
   "description": "集中测试注册表 — 声明仓库全部 CPU 密集测试脚本，映射到覆盖的源码模块与依赖关系，供增量测试选择器消费。v2.1 修复角色模块覆盖缺失、统一路径前缀、补依赖分析。",
   "tests": {
     "local-agent/tests/test_router_integration.sh": {
@@ -685,6 +685,208 @@
       "cpu_cost_est": 2.0,
       "time_est": 6.0,
       "kind": "light"
+    },
+    "local-agent/tests/test_comment_stream.sh": {
+      "name": "test_comment_stream",
+      "covers": [
+        "local-agent/comment_stream/reader.py",
+        "local-agent/comment_stream/__init__.py",
+        "local-agent/dispatch_engine.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dispatch_verify.sh": {
+      "name": "test_dispatch_verify",
+      "covers": [
+        "local-agent/dispatch_engine.py",
+        "local-agent/dispatch/ability.py",
+        "local-agent/roles/base.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dev_team.sh": {
+      "name": "test_dev_team",
+      "covers": [
+        "local-agent/dev_team.py",
+        "local-agent/dev_team_kit/__init__.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dev_team_driver.sh": {
+      "name": "test_dev_team_driver",
+      "covers": [
+        "local-agent/dev_team_driver.py",
+        "local-agent/orchestrator.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_platform_adapter.sh": {
+      "name": "test_platform_adapter",
+      "covers": [
+        "local-agent/entries/__init__.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_bridge_loop.sh": {
+      "name": "test_bridge_loop",
+      "covers": [
+        "local-agent/entries/bridge.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_dashboard.sh": {
+      "name": "test_dashboard",
+      "covers": [
+        "local-agent/entries/dashboard.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_review_metrics.sh": {
+      "name": "test_review_metrics",
+      "covers": [
+        "local-agent/review_metrics/__init__.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_review_effectiveness_integration.sh": {
+      "name": "test_review_effectiveness_integration",
+      "covers": [
+        "local-agent/review_metrics/__init__.py",
+        "local-agent/roles/reviewer.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_secretary_scale.sh": {
+      "name": "test_secretary_scale",
+      "covers": [
+        "local-agent/scale/secretary_scale.py",
+        "local-agent/scale/prescale.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_bus.sh": {
+      "name": "test_hybrid_bus",
+      "covers": [
+        "local-agent/hybrid/bus.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_cost.sh": {
+      "name": "test_hybrid_cost",
+      "covers": [
+        "local-agent/hybrid/cost.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_e2e.sh": {
+      "name": "test_hybrid_e2e",
+      "covers": [
+        "local-agent/hybrid/cli.py",
+        "local-agent/hybrid/worker.py",
+        "local-agent/hybrid/sync.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_parallel.sh": {
+      "name": "test_hybrid_parallel",
+      "covers": [
+        "local-agent/hybrid/parallel.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_registry.sh": {
+      "name": "test_hybrid_registry",
+      "covers": [
+        "local-agent/hybrid/registry.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_selector.sh": {
+      "name": "test_hybrid_selector",
+      "covers": [
+        "local-agent/hybrid/selector.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_hybrid_station.sh": {
+      "name": "test_hybrid_station",
+      "covers": [
+        "local-agent/hybrid/station.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_dev_standard.sh": {
+      "name": "test_dev_standard",
+      "covers": [
+        "local-agent/dev_standard/specs.py",
+        "local-agent/dev_standard/checker.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_dev_standard_host.sh": {
+      "name": "test_dev_standard_host",
+      "covers": [
+        "local-agent/dev_standard/specs.py",
+        "local-agent/dev_standard/checker.py"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 3.0,
+      "time_est": 8.0,
+      "kind": "cpu-dense"
     }
   }
 }

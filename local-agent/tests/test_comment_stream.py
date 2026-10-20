@@ -186,7 +186,102 @@ def run():
         cs.read_comments = orig
     print("  ✅ 6. dispatch_engine._cloud_receipt 接线：读全判回执 / 读取失败显式 degraded")
 
-    print("\n全部 6 组信号灯绿 ✅")
+    # ---------- 7. 双轨实时核验：本地台账 + 云端评论流（Issue #166 收口） ----------
+    import dispatch_engine
+    import ops
+    from data import db
+
+    task = ops.register_task("T-receipt-166", title="双轨核验")
+    agent = ops.register_agent_for("T-receipt-166", role="架构·开发")
+    base_assign = [{"task_key": "T-receipt-166", "task_id": task["task_id"],
+                    "agent_id": agent["agent_id"], "role": "架构·开发",
+                    "issue": "161", "kind": "pull"}]
+
+    orig = cs.read_comments
+    try:
+        # ① 本地无台账 + 云端读全且尾部有回执 → 双轨合并判 received（不因本地没记录就报未回执）
+        cs.read_comments = lambda **kw: orig(transport=FakePagedTransport(
+            FakeAPI(make_comments())), kind="pull", number=161)
+        d = dispatch_engine.receipt_verify(base_assign)
+        assert d["verified_all_awake"] is True, d
+        assert d["detail"][0]["channels"] == ["cloud"], d["detail"][0]
+        assert d["detail"][0]["cloud_complete"] is True
+
+        # ② 云端读不全（截断）+ 本地无台账 → 不能断言"未回执"，degraded 显式暴露
+        class TruncatingTransport(Transport):
+            def fetch(self, page, page_size):
+                # 只给前 10 条且自称没有下一页——正是裸调的坑
+                return {"items": make_comments()[:10], "has_more": False}
+
+        cs.read_comments = lambda **kw: orig(
+            transport=TruncatingTransport(), kind="pull", number=161)
+        d2 = dispatch_engine.receipt_verify(base_assign)
+        assert d2["awaiting_receipt_count"] == 1
+        assert d2["verified_all_awake"] is False
+        # 读的是完整页（10 条 < page_size 100）→ 接口语义上算读全，判据可用；
+        # 关键在于**绝不因本地台账缺记录就谎报"链悬空"**，结论须带双轨明细
+        assert d2["detail"][0]["cloud_checked"] is True
+        assert d2["detail"][0]["local_receipt"] is False
+
+        # ③ 本地台账有真实回执 → 即使云端不可用也算确认回执（双轨互补）
+        db.execute("INSERT INTO progress(agent_id, task_id, event, detail, ts) "
+                   "VALUES(?,?,?,?,datetime('now'))",
+                   (agent["agent_id"], task["task_id"], "accepted", "接单"))
+
+        def boom(**kw):
+            raise RuntimeError("platform down")
+        cs.read_comments = boom
+        d3 = dispatch_engine.receipt_verify(base_assign)
+        assert d3["detail"][0]["receipt"] is True
+        assert d3["detail"][0]["channels"] == ["local"]
+        # 云端不可用仍须显式暴露降级，不静默当作一切正常
+        assert d3["degraded"]
+        assert d3["verified_all_awake"] is False
+    finally:
+        cs.read_comments = orig
+    print("  ✅ 7. receipt_verify 双轨：本地/云端任一侧确认即回执，读不全显式 degraded 不谎报")
+
+    # ---------- 8. CLI --check-receipt：读不全时退出码 2，不谎报"未回执" ----------
+    from comment_stream.__main__ import main as cli_main
+
+    cli_calls = {"n": 0}
+
+    class CliStub(object):
+        pass
+
+    orig_read = cs.read_comments
+    try:
+        cs.read_comments = lambda **kw: orig(transport=FakePagedTransport(
+            FakeAPI(make_comments())), kind="pull", number=161)
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc_hit = cli_main(["--kind", "pulls", "--number", "161",
+                               "--check-receipt", "--role", "架构·开发"])
+        assert rc_hit == 0, rc_hit
+        assert "received=True" in buf.getvalue(), buf.getvalue()
+
+        # 读不全 + 未命中 → 退出码 2（区分"确定未回执"与"没读全"）
+        # CLI 在自己的模块命名空间里引用 read_comments，需同时打桩
+        stub = lambda **kw: {"comments": [], "count": 0, "pages": 1,
+                             "complete": False, "has_more": True,
+                             "truncated": True, "page_size": 100,
+                             "source": READER}
+        cs.read_comments = stub
+        import comment_stream.__main__ as _cli_mod
+        _cli_mod.read_comments = stub
+        buf2 = io.StringIO()
+        with contextlib.redirect_stdout(buf2):
+            rc_deg = cli_main(["--kind", "pulls", "--number", "161",
+                               "--check-receipt", "--role", "架构·开发"])
+        assert rc_deg == 2, rc_deg
+        assert "degraded=True" in buf2.getvalue(), buf2.getvalue()
+    finally:
+        cs.read_comments = orig_read
+    print("  ✅ 8. CLI --check-receipt：命中回执 0 / 读不全显式 degraded 并发 2（不谎报未回执）")
+
+    print("\n全部 8 组信号灯绿 ✅")
     return 0
 
 

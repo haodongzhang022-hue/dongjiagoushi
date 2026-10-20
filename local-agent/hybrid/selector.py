@@ -197,6 +197,60 @@ class IncrementalSelector(object):
             result.update(self._impact_closure(t))
         return sorted(result)
 
+    def suggest_tests(self, changed_files):
+        """变更未命中 registry 覆盖时的**候选测试推断**（防"假绿"兜底）。
+
+        `select()` 只认 registry 登记的 covers；一旦变更落在**未登记的模块**
+        （新增模块、纯文档、新脚本）上，select() 返回空 → CI 以前直接回落"只跑
+        核心冒烟"，等于该模块一个测试都没跑却显示通过（Issue #166 踩过：
+        comment_stream 新增模块没登记 registry，CI 跳过了它的信号灯）。
+
+        这里按**命名约定**反推候选：变更路径里的模块名（如
+        `local-agent/comment_stream/reader.py` → `comment_stream`）去匹配
+        `tests/test_<name>*.sh` / `local-agent/tests/test_<name>*.sh`。
+        只返回**磁盘上真实存在**的脚本，推断不出就返回空（让调用方回落冒烟）。
+
+        Args:
+            changed_files: git 变更文件清单
+        Returns:
+            list: 候选测试脚本路径（仓库根相对），按路径排序
+        """
+        if not changed_files:
+            return []
+        root = self.root_dir
+        test_dirs = [os.path.join("local-agent", "tests"), "tests"]
+        available = {}
+        for d in test_dirs:
+            full = os.path.join(root, d)
+            if not os.path.isdir(full):
+                continue
+            for fn in os.listdir(full):
+                if fn.startswith("test_") and fn.endswith(".sh"):
+                    available[os.path.join(d, fn)] = fn
+
+        hits = set()
+        for f in changed_files:
+            parts = f.rstrip("/").split("/")
+            # 变更文件所属模块名：取父目录名（新增模块的源码/文档都能命中）
+            mods = set()
+            if len(parts) >= 2:
+                mods.add(parts[-2])
+            if parts and parts[-1].endswith(".py"):
+                mods.add(parts[-1][:-3])
+            # docs/FOO.md / docs/adr/0007-foo.md 也按文件名推断
+            stem = os.path.splitext(parts[-1])[0]
+            if stem:
+                mods.add(stem.replace("-", "_").split("_0")[0])
+            for mod in mods:
+                mod = mod.strip().lower()
+                if len(mod) < 4:
+                    continue
+                for path, fn in available.items():
+                    tname = fn[len("test_"):-len(".sh")].lower()
+                    if tname == mod or tname.startswith(mod) or mod.startswith(tname):
+                        hits.add(path)
+        return sorted(hits)
+
     def incremental(self, base="HEAD~1", head="HEAD"):
         """一键增量选择：git diff → 受影响测试。"""
         files = self.changed_files(base, head)

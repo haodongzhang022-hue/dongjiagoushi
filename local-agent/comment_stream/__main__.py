@@ -3,7 +3,7 @@
 import argparse
 import json
 
-from .reader import read_comments, comment_meta
+from .reader import read_comments, comment_meta, has_receipt
 
 
 def main(argv=None):
@@ -14,6 +14,9 @@ def main(argv=None):
     p.add_argument("--repo", default=None, help="org/repo（缺省取 CNB_REPO）")
     p.add_argument("--page-size", type=int, default=100)
     p.add_argument("--days", type=float, default=None, help="只看最近 N 天（时间窗过滤）")
+    p.add_argument("--check-receipt", action="store_true",
+                   help="只核 [接单] 回执：输出 received/complete/degraded（读不全不谎报）")
+    p.add_argument("--role", default=None, help="配合 --check-receipt：回执须提及的角色名")
     p.add_argument("--json", action="store_true", help="输出 JSON")
     a = p.parse_args(argv)
 
@@ -30,6 +33,19 @@ def main(argv=None):
             except ValueError:
                 keep.append(c)
         result = dict(result, comments=keep, count=len(keep))
+
+    if a.check_receipt:
+        receipt = has_receipt(result, role=a.role)
+        if a.json:
+            print(json.dumps(receipt, ensure_ascii=False, indent=2))
+        else:
+            print("回执核验：received=%s complete=%s degraded=%s（%d 条评论）"
+                  % (receipt["received"], receipt["complete"],
+                     receipt["degraded"], receipt["count"]))
+            if receipt["degraded"]:
+                print("  ⚠️ 评论流未读全 → 不得据此断言「未回执/链悬空」")
+        # 读不全且没命中回执时退出码 2：让调用方区分"确定未回执"与"没读全"
+        return 0 if receipt["received"] or not receipt["degraded"] else 2
 
     if a.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

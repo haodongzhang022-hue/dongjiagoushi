@@ -270,6 +270,14 @@ class BaseRole:
             raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
         return self.dispatch_ability.dispatch_verify(assignments)
 
+    def receipt_verify(self, assignments, since=None, role_keys=None):
+        """实时回执核验（双轨）：本地 progress 事件 + 云端评论流任一侧确认 [接单]
+        即算回执；评论流读不全时显式 degraded，不据此断言链悬空。"""
+        if self.dispatch_ability is None:
+            raise RuntimeError(f"角色 {self.name} 未加载通用派发能力")
+        return self.dispatch_ability.receipt_verify(
+            assignments, since=since, role_keys=role_keys)
+
     def accept(self, task_key, agent_id, role=None, note=""):
         """接单回执：收到 [触发:<角色>] 接力卡后回执 [接单] 确认接手。"""
         if self.dispatch_ability is None:

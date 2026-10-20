@@ -45,7 +45,11 @@ def _monitor():
 
 
 # 内建：仓库全部 CPU 密集测试脚本（云端 37 个中的纯 CPU 部分）
-BUILTIN_CPU_SCRIPTS = [
+#
+# ⚠️ 清单不是"手抄常量"，而是**从 registry.json 派生**：新增测试脚本只要登记到
+#    registry.json 就自动进本清单，不会出现「脚本新增了 20 个、清单还写 37」的僵化
+#    （Issue #166 收口：test_hybrid_pipeline 长期红灯正是此漂移，见 _registered_scripts）。
+REGISTRY_FALLBACK = [
     "local-agent/tests/test_router_integration.sh",
     "local-agent/tests/test_scale.sh",
     "local-agent/tests/test_prescale_entry.sh",
@@ -90,6 +94,50 @@ BUILTIN_CPU_SCRIPTS = [
 ]
 
 
+def _registered_scripts():
+    """从 hybrid.registry（registry.json 唯一事实源）取脚本清单；取不到回退常量。
+
+    返回按 registry 顺序的脚本路径列表。派生而非手抄，避免清单与真实测试集漂移。
+    """
+    try:
+        from hybrid import registry as _reg
+        tests = [t for t in _reg.all_tests()
+                 if str(t).endswith(".sh")
+                 # kind=light 的脚本（如 dsh 装载验证）按设计留在云端，
+                 # 不进"本地执行清单"，否则本地会把云端专属验证也拉来跑。
+                 and (_reg.get(t) or {}).get("kind") != "light"]
+        if tests:
+            return tests
+    except Exception:  # noqa: BLE001 - registry 不可用时回退常量，不阻塞 CLI
+        pass
+    return list(REGISTRY_FALLBACK)
+
+
+BUILTIN_CPU_SCRIPTS = _registered_scripts()
+
+
+def _task_estimates(names=None):
+    """给脚本清单配成本估算：**优先用 registry 的真实 time/cpu 估值**，缺省才兜底。
+
+    此前用 `5 + (i % 10)` 合成估算，越靠后的脚本云端成本越高，导致同一脚本在
+    registry 登记前后判定结果不一致（假 local / 假 cloud）。改为以 registry 估值
+    为唯一口径，没登记的脚本才走保守兜底。
+    """
+    names = list(names or BUILTIN_CPU_SCRIPTS)
+    try:
+        from hybrid import registry as _reg
+        meta = {t: (_reg.get(t) or {}) for t in names}
+    except Exception:  # noqa: BLE001
+        meta = {}
+    out = []
+    for i, n in enumerate(names):
+        m = meta.get(n) or {}
+        time_est = float(m.get("time_est") or (5 + i % 10))
+        cpu_est = float(m.get("cpu_cost_est") or (10 + i % 20))
+        out.append((n, time_est, cpu_est))
+    return out
+
+
 def cmd_classify(args):
     r = _router()
     for name in args.scripts:
@@ -98,11 +146,7 @@ def cmd_classify(args):
 
 def cmd_route(args):
     r = _router()
-    tasks = []
-    # 从内建清单带成本估算
-    for i, name in enumerate(BUILTIN_CPU_SCRIPTS):
-        tasks.append((name, 5 + (i % 10), 10 + (i % 20)))
-    res = r.route_many(tasks)
+    res = r.route_many(_task_estimates())
     s = res["summary"]
     print(json.dumps({
         "total": s["total"], "local": s["local"], "cloud": s["cloud"],
@@ -156,8 +200,7 @@ def cmd_sync(args):
 def cmd_cost(args):
     r = _router()
     m = _monitor()
-    tasks = [(n, 5 + (i % 10), 10 + (i % 20)) for i, n in enumerate(BUILTIN_CPU_SCRIPTS)]
-    res = r.route_many(tasks)
+    res = r.route_many(_task_estimates())
     last = _load_last()
     rep = m.report(res, last)
     print(json.dumps(rep, ensure_ascii=False, indent=2))
@@ -167,8 +210,7 @@ def cmd_all(args):
     # 一键：route → run(local) → sync → cost
     r = _router()
     m = _monitor()
-    tasks = [(n, 5 + (i % 10), 10 + (i % 20)) for i, n in enumerate(BUILTIN_CPU_SCRIPTS)]
-    res = r.route_many(tasks)
+    res = r.route_many(_task_estimates())
     w = _worker(root=args.root, timeout=args.timeout, dry=args.dry)
     result = w.run(res["local"])
     _save_last(result)

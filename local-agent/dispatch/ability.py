@@ -125,6 +125,13 @@ class DispatchAbility:
         是否真实回执 [接单]，无回执即 awaiting_receipt，绝不假装到 L4。"""
         return self._engine().dispatch_verify(assignments)
 
+    def receipt_verify(self, assignments, since=None, role_keys=None):
+        """实时回执核验（双轨 · Issue #166）：本地 progress 事件 + 云端评论流
+        一起看，任一侧确认 [接单] 即算回执；读不全时显式 degraded，
+        不当"链悬空"用。用于核平台侧回执，与 dispatch_verify 互补。"""
+        return self._engine().receipt_verify(
+            assignments, since=since, role_keys=role_keys)
+
     # ------------------------------------------------------------
     # 被派发方侧（接单闭环）
     # ------------------------------------------------------------

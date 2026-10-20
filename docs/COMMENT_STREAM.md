@@ -32,7 +32,11 @@ CLI：
 python -m comment_stream --kind pulls --number 161            # 人可读摘要
 python -m comment_stream --kind issues --number 166 --days 3  # 只看近 3 天
 python -m comment_stream --kind pulls --number 161 --json     # 机器消费
+python -m comment_stream --kind pulls --number 161 --check-receipt --role 架构·开发
 ```
+
+`--check-receipt` 是「上游到底回执没有」的**确定性问法**：命中回执退出码 0；
+读不全又没命中退出码 **2**（区分「确定未回执」与「没读全，不知道」），不谎报。
 
 ## 契约
 
@@ -54,10 +58,26 @@ python -m comment_stream --kind pulls --number 161 --json     # 机器消费
 - `dispatch_engine._cloud_receipt()`：云端语境按 Issue/PR 评论流核 `[接单]` 回执，
   走本入口读全量；读取失败/未读全进 `degraded`，不静默判"未回执"。
   与 `_has_receipt()`（本地 progress 事件）双轨互补，见 `docs/DISPATCH_DEPTH.md` §八。
+- **`dispatch_engine.receipt_verify()`（实时核验·双轨合并）**：`dispatch_verify()` 是
+  派发**瞬间**的闸门（只查本地 progress 台账）；真实唤醒多发生在云端，台账不会同步
+  回本地。`receipt_verify()` 一次把两轨都看了再下结论：
+
+  | 本地台账 | 云端评论流（读全） | 结论 |
+  |---|---|---|
+  | 已回执 | 任意 | `receipt=True`（channels=local） |
+  | 无 | 已回执 | `receipt=True`（channels=cloud） |
+  | 无 | 确定无回执 | `receipt=False`（确定性未回执） |
+  | 无 | 读不全 | `receipt=False` + **`degraded`**（不得断言链悬空） |
+
+  合并原则只有一条：**读不全就闭嘴**——显式 `degraded`，不当"未回执"用。
+  已挂到 `DispatchAbility.receipt_verify` / `BaseRole.receipt_verify`，全员可用。
 - 离线可测：传输层可注入（`transport=` 参数），夹具模拟"默认 10 条"的假 API。
 
 ## 防退化
 
-`local-agent/tests/test_comment_stream.{sh,py}`（6 组信号灯）用「评论数 89 > 默认页大小
+`local-agent/tests/test_comment_stream.{sh,py}`（8 组信号灯）用「评论数 89 > 默认页大小
 10」的夹具锁死：**裸调只读到 10 条 → 漏掉尾部回执（假阴性 RED）**，入口读到全量纠正。
 绕过入口的写法一旦回潮，信号灯即红。
+
+第 7/8 组把"不谎报"也锁死：读不全时 `receipt_verify` 必须 `degraded`、
+`--check-receipt` 必须退出码 2——**允许"不知道"，禁止"不知道却说没有"**。

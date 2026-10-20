@@ -827,3 +827,91 @@ if __name__ == "__main__":
     assignments = json.loads(args.assignments)
     result = dispatch(args.repo, assignments, enable_issue=not args.no_issue)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+# ============================================================
+# 实时回执核验（云端双轨 · Issue #166）
+# ============================================================
+def receipt_verify(assignments, since=None, role_keys=None):
+    """核验「对端是否已真实回执 [接单]」——本地 progress 事件 + 云端评论流双轨。
+
+    `dispatch_verify()` 只查本地 progress 台账，是**派发瞬间**的闸门；但真实唤醒
+    发生在云端时（agent 在 Issue/PR 评论里回执），台账并不会同步到本地。要答
+    「上游到底回执没有 / 链是不是悬空」，必须同时看平台侧评论流。
+
+    两轨语义：
+      - 本地轨：`_has_receipt(task_id, agent_id)`（progress 事件 accepted/awake_ack）
+      - 云端轨：`_cloud_receipt()`（走 `comment_stream` 统一入口读**全量**评论流）
+    合并原则（**不谎报**）：
+      - 任一轨确认回执 → `received=True`；
+      - 都没确认但有一轨读不全（评论流未读全 / 任务未登记本地台账）→
+        `received=False` 且 `degraded` 显式标出，**不得据此断言"链悬空"**；
+      - 只有两轨都确定没回执时，才算确定性的「未回执」。
+
+    Args:
+        assignments: 分发记录清单（task_id/agent_id/role/issue/issue_number/kind/repo）
+        since: 可选，只认该时间点之后的云端评论
+        role_keys: 可选，只认提及这些角色名的云端回执
+    Returns:
+        dict: verified_all_awake / confirmed / awaiting_receipt / degraded / detail
+    """
+    detail, awaiting, degraded = [], [], []
+
+    local_rows = dispatch_verify(assignments)["detail"]
+    cloud_rows = None
+    try:
+        cloud_rows = _cloud_receipt(assignments, since=since, role_keys=role_keys)
+    except Exception as e:  # noqa: BLE001 - 平台侧不可用也要显式暴露，绝不静默
+        degraded.append({"scope": "cloud", "error": str(e)[:200]})
+
+    cloud_by_issue = {}
+    for row in (cloud_rows or {}).get("detail", []):
+        cloud_by_issue.setdefault(str(row.get("issue")), []).append(row)
+
+    for row in local_rows:
+        issue = str(row.get("issue") or "")
+        clouds = cloud_by_issue.get(issue) or []
+        cloud_ok = any(c.get("receipt") for c in clouds)
+        local_ok = bool(row.get("receipt"))
+        # 云端轨对该 issue 是否"读全了才判定"：没读全就不能当作确定性未回执
+        cloud_complete = all(c.get("complete") is not False for c in clouds) if clouds else None
+        combined = {
+            "task_id": row.get("task_id", ""),
+            "task_key": row.get("task_key", ""),
+            "role": row.get("role", ""),
+            "issue": issue,
+            "receipt": local_ok or cloud_ok,
+            "local_receipt": local_ok,
+            "cloud_receipt": cloud_ok,
+            "cloud_checked": bool(clouds),
+            "cloud_complete": cloud_complete,
+            "channels": [c for c, v in (("local", local_ok), ("cloud", cloud_ok)) if v],
+        }
+        detail.append(combined)
+        if combined["receipt"]:
+            continue
+        awaiting.append(dict(combined))
+        if clouds and cloud_complete is False:
+            degraded.append({"issue": issue, "role": combined["role"],
+                             "reason": "评论流未读全，回执判据可能假阴性"})
+
+    # 云端轨自身报的降级（读取失败等）一并透传
+    for d in (cloud_rows or {}).get("degraded", []):
+        if d not in degraded:
+            degraded.append(d)
+
+    confirmed = [d for d in detail if d["receipt"]]
+    return {
+        # 有降级时一律不能宣称"已验证全唤醒"——标 False 显式暴露
+        "verified_all_awake": (len(awaiting) == 0 and not degraded and bool(detail)),
+        "total": len(detail),
+        "confirmed_count": len(confirmed),
+        "awaiting_receipt_count": len(awaiting),
+        "awaiting_receipt": awaiting,
+        "degraded": degraded,
+        "detail": detail,
+        "note": ("本地台账 + 云端评论流双轨均已确认 [接单] 回执"
+                 if not awaiting and not degraded else
+                 "存在未确认回执或读取降级的任务——不得据此断言链悬空/未回执，"
+                 "先修读取侧（comment_stream 默认全量）或重触发/升级再判"),
+    }

@@ -8,6 +8,11 @@
 与 `bash local-agent/tests/*.sh`），这些脚本是**纯 CPU 逻辑**（跑断言、比对、模拟），
 与 LLM 强相关操作无关，却在云原生构建机上计费消耗 CPU，导致**云原生构建-CPU 成本过高**。
 
+> 注：37 是 **Issue #57 当时的快照数**，不是常量。脚本集现在**从
+> `hybrid/registry.json` 派生**（`hybrid.cli.BUILTIN_CPU_SCRIPTS = _registered_scripts()`），
+> 新增测试只要登记进 registry 就自动进清单；本文出现的 37 一律读作"登记在册的
+> CPU 密集脚本全集"，实际数量以 `python -m hybrid.cli route` 输出为准。
+
 ## 二、方案：混合资源路由
 
 把纯 CPU 逻辑**本地化执行**，云端只保留 **LLM 强相关操作**（知识库入库、CodeWiki、

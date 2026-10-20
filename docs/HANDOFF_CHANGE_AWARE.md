@@ -89,6 +89,26 @@ from hybrid.registry import (
 )
 ```
 
+### 2.2.1 覆盖漂移与"假绿"兜底（Issue #166）
+
+`select()` 只认 registry 里登记过的 `covers`。一旦变更落在**没登记的模块**上（新增模块、
+纯文档、新脚本），`select()` 返回空，CI 以前直接回落"只跑核心冒烟"——等于该模块
+**一个测试都没跑却显示通过**。Issue #166 就踩到这个：`comment_stream` 是新增模块，
+没登记 registry，CI 跳过了它的信号灯。
+
+两道防线：
+
+1. **登记齐全（首要）**：新增模块必须把对应测试登记进 `hybrid/registry.json`
+   （含 `covers` / `kind`）。`kind=light` 的脚本（如 dsh 装载验证）按设计留云端，
+   不进本地执行清单。当前 registry 已与磁盘上的 `test_*.sh` 对齐，缺失为 0。
+2. **兜底不再假绿**：`IncrementalSelector.suggest_tests(changed)` 按命名约定反推候选
+   （`local-agent/comment_stream/reader.py` → `local-agent/tests/test_comment_stream.sh`），
+   只返回磁盘上真实存在的脚本；推断不出才回落核心冒烟。
+
+```python
+selected = s.select(changed) or s.suggest_tests(changed) or ['tests/test_architect_system.sh']
+```
+
 ### 2.3 变更感知的接入方式（云原生 CI）
 
 **在 `.cnb.yml` 中**，`pull_request` 触发时只跑受影响的测试：

@@ -107,8 +107,17 @@ main:
             print(f'  变更文件数: {len(changed)}')
             selected = s.select(changed)
             if not selected:
-                print('  变更未命中任何测试，跑核心冒烟测试兜底')
-                selected = ['tests/test_architect_system.sh']
+                # 兜底不能是"假绿"：变更只碰了没登记的模块（如新增模块/纯文档）时，
+                # 只跑核心冒烟 = 该模块一个测试都没跑却显示通过（Issue #166 踩过：
+                # comment_stream 新增模块未登记 registry，CI 直接跳过了它的信号灯）。
+                # 这里改为从**变更文件反推候选测试**，再回落仓库级核心冒烟。
+                cand = s.suggest_tests(changed)
+                if cand:
+                    print(f'  变更未命中已登记覆盖，按命名推断候选测试({len(cand)}个)')
+                    selected = cand
+                else:
+                    print('  变更未命中任何测试，跑核心冒烟测试兜底')
+                    selected = ['tests/test_architect_system.sh']
 
             print(f'  选定测试({len(selected)}个):')
             for t in selected:

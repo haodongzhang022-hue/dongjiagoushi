@@ -61,16 +61,22 @@ echo "  cli classify: $R"
 if echo "$R" | grep -q "test_unit_cpu.sh → local"; then ok "CLI classify 纯CPU→local"; else bad "CLI classify local 失败: $R"; fi
 if echo "$R" | grep -q "llm_knowledge_update → cloud"; then ok "CLI classify LLM→cloud"; else bad "CLI classify cloud 失败: $R"; fi
 
-# 6. CLI route（37 脚本全部判 local 或 cloud，总数为 37）
+# 6. CLI route（registry 登记的全部脚本都要被判 local/cloud 且不重不漏）
+#    ⚠️ 断言口径不写死数字：脚本集从 registry.json 派生，新增测试不会让信号灯假红
+EXPECT=$(cd "$ROOT" && python3 -c "import sys;sys.path.insert(0,'local-agent');from hybrid import registry;print(len([t for t in registry.all_tests() if (registry.get(t) or {}).get('kind') != 'light']))")
 R=$(cd "$ROOT" && python3 -m hybrid.cli route | python3 -c "import sys,json;d=json.load(sys.stdin);print(str(d['total'])+'|'+str(d['local'])+'|'+str(d['cloud']))")
-echo "  cli route: $R"
-if [ "$(echo "$R" | cut -d'|' -f1)" = "37" ]; then ok "CLI route 覆盖37个脚本"; else bad "CLI route 数量不符: $R"; fi
+echo "  cli route: $R (expect total=$EXPECT)"
+if [ "$(echo "$R" | cut -d'|' -f1)" = "$EXPECT" ] && [ $(( $(echo "$R" | cut -d'|' -f2) + $(echo "$R" | cut -d'|' -f3) )) = "$EXPECT" ]; then
+  ok "CLI route 覆盖 $EXPECT 个登记脚本（local+cloud 不重不漏）"
+else
+  bad "CLI route 数量不符: $R (expect total=$EXPECT)"
+fi
 
 # 7. CLI all（dry-run 完整链路）
 R=$(cd "$ROOT" && python3 -m hybrid.cli all --dry --timeout 5 | python3 -c "import sys,json;d=json.load(sys.stdin);print(str(d['run']['pass'])+'/'+str(d['run']['total'])+'|'+str(d['sync']['synced']))")
 echo "  cli all: $R"
-if [ "$(echo "$R" | cut -d'|' -f1)" = "37/37" ] && [ "$(echo "$R" | cut -d'|' -f2)" = "True" ]; then
-  ok "CLI all 完整链路 37 全通过 + 同步成功"
+if [ "$(echo "$R" | cut -d'|' -f1)" = "$EXPECT/$EXPECT" ] && [ "$(echo "$R" | cut -d'|' -f2)" = "True" ]; then
+  ok "CLI all 完整链路 $EXPECT 全通过 + 同步成功"
 else
   bad "CLI all 失败: $R"
 fi
@@ -79,9 +85,28 @@ fi
 R=$(cd "$(dirname "$ROOT")" && bash scripts/local-exec.sh --only cost | python3 -c "import sys,json,re;txt=sys.stdin.read();d=json.loads(txt[txt.index('{'):]);print(d['net_save'])")
 if [ -n "$R" ] && [ "$R" != "0.0" ]; then ok "local-exec.sh 成本报表正常 net_save=$R"; else bad "local-exec.sh 成本报表异常: $R"; fi
 
-# 9. .cnb.yml 云端已移除 CPU 密集测试命令（纯 CPU 命令不再在云端执行）
-CNB=$(cd "$(dirname "$ROOT")" && grep -cE "bash (local-agent/)?tests/test_" .cnb.yml || true)
-if [ "$CNB" = "0" ]; then ok ".cnb.yml 已移除 CPU 密集测试命令(0条)"; else bad ".cnb.yml 仍含 $CNB 条 CPU 密集命令"; fi
+# 9. .cnb.yml 云端只保留 registry 标记 kind=light 的测试（纯 CPU 密集脚本必须本地跑）
+#    ⚠️ 不写死"必须为 0"：dsh 装载验证这类 kind=light 的脚本按设计留在云端。
+STRAY=$(cd "$(dirname "$ROOT")" && python3 -c "
+import re,sys
+sys.path.insert(0,'local-agent')
+from hybrid import registry
+txt=open('.cnb.yml',encoding='utf-8').read()
+bad=[]
+for m in re.finditer(r'bash\s+((?:local-agent/)?tests/test_[\w.]+\\.sh)', txt):
+    t=m.group(1)
+    kind=(registry.get(t) or {}).get('kind')
+    if kind != 'light':
+        bad.append(t)
+print(len(bad), ','.join(sorted(set(bad))))
+")
+CNB=$(echo "$STRAY" | cut -d' ' -f1)
+NAMES=$(echo "$STRAY" | cut -d' ' -f2-)
+if [ "$CNB" = "0" ]; then
+  ok ".cnb.yml 云端无 CPU 密集测试命令（仅保留 kind=light）"
+else
+  bad ".cnb.yml 仍含 $CNB 条 CPU 密集命令: $NAMES"
+fi
 
 # 10. 公开接口 __init__ 可导入
 R=$(python3 -c "import sys;sys.path.insert(0,'$ROOT');import hybrid;print(hasattr(hybrid,'HybridResourceRouter') and hasattr(hybrid,'LocalWorker') and hasattr(hybrid,'ResultSync') and hasattr(hybrid,'CostMonitor'))")
