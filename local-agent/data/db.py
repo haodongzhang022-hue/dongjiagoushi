@@ -40,6 +40,7 @@
 import os
 import sqlite3
 import threading
+import weakref
 from datetime import datetime
 
 # ---- 后端选择 ----
@@ -109,6 +110,45 @@ def _depth():
     return getattr(_thread_local, "tx_depth", 0)
 
 
+def is_in_tx():
+    """只读探针：当前线程事务计数是否 > 0（**不**用 conn.in_transaction 判据）。
+
+    CPython sqlite3 在 `isolation_level=''` 下自己开隐式事务，`in_transaction`
+    常态为 True，拿它判「是否在事务中」会把正常状态误判成遗弃。本函数只读计数。
+
+    生产用途：`data-cli status` 用它输出当前线程事务态（诊断「写没进事务 /
+    depth 是否泄漏」），而非只看 `in_transaction` 被常态 True 误导。
+    """
+    return _depth() > 0
+
+
+def tx_depth():
+    """公开探针：当前线程事务嵌套深度（0 = 不在事务中）。
+
+    `is_in_tx()` 只回答"有没有"，回答不了"漏了几层"；诊断 tx_depth 泄漏要的是后者。
+    对外公开它，测试与 `data-cli status` 就不必去抠私有符号（重构私有名时不至于碎）。
+    """
+    return _depth()
+
+
+def alive_tx_frames():
+    """公开探针：当前线程**存活**事务对象数（遗弃判据的另一半）。
+
+    `tx_depth > alive_tx_frames()` 就是「有层被遗弃」的完整口径——诊断/测试据此判断
+    兜底是否成立，不必去读私有帧栈。
+    """
+    return len(_alive_frames())
+
+
+def reclaim_abandoned_tx(force=False):
+    """公开入口：回收遗弃事务残留（语义见 `_reclaim_abandoned_tx`）。
+
+    生产路径已自动调用（开新事务前 / 最外层收尾时），本函数给诊断与测试一个**公开**
+    抓手，避免外部为了验证兜底去 import 私有符号。返回 True = 本次真动了计数/清帧。
+    """
+    return _reclaim_abandoned_tx(force=force)
+
+
 def execute(sql, params=()):
     """执行一条写语句（insert/update/delete），返回受影响行数。
 
@@ -170,12 +210,95 @@ def transaction():
         tx = _SQLA_Tx(eng.begin(), depth)
         _thread_local.tx_depth = depth
         return tx
+    # 新事务即将开启：先回收**遗弃**残留（非 with + 中途异常丢对象会留下脏计数）。
+    # force 不可无条件：那会把活着的嵌套事务误判成遗弃，内层随之退化成 L1、
+    # 显式收尾也不再抛错（「以为回滚了、其实落库了」的陷阱会复活）。
+    # 判据：**开新事务的时刻不该有活事务**；若帧全空而计数 > 0 → 必是遗弃。
+    _reclaim_abandoned_tx(force=True)
     conn = connect()
     depth = _depth()
     if depth == 0:
         conn.execute("BEGIN IMMEDIATE")  # 立即取写锁，读-改-写期间不被他人插入
+    tx = _SQLite_Tx(conn, depth + 1)
     _thread_local.tx_depth = depth + 1
-    return _SQLite_Tx(conn, depth + 1)
+    return tx
+
+
+def _tx_stack():
+    """当前线程**存活**事务对象的弱引用列表。
+
+    计数 `tx_depth` 只管「嵌套层数」，分不清「还在用的内层」与「已被丢弃的残骸」。
+    存活帧补上这一维。**必须用 weakref**：强引用会让「被调用方丢弃的事务对象」
+    看起来仍然存活，遗弃与正常嵌套就分不开了（实测：强引用列表下 `del tx` 计数
+    与帧都不变，兜底永远不触发）。走弱引用后「对象被丢弃 → 引用自动失效」，
+    `计数 > 存活引用数` 才是**真有层被遗弃**。
+    """
+    stack = getattr(_thread_local, "tx_stack", None)
+    if stack is None:
+        stack = []
+        _thread_local.tx_stack = stack
+    return stack
+
+
+def _alive_frames():
+    """存活事务对象（清掉已失效的弱引用）。"""
+    stack = _tx_stack()
+    stack[:] = [r for r in stack if r() is not None]
+    return [r() for r in stack]
+
+
+def _drop_frame(tx):
+    """摘下 tx 的存活帧（按身份比对，防 `id()` 复用误摘）。"""
+    stack = _tx_stack()
+    stack[:] = [r for r in stack if r() is not None and r() is not tx]
+
+
+def _reclaim_abandoned_tx(force=False):
+    """回收**遗弃事务**残留的事务计数（best-effort）。
+
+    返回值语义**单一**：True = 本次真的动了计数/清了残帧，False = 什么都没改。
+    不再有"清理成功却返回 False"的分支（曾让调用方无法凭返回值判断有没有回收）。
+
+    `_thread_local.tx_depth` 靠 tx 对象收尾递减，非 `with` 用法下若中途异常、
+    对象被丢弃而未收尾，计数就永久残留：之后 `db.execute` 不再自动提交、
+    `BEGIN IMMEDIATE` 不再取写锁 —— 事务**静默失去原子性**（正是 M1 要消灭的
+    「假原子性」），且下一次 `with` 正常退出也可能**不落库**。
+
+    **判据用「存活帧数」，不用 `conn.in_transaction`**：CPython sqlite3 在
+    `isolation_level=''` 下会自己开隐式事务，`in_transaction` 常态为 True ——
+    拿它当判据会把正常状态误判成遗弃，反而丢掉最外层 commit。也不单看计数：
+    `计数 == 存活帧数` 才是正常嵌套，只有「计数 > 存活帧数」才真有层被遗弃。
+
+    `force=True` 只允许在**不该有任何活事务**的时刻调用（开新事务前）：此时
+    `计数 > 0 且 存活帧 == 0` 即遗弃；计数归零而帧没摘则是残留帧，一并清理。
+    """
+    depth = getattr(_thread_local, "tx_depth", 0)
+    stack = _alive_frames()
+    if force:
+        if depth <= 0:
+            if not stack:
+                return False          # 无计数、无残帧 → 干净，没动手
+            del _tx_stack()[:]        # 计数已归零、帧没摘 → 残留帧，清掉
+            return True               # 动了手就要如实说（返回值语义统一）
+        if not stack:
+            # 帧全空而计数 > 0：唯一的解释是遗弃（活事务必有帧）
+            try:
+                connect().rollback()
+            except Exception:
+                pass
+            _thread_local.tx_depth = 0
+            return True
+        return False                  # 有活帧 → 正常嵌套/可信残留，交回正常路径
+    if depth <= 0 or depth <= len(stack):
+        return False                  # 无残留 / 计数与存活帧自洽（正常嵌套）→ 不动
+
+    # 遗弃层无人能收尾 → 统一回滚（若有未提交写，宁可丢弃也不静默半提交）
+    try:
+        connect().rollback()
+    except Exception:
+        pass
+    _thread_local.tx_depth = len(stack)
+    return True
 
 
 class _SQLite_Tx:
@@ -196,6 +319,7 @@ class _SQLite_Tx:
         self._conn = conn
         self._depth = depth          # 本层事务的嵌套深度（1 = 最外层）
         self._closed = False
+        _tx_stack().append(weakref.ref(self))   # 弱引用登记存活帧（与 tx_depth 对应）
 
     def commit(self):
         self._finish("commit", explicit=True)
@@ -206,12 +330,21 @@ class _SQLite_Tx:
     def _finish(self, action, explicit=False):
         """收尾：depth 递减；最外层才落 commit/rollback。幂等，重复调用无副作用。"""
         if self._closed:
+            # 重复收尾：本层已归零，但若是**中途异常导致对象被遗弃**后又被显式收尾，
+            # 计数可能仍残留 → 先回收遗弃层，再视为无操作（不重放 commit/rollback）。
+            _reclaim_abandoned_tx()
             return
+        # **判据必须在回收之前**：本层自己是内层（depth>1）就要抛错，与计数是否
+        # 被他人污染无关——先回收会把计数清零，令 `depth>1` 判据失效（曾经的回归）。
         if explicit and self._depth > 1:
             raise RuntimeError(
                 "嵌套事务不支持显式 %s()：只有最外层事务能提交/回滚。"
                 "内层请直接退出 with（异常会冒泡到最外层回滚）。" % action)
+        # 本层是最外层且要收尾 → 顺手把**遗弃层**残留回收（它们无人能收尾，
+        # 残留下去会让后续事务跳过 BEGIN IMMEDIATE、静默失去原子性）。
+        _reclaim_abandoned_tx()
         self._closed = True
+        _drop_frame(self)
         # 按本层深度收敛（不用「当前深度-1」：内层显式调用抛错时不会走 __exit__，
         # 用「当前深度-1」会让计数永久留 1，之后事务静默失去原子性）。
         depth = self._depth - 1
@@ -228,6 +361,7 @@ class _SQLite_Tx:
     def __exit__(self, exc_type, exc, tb):
         if self._closed:
             return False
+        _drop_frame(self)
         depth = self._depth - 1
         _thread_local.tx_depth = depth
         self._closed = True

@@ -565,7 +565,7 @@
         "docs/",
         "local-agent/collab/disposition.py",
         "local-agent/roles/reviewer.py",
-        "src/memory/backends/embedding/",
+        "src/memory/backends/embedding.py",
         "src/memory/schema.py"
       ],
       "depends_on": [],
@@ -631,11 +631,11 @@
     "local-agent/tests/test_dev_enhanced.sh": {
       "name": "test_dev_enhanced",
       "covers": [
-        "fractal.py",
-        "topology/topologies.py",
-        "topology/router.py",
-        "topology/fusion.py",
-        "orchestrator.py"
+        "local-agent/fractal.py",
+        "local-agent/topology/topologies.py",
+        "local-agent/topology/router.py",
+        "local-agent/topology/fusion.py",
+        "local-agent/orchestrator.py"
       ],
       "depends_on": [
         "local-agent/tests/test_local_agent.sh"
@@ -719,6 +719,22 @@
       "depends_on": [],
       "cpu_cost_est": 2.0,
       "time_est": 6.0,
+      "kind": "cpu-dense"
+    },
+    "tests/test_model_role_assign.sh": {
+      "name": "test_model_role_assign",
+      "covers": [
+        "local-agent/model_routing/spec.py",
+        "local-agent/model_routing/engine.py",
+        "local-agent/model_routing/cli.py",
+        "local-agent/model_routing/models.yml",
+        "local-agent/llm/openai_compat.py"
+      ],
+      "depends_on": [
+        "local-agent/tests/test_model_routing.sh"
+      ],
+      "cpu_cost_est": 1.2,
+      "time_est": 4.0,
       "kind": "cpu-dense"
     }
   }
