@@ -43,6 +43,8 @@ local-agent/review_cycle/state/
 local-agent/hybrid/.bus_queue.json
 local-agent/hybrid/.quota_ledger.json
 
+# MCP 汇聚注册表运行时产物（服务 pid / 日志，本机累积，不进版本库）
+local-agent/mcp_hub/_runtime/
 # dsh-adapter 离线 stub / 依赖目录（dsh-adapter/.gitignore 已忽略，但根层 git add -f 会绕过
 # 子目录规则把离线桩提交进来 —— Issue #170 台账 PR 曾误提交 4 个文件，此处根层兜底）
 dsh-adapter/node_modules/

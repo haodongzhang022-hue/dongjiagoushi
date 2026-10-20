@@ -13,6 +13,8 @@
 |---|---|---|---|---|---|
 | **入口** | 架构·秘书（强制入口+路由）| 秘书/入口/接待/先看看 | `.cnb/settings.yml` + `AGENTS.md·默认入口协议` | docs/SECRETARY_SENSE.md | module_version 声明头 |
 | **入口** | 三入口归一化（platform-adapter）| 三入口/入口归一化/网页对话/cnb/local/多宿主/谁当入口 | `local-agent/entries/` | docs/PLATFORM_ADAPTERS.md | Issue #105 · module platform-adapter v0.2.0 |
+| **对接** | 角色名册与派单接入（roster）| 角色列表/名册/roster/派单/对接/握手/跨仓派活/role_id/本地发请求过来开发/roster webhook | `local-agent/roster/` + `local-agent/dispatcher/webhook.py`(`/webhook/<src>/roster`) | docs/ROSTER.md | Issue #171 · module roster v0.2.0 |
+| **对接** | MCP 汇聚注册表（mcp_hub）| MCP/mcp 收录/MCP注册表/端点清单/3092/统一入口/mcp服务/端口/前端形态/jsonrpc/sse | `local-agent/mcp_hub/specs.py` | docs/MCP_HUB.md | Issue #171 · module mcp-hub v0.1.0 |
 | **桥接闭环** | 本地⇄云端桥接闭环（entries.bridge）| 最常用链路/本地deepseek harness/网页gemini工具桥/云开发请求/异步句柄/跨对话/跨PR/跨仓库/本地数据对齐/本地测试先行/云端建环境贵 | `local-agent/entries/bridge.py` | docs/PLATFORM_ADAPTERS.md 三.6 | Issue #105 · module platform-adapter v0.3.0 |
 | **模型** | 模型路由（统一配置文件 + 多级降级链 + 真实接线 + **角色按需指定**）| 模型/统一配置/配置文件/角色按需指定/角色别名/主模型/备用模型/多级备选/降级/渠道不通/配置生效/非单次有效/按角色/v4.1 flash/1017/alias/codebuddy/glm/audit/两链一致/fallback_chain | `local-agent/model_routing/models.yml`（唯一配置文件）| docs/MODEL_ROUTING.md | Issue #147 · module model-routing v0.3.0-update → v0.3.0-fix（Issue #182 复评 · PR #184）|
 | **聚合控制页** | 跨端聚合控制页（entries.dashboard）| 聚合控制/fastapi聚合页/状态显示/每端面板/跨端交互/控制台/健康灯/一键控制/overview/panel | `local-agent/entries/dashboard.py` | docs/PLATFORM_ADAPTERS.md 三.7 | Issue #105 · module platform-adapter v0.5.0 |
@@ -95,6 +97,8 @@
 | 我不清楚需求要做什么 | 架构·产品 / 架构·秘书（澄清+用户故事） |
 | 我要设计一个系统/模块 | 架构·总师（架构八步）→ 架构·经理（调度） |
 | 我要把一个需求拆给多个 agent 干活 | 架构·经理 dispatch + DispatchAbility（L1-L4）|
+| 我要让外部对端（管理台/中控/网关）按角色派单进来开发 | roster（`catalog` 拉清单 → `verify` 对一次 → `intake` 派单入场，或 `POST /webhook/<src>/roster` 不 import 直达）|
+| 我不知道本仓一共有哪些 MCP 工具 / 要一个统一 MCP 入口 | mcp_hub（`catalog` 看端点+工具清单 → `launch` 拉起三前端 → `call` 转发；未接线如实 not_wired）|
 | 我要跨仓库召唤角色 | HandleAbility（不写死角色名）|
 | 我要"真唤醒"对端而非只描述 | DepthAbility awake（L3 校验回执）|
 | 我怕一个功能只"列个表/断言/通畅"就算做完 | feature-verify（功能级校验：一 PR 一脚本，跑不过=没做完）|

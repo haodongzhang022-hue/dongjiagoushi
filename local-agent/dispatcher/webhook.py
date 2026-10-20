@@ -29,6 +29,21 @@
   - 复用 dispatcher 现有链路：事件进来后 normalize → rules → queue → guard →
     router → webui，与仓库事件完全同构。
 
+**角色名册派单入口（`POST /webhook/<source_name>/roster`，Issue #171）**：
+
+外部对端拿到 `roster.catalog()` 的 `role_id` 后，不必 import 本仓任何模块，
+直接 POST 一条派单请求即可入场：
+
+```
+POST /webhook/local_pc/roster   头: X-API-Key <该源秘钥>
+{"target": "arch.developer", "task": "补 token 刷新", "entity": "issue-42"}
+```
+
+链路：认证（同 webhook）→ `roster.intake()` → `intake` 内部走同一条
+`rules → queue → guard → router`，返回 `event_id` 可回查。
+回执里 `ok` 只代表"真派出去了"，`ok=false + reason` 明确区分
+`role_not_implemented`（跑不了）/ `unknown_target`（认不出）/ `not_dispatched`（被护栏拦）。
+
 安全（用户拍板 key + IP 白名单）：
   - 请求头 `X-API-Key` 携带该源秘钥；
   - `security.authenticate` 校验「源存在 + 启用 + key 匹配 + IP 在白名单」；
@@ -69,6 +84,7 @@ def handle_webhook(handler, path):
         return 404, {"ok": False, "error": "not_found"}
 
     source_name = parts[1]
+    is_roster = len(parts) > 2 and parts[2] == "roster"
     api_key = handler.headers.get("X-API-Key", "")
     client_ip = _client_ip(handler)
 
@@ -86,7 +102,11 @@ def handle_webhook(handler, path):
     except Exception as e:
         return 400, {"ok": False, "error": f"bad_json: {e}"}
 
-    # ③ 规范化事件并注入 dispatcher
+    # ③ 角色名册派单：同一套认证，走 roster.intake
+    if is_roster:
+        return _handle_roster(payload, src, source_name, client_ip)
+
+    # ④ 规范化事件并注入 dispatcher
     from . import engine
     dispatcher = engine.Dispatcher()
     # 支持单事件（payload 直接是事件）或批量（events 数组）
@@ -111,6 +131,51 @@ def handle_webhook(handler, path):
 
     return 200, {"ok": True, "source": source_name, "accepted": len(results),
                  "results": results}
+
+
+def _handle_roster(payload, src, source_name, client_ip):
+    """角色名册派单入口：把对端的派单请求交给 roster.intake（不另起链路）。
+
+    单条 or 批量（`{"requests": [...]}`）；逐条记账，单条失败不中断整批。
+    """
+    if not isinstance(payload, dict):
+        return 400, {"ok": False, "error": "bad_payload"}
+    try:
+        from roster import intake as roster_intake
+    except Exception as e:  # noqa: BLE001
+        return 500, {"ok": False, "error": f"roster_unavailable: {e}"}
+
+    reqs = payload.get("requests")
+    batch = isinstance(reqs, list)
+    items = reqs if batch else [payload]
+
+    results = []
+    for item in items:
+        if not isinstance(item, dict):
+            results.append({"ok": False, "reason": "bad_request"})
+            continue
+        item = dict(item)
+        item.setdefault("source", f"webhook:{source_name}")
+        item.setdefault("detail", {})
+        if isinstance(item["detail"], dict):
+            item["detail"].setdefault("external_source", source_name)
+            item["detail"].setdefault("client_ip", client_ip)
+        try:
+            results.append(roster_intake(item))
+        except Exception as e:  # noqa: BLE001
+            results.append({"ok": False, "reason": "intake_error", "error": str(e)})
+
+    ok = all(r.get("ok") for r in results) if results else False
+    body = {"ok": ok, "source": source_name, "accepted": sum(1 for r in results if r.get("ok")),
+            "rejected": sum(1 for r in results if not r.get("ok")),
+            "results": results}
+    if not batch:
+        body = {"ok": ok, "source": source_name, **results[0]}
+    # 认不出目标 / 跑不了 → 400（对端要修，不是它的服务端错误）
+    code = 200 if ok else (400 if all(r.get("reason") in
+                                     ("unknown_target", "role_not_implemented",
+                                      "empty_task", "bad_request") for r in results) else 409)
+    return code, body
 
 
 class _WebhookHandler(BaseHTTPRequestHandler):
@@ -139,6 +204,7 @@ class _WebhookHandler(BaseHTTPRequestHandler):
         body = html.escape(
             "外部事件源 Webhook 接收端\n"
             "POST /webhook/<source_name>  头: X-API-Key <该源秘钥>\n"
+            "POST /webhook/<source_name>/roster  角色名册派单（target=role_id）\n"
             "Body: 事件 JSON（单事件 或 {events:[...]} 批量）\n"
             "安全: 秘钥 + IP 白名单（见 security.py）\n"
             "登记源: python -m local-agent.dispatcher.cli ext add <name>"
