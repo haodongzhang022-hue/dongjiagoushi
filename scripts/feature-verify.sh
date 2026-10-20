@@ -410,6 +410,24 @@ filter() {
 }
 
 # ------------------------------------------------------------
+# TDD 红灯语义（Issue #165 P2 · 与 tests/test_feature_verify.sh 同源判据）
+# ------------------------------------------------------------
+# 光有 `rc != 0` 一根灯会把两件事混在一起：「功能该实现却没做完」（真红，阻断）
+# 与「测试先行、功能还没写」（TDD 红，工作项）。混着用 → 仓库里正当存在 TDD 红时
+# 闸门永远红；反之没人挂红时又是空转的绿。
+#   .tdd           每行一个**仍待实现**的模块名（逐模块生效，不搞全仓挂红灯）
+#   .tdd.verified  功能真实现后把模块写进来 → 同一红立刻恢复真红否决
+# 只认脚本自己的结论（脚本非 0 退出），不解析日志文本——注入散装 ❌ 冒充不了。
+TDD_DECL="${FEATURE_VERIFY_TDD_FILE:-.tdd}"
+is_tdd_pending() {  # $1=模块名 → 0=仍待实现的 TDD 红
+  local mod="$1"
+  [ -f "$TDD_DECL" ] || return 1
+  grep -qxF "$mod" "$TDD_DECL" || return 1
+  [ -f "$TDD_DECL.verified" ] && grep -qxF "$mod" "$TDD_DECL.verified" && return 1
+  return 0
+}
+
+# ------------------------------------------------------------
 # 4. 逐个跑
 # ------------------------------------------------------------
 run_all() {
@@ -429,8 +447,8 @@ run_all() {
     for f in "${ALL_SCRIPTS[@]}"; do echo "    $f"; done
     exit 0
   fi
-  local PASS=0 FAIL=0
-  local -a FAILED_ITEMS=()
+  local PASS=0 FAIL=0 TDD=0
+  local -a FAILED_ITEMS=() TDD_ITEMS=()
   for f in "${ALL_SCRIPTS[@]}"; do
     local module fea label
     module="$(basename "$(dirname "$f")")"
@@ -441,13 +459,21 @@ run_all() {
     if bash "$f"; then
       echo "  ✅ $label 通过（功能完成）"
       PASS=$((PASS+1))
+    elif is_tdd_pending "$module"; then
+      # TDD 红灯：测试先行、功能还没写 → 是工作项，不是坏功能（Issue #165 P2）
+      echo "  🔴TDD $label 未实现（.tdd 已声明且未标 verified）→ 记账不阻断"
+      TDD=$((TDD+1)); TDD_ITEMS+=("$label")
     else
       echo "  ❌ $label 崩溃/未达成 → 坏功能定位: $module/$fea"
       FAIL=$((FAIL+1)); FAILED_ITEMS+=("$label")
     fi
   done
   echo ""
-  echo "==== [feature-verify] 汇总: PASS=$PASS FAIL=$FAIL ===="
+  echo "==== [feature-verify] 汇总: PASS=$PASS FAIL=$FAIL TDD=$TDD ===="
+  if [ "$TDD" -gt 0 ]; then
+    echo "🔴TDD 待实现（TDD 红灯，非坏功能；实现后请写进 .tdd.verified 让它恢复否决）："
+    for it in "${TDD_ITEMS[@]}"; do echo "  - $it"; done
+  fi
   if [ "$FAIL" -gt 0 ]; then
     echo "🔴 存在坏功能（回归定位）："
     for it in "${FAILED_ITEMS[@]}"; do echo "  - $it"; done

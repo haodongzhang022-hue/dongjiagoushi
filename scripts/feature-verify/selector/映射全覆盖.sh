@@ -285,7 +285,10 @@ grep -q "证据目录已落地" "$TMP/x3.out" 2>/dev/null \
   || ok "Then-10c: 去 pending 后不再报 stale（stale 判据准确）"
 # 10d：hermetic —— 强制 collab 为 pending 形态（全模块保留）配「目录已落地」→ 必须提示 stale；
 #      不依赖仓库真实 map 形态，故合并态去/留 pending 前后都稳定可测（拆 p3 的坑）。
-sed -e 's/^collab:/pending: collab:/' -e 's/^pending: collab:/pending: collab:/' "$MAP" > "$TMPV2/stale.map"
+# 夹具意图：把 collab 从「正式登记」改造成「仍挂 pending:」的 stale 形态。
+# 旧版第二条 `-e 's/^pending: collab:/pending: collab:/'` 是**恒等替换**（no-op），
+# 写出 0 效果却让读者以为做了两步处理 —— 已删，只留真正生效的那一步。
+sed 's/^collab:/pending: collab:/' "$MAP" > "$TMPV2/stale.map"
 if FEATURE_VERIFY_DIR="$TMPV2" FEATURE_VERIFY_MAP="$TMPV2/stale.map" \
    bash "$FV" --check-map >"$TMP/x4.out" 2>&1; then
   grep -q "证据目录已落地" "$TMP/x4.out" \

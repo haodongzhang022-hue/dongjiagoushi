@@ -36,7 +36,7 @@
 | **质量** | 统一审查处置标签 | merge/proceed/fix_bug/human/consult/vote/blocked | `local-agent/collab/disposition.py` | docs/REVIEW_DISPOSITION.md | Issue #47 · #150 |
 | **质量** | 有效性度量模型 | 度量/有效性/解决度/缺陷/稳定性/通用性/一致性 | `local-agent/review_metrics/` | docs/REVIEW_METRICS.md | Issue #100 决策⑤ |
 | **质量** | 评审双轴必走（do_review 主流程强制）| 双轴/Standards/Spec/do_review/缺轴不完整 | `roles/reviewer.py` | docs/REVIEW_DUAL_AXIS.md | Issue #98 |
-| **质量** | 功能级校验（feature-verify）| 功能校验/功能做完/feature-verify/feature-regress/坏功能定位/模块映射/未映射即RED | `scripts/feature-verify/`（+ `modules.map` 唯一事实源）+ `scripts/feature-verify.sh` | docs/FEATURE_VERIFY.md | Issue #109 · #162 |
+| **质量** | 功能级校验（feature-verify）| 功能校验/功能做完/feature-verify/feature-regress/坏功能定位/模块映射/未映射即RED/TDD红灯/待实现 | `scripts/feature-verify/`（+ `modules.map` 唯一事实源）+ `scripts/feature-verify.sh`（+ `.tdd` / `.tdd.verified` 两阶段判据） | docs/FEATURE_VERIFY.md | Issue #109 · #162 · #165 |
 | **效率** | 评审增量上下文（review-context）| 评审复述/增量上下文/冻结骨架/免复述/上下文复用 | `local-agent/review_context/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-context v0.2.0 |
 | **效率** | 评审段调度器（review-cycle）| 评审段/攒批/异步收集/同指纹不重复构建/减CPU损耗 | `local-agent/review_cycle/` | docs/REVIEW_EFFICIENCY.md | Issue #150 · module review-cycle v0.2.0 |
 | **协作** | 阶段链门控（stage-gate）| 阶段链/抢跑/重复触发/乱序/链条按序推进/进度失衡 | `local-agent/review_cycle/gate.py` | docs/REVIEW_EFFICIENCY.md §二.④ | Issue #150 · module review-cycle v0.3.2 |

@@ -365,6 +365,63 @@ else
   echo "  ❌ 运行时核验：阶段链门控未拦下抢跑/重复触发"
 fi
 
+
+# ============================================================
+# ADR-0013 口径锁（Issue #165 项4 · 复评 🔴2 返工）
+# ------------------------------------------------------------
+# ADR-0013 原文锁的对象是 `feature-verify \`collab/写时状态中介\``（Then-1~N），
+# 证据脚本是 scripts/feature-verify/collab/写时状态中介.sh —— **不是 selector**。
+# 原版口径锁取的是 selector/映射全覆盖.sh 的最大 Then（11），与 ADR 那句话无关：
+# 锁本身永远绿（抓不住漂移），并且把 ADR 从「Then-1~5（少报）」放成「Then-1~11（多报）」。
+# 本版三件事一起做，缺一不成：
+#   ① 证据脚本指向 collab/写时状态中介.sh，grep 口径取全文 Then-N[a-z]（该脚本多数
+#      断言写在 ok()/bad() 的字符串里，只 grep `^# -+ Then-` 会漏到 6 以下）；
+#   ② ADR 的 Then-1~N 改成脚本**实际最大序号**；
+#   ③ 牙齿自证：把 ADR 临时改成错值，锁必须转红（否则又是"永远绿"的假牙）。
+# ============================================================
+echo ""
+echo "▶ ADR-0013 Then 覆盖区间口径锁（证据=collab/写时状态中介）"
+ADR_FILE="docs/adr/0013-write-path-atomic-and-migration-sink.md"
+EVID_SH="scripts/feature-verify/collab/写时状态中介.sh"
+
+# max_then <file>：脚本内实际最大 Then 主序号（Then-1b / Then-5b 归主序号）
+max_then() {
+  grep -oE 'Then-[0-9]+[a-z]?' "$1" 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1
+}
+# adr_then <file>：ADR 声明的 Then-1~N 的 N
+adr_then() {
+  grep -oE 'Then-1~[0-9]+' "$1" 2>/dev/null | grep -oE '[0-9]+$' | head -1
+}
+
+if [ -f "$ADR_FILE" ] && [ -f "$EVID_SH" ]; then
+  EVID_MAX="$(max_then "$EVID_SH")"
+  ADR_N="$(adr_then "$ADR_FILE")"
+  check "ADR-0013 声明的 Then-1~N 与 collab 证据脚本实际最大 Then 一致" "$EVID_MAX" "$ADR_N"
+  contains "ADR-0013 口径引用指向 collab/写时状态中介证据" "$(cat "$ADR_FILE")" 'collab/写时状态中介'
+  # 牙齿自证：ADR 改成错值（实际+1）必须被判红 → 证明上面的 check 不是恒真
+  ADR_MUT="$(mktemp)"
+  sed -E "s/Then-1~[0-9]+/Then-1~$((EVID_MAX + 1))/" "$ADR_FILE" > "$ADR_MUT"
+  if [ "$(adr_then "$ADR_MUT")" != "$(max_then "$EVID_SH")" ]; then
+    PASS=$((PASS+1)); echo "  ✅ ADR-0013 口径锁有牙：ADR 写成 Then-1~$((EVID_MAX + 1)) 时锁判不一致（非恒真）"
+  else
+    FAIL=$((FAIL+1)); FAILED_ITEMS+=("[ADR-0013 口径锁牙齿] ADR 写错值仍判一致 → 锁是空牙")
+    echo "  ❌ ADR-0013 口径锁牙齿：ADR 写错值仍判一致 → 锁是空牙"
+  fi
+  # 反向自证：证据脚本换成 selector（原版的错对象）时数值应当不同，
+  # 说明「指向哪个脚本」真的决定结果，不是两处恰好同值造成的假一致
+  SEL_SH="scripts/feature-verify/selector/映射全覆盖.sh"
+  if [ -f "$SEL_SH" ] && [ "$(max_then "$SEL_SH")" != "$EVID_MAX" ]; then
+    PASS=$((PASS+1)); echo "  ✅ ADR-0013 口径锁对象正确：selector 最大 Then=$(max_then "$SEL_SH") ≠ collab 证据 $EVID_MAX（原版锁错对象）"
+  else
+    FAIL=$((FAIL+1)); FAILED_ITEMS+=("[ADR-0013 口径锁对象] selector 与 collab 证据最大 Then 相同，无法证明锁错对象")
+    echo "  ❌ ADR-0013 口径锁对象：两脚本最大 Then 相同，锁对象是否正确的判据不成立"
+  fi
+  rm -f "$ADR_MUT"
+else
+  FAIL=$((FAIL+1)); FAILED_ITEMS+=("[ADR-0013 口径锁] 文件缺失：$ADR_FILE 或 $EVID_SH")
+  echo "  ❌ ADR-0013 口径锁：文件缺失"
+fi
+
 # ============================================================
 # 汇总（信号灯）
 # ============================================================
