@@ -204,3 +204,60 @@
 > 本次无任何一方的核验记录被覆盖或删除。
 
 ---
+
+## 十、终态收口（2026-10-20 · 本单关闭前的最后一轮）
+
+> 口径不变：**不看自述，只认三样** —— PR 真 merged（且 base=`main`）、`origin/main` 上产物实体存在、
+> 信号灯真跑。本节记本轮重新核过的结果。
+
+### 10.1 大盘终态：open Issue 33 → 2 → 0
+
+| Issue | 终态 | 证据 |
+|---|---|---|
+| **#170** 本单 | 关闭 | 本节即收尾留痕 |
+| **#182** 检查问题（按角色指定模型） | 关闭 | PR #183/#184/#185 均 merged（base=main）；main 上真跑 `test_model_role_assign` **8/8**、`test_model_routing` **12/12**、`test_doc_consistency` **101/0**；`cli audit` ok / `total_declared=24` |
+| **#177** 云端承接侧联调 | **移交新单** | PR #181 仍 open（mergeable），云端承接侧代码未进 main；「真回执闭环」必须由人类本地发卡才验得了，不属本单可闭环范围 |
+
+### 10.2 四条 PR 的路径纠偏（本轮实际动手的活）
+
+上一轮留下的 4 条 open PR 有 3 条**看着 open、实际合不进去**，根子同一件事：
+**base 挂错 / head 分支被跨 PR 复用**。本轮全部从 `main` 重做：
+
+| 原 PR | 病灶 | 处置 | 新 PR |
+|---|---|---|---|
+| **#189** 快档三档语义 | base = #186 的源分支（违反解耦规则①） | 从 main 重做，只留「降级链可靠性」 | **#191** ✅ mergeable |
+| **#186** 平台参数收口 | `code_conflict`；head 被 #189 复用作 base，推送后平台读不到新 sha | 解冲突后用独立分支重开，只留「平台参数/别名纪律」 | **#192** ✅ mergeable |
+| **#174** roster + mcp_hub | 落后 main 27 个提交，`.gitignore` 冲突 | 从 main 合并解冲突，两侧全保留 | **#193** ✅ mergeable |
+| **#181** 云端承接侧 | 已 rebase 到 main、mergeable | 不动，随 #177 一起走 | 原样 |
+
+拆开之后看清一个**真 bug** 的归属：#189 把「平台参数」和「降级链修复」捆在一起，后者是 main 上的真缺陷——
+
+```python
+# local-agent/llm/openai_compat.py（修复前）
+callers = {m: (lambda sp, ui, **k: self._call_model(m, sp, ui, **k)) for m in chain}
+```
+
+闭包捕获的是**循环变量**，循环结束后所有档都指向链尾 → 三级降级链静默退化成「只用最后一档」，
+还伪装成「每档都试过了」。已改为逐档绑定 `model=ch`（PR #191），活体验证：
+
+```
+called: ['deepseek-v4.1-flash', 'codebuddy', 'glm-5.3-flash']   ← 逐档真试
+result: model=glm-5.3-flash  degraded=True  from_model=deepseek-v4.1-flash
+```
+
+### 10.3 本轮踩到的两个坑（写下来防再犯）
+
+1. **平台 PR API 改不了 base**。`patch-pull` 传 `base` / `base_ref` / `baseBranch` / `{"base":{"ref":...}}`
+   全部被忽略（返回 200、base 不变）。base 错了只能**关旧开新**。
+2. **head 分支被两条 PR 同时占用会哑掉**。同一条 `auto/model-platform-params-main-k3q`
+   既是 #186 的 head 又是 #189 的 base，push 之后 #186 的 head sha 一直不动、`mergeable_state`
+   永远停在 `conflict`——不是冲突没解，是 PR 根本读不到新提交。换独立分支才通。
+
+### 10.4 遗留去向（不吞，全部有承接）
+
+- 「云端承接侧联调 + 真回执闭环」→ 新开单承接（#177 转过去），不在本单挂着；
+- #191 / #192 里显式标注两处**待人类拍板**（平台真实快档 ID、`last_resort_model` 由谁定）。
+
+> 一条实话：这盘从 33 条收下来，真正花时间的不是改代码，是**分辨哪些「已完成」是真的**。
+> 本轮又抓到同族问题——PR 看着 open、其实 head 早哑了。所以「关单」这步，
+> 我核的永远是**实体**（sha / merge-tree / 信号灯），不是页面上的状态字样。
