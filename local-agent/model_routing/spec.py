@@ -115,6 +115,108 @@ def resolve_alias(model):
     return model
 
 
+def alias_table():
+    """版本别名表（`{口语版本串: 平台真实 ID}`），由配置唯一声明。"""
+    table = _raw().get("alias") or {}
+    return table if isinstance(table, dict) else {}
+
+
+def alias_key_issues():
+    """别名**键**体检：登记了左值却没人会用它 = 配置垃圾，且右值坏掉不会被发现。
+
+    场景：`alias: {minimax-3.1-flash: <真实ID>}` —— 若 `minimax-3.1-flash` 既不在
+    任何角色链里、也不是 default/fallback 的成员，这条登记就永远不会被 `resolve_alias`
+    走到；右值写成错 ID 也没人能测出来（#177 事故的静默版）。
+    这类条目要么是「登记了忘接线」（应写进角色链），要么是「名字打错」（应修键）。
+
+    返回 [{key, value, reason, detail}]。
+    """
+    table = alias_table()
+    if not table:
+        return []
+    used = set()
+    for m in list(default_chain()) + list(fallback_chain()):
+        used.add(m)
+    for role in role_overrides():
+        used.update(role_chain(role))
+    bad = []
+    for key in table:
+        if key not in used:
+            bad.append({
+                "key": key, "value": table[key], "reason": "alias_unused",
+                "detail": "alias 键 %r 未被任何角色链引用（登记了但接线不到，右值写坏也测不出来）"
+                          % key,
+            })
+    return bad
+
+
+def npc_go_params():
+    """平台 `npc:go` 可控参数（推理深度 / 上下文窗口 / 输出上限 / 轮次）。
+
+    为什么不和 `model` 放一起：`model` 是 `default.chain[0]` 的**派生物**（唯一事实源在
+    default.chain，配置里不重复字面量）；而这几项**不派生于渠道链**——显式指定自定义
+    model 时平台会回落到内置默认（medium / 1m / 48k / 500），把期望值写死才防「以为设了
+    其实没设」。配置缺失返回 {}（不臆造平台默认值）。
+    """
+    blk = _raw().get("npc_go")
+    return dict(blk) if isinstance(blk, dict) else {}
+
+
+def last_resort_model():
+    """兜底档的**平台可执行单模型**（三档里的档3）。
+
+    为什么单列：`npc:go` 只接受一个 model 字段，渠道链上某些档在平台侧跑不起来；
+    这一条是「连备用话术都没得跑」时的最后一道可执行模型。
+    配置缺失 → 取 chain 末档（不臆造模型名）。
+    """
+    m = _raw().get("last_resort_model")
+    if isinstance(m, str) and m.strip():
+        return resolve_alias(m.strip())
+    c = default_chain()
+    return c[-1] if c else _FALLBACK_CHAIN[-1]
+
+
+def tier_view(role=None):
+    """把某角色的渠道链解读成**三档语义**（用户 2026-10-20 PR #185 定调）。
+
+      档1 `fast`        —— 指定：该角色**显式写进 roles** 的链首档（专属快档）；
+      档2 `same`        —— 和其他角色一样：与 `fallback_chain` 重合的档位；
+      档3 `last_resort` —— 现在的兜底：`last_resort_model` 单模型。
+
+    判据是确定性的两条：① 是否 `specified`（显式写进 roles）；② 成员是否在
+    `fallback_chain` 里。未列出的角色（specified=False）全部记 `same`——它的首个模型
+    本来就叫默认，不冒充「指定」。快档角色链首若与默认链成员同名（如 glm-5.3-flash），
+    仍记 `fast`：显式指定的首档语义就是「指定」，这是配置写法的约定。
+    """
+    chain = list(role_chain(role))
+    fb = set(fallback_chain())
+    last = last_resort_model()
+    specified = is_role_specified(role)
+    tiers = []
+    for idx, model in enumerate(chain):
+        if idx == 0 and specified:
+            tier = "fast"
+        elif model in fb:
+            tier = "same"
+        elif model == last:
+            tier = "last_resort"
+        else:
+            tier = "extra"
+        tiers.append({"tier": tier, "model": model, "priority": idx + 1})
+    return {"role": role, "chain": chain, "tiers": tiers,
+            "last_resort_model": last,
+            "specified": is_role_specified(role)}
+
+
+def is_fast_role(role):
+    """该角色是否挂了「快档优先」的三档链（显式指定且首档异于默认链首）。"""
+    if not is_role_specified(role):
+        return False
+    c = role_chain(role)
+    d = default_chain()
+    return bool(c) and bool(d) and c[0] != d[0]
+
+
 def default_chain():
     """通用默认渠道链（不指定角色时用）。配置缺失 → 内置兜底链。"""
     c = _chain_of(_raw().get("default"))
@@ -310,6 +412,18 @@ def audit_roles():
                 bad.append({"role": role, "reason": "alias_broken",
                             "detail": "短名 %r 解析链 %r ≠ 规范名链 %r（别名断裂，短名会静默走 fallback）"
                                       % (short, sc, rc)})
+    # ④ 模型别名键体检（登记了但没人用 = 接线不到，右值坏掉也测不出来）
+    for item in alias_key_issues():
+        bad.append({"role": item["key"], "reason": item["reason"], "detail": item["detail"]})
+    # ⑤ 快档链必须能「显性降级」：首档之外至少还要有 1 档与其他角色相同的模型
+    #    （只挂单档 = 首档一挂就整条断，等于把静默失败写进配置）
+    for role in role_overrides():
+        view = tier_view(role)
+        kinds = [t["tier"] for t in view["tiers"]]
+        if "same" not in kinds:
+            bad.append({"role": role, "reason": "no_degrade_target",
+                        "detail": "链 %r 没有「与其他角色一样」的档位，主档不通就无处降级（显性降级缺位）"
+                                  % (view["chain"],)})
     return bad
 
 

@@ -20,7 +20,12 @@ default:
   chain: &default_chain
     - deepseek-v4.1-flash           # 主通道
     - codebuddy                     # @CodeBuddy 通道
-    - glm-5.3-flash                 # 兜底
+    - glm-5.3-flash                 # 兜底：纯文本 CLI/网关可达的最后一道
+
+# ①' 兜底档的**平台可执行的后备单模型**（chain 档位在平台侧无法逐档跑时要降到这里）
+#    npc:go 只接受一个 model 字段，链上每一档在平台侧不一定都跑得起来；
+#    这一条是「连兜底话术都没得跑」时的最后可执行单模型（claude 家族在平台可选列表内）。
+last_resort_model: claude-3-5-sonnet
 
 # ② 继承兜底链（角色未在 roles 中显式写出时走这条，仍属 default 体系）
 #    通过 YAML 锚点 *default_chain 直接引用 default.chain —— 配置层零重复字面量。
@@ -67,11 +72,28 @@ role_aliases:
 # ⑤ 按角色显式指定（Issue #182 · 仅列**真正需要不同链**的角色）
 #    写规则：chain 第一档是主档；后面是降级顺序。
 #    未在此列出的角色 → 走 fallback_chain（= default.chain），不在配置里堆空壳链。
-#    当前只有以下两类真正差异化（依据：该岗一轮吞吐的 token 规模 / 任务回合频率）：
-#      - 进度推手 / 客服：高频短答、不需长上下文 → 快档 glm-5.3-flash 优先。
+#    当前差异化的角色（依据：该岗一轮吞吐的 token 规模 / 任务回合频率）：
+#      - 进度推手 / 客服：高频短答、不需长上下文 → 快档 glm-5.3-flash 优先；
+#      - 开发：主力读写码、回合最多，要的是「回合快」→ 同样挂三档。
+#
+#    三档语义（用户 2026-10-20 PR #185 定调；引擎 spec.tier_view 可读）：
+#      档1 **指定**（tier=fast）——直指快档模型。真实快档 ID 待人类确认，
+#            确认后登记 alias、再改这一处即全角色生效（先 `probe` 验真，未验真不登记，
+#            防 #177 式 stage error）；
+#      档2 **和其他角色一样**（tier=same）——不另造名字，直接用 `fallback_chain`
+#            的模型集合（= default.chain），零字面量重复；
+#      档3 **现在的兜底**（tier=last_resort）——`last_resort_model` 单模型，
+#            平台侧一定跑得起来的那一道。
+#    ★ 显性降级：档1→档2→档3 每一跳都写 model_routing_trace（event=model.call.fail,
+#      degraded=1, fallback_from, next）；llm 层读同一份留痕判「本轮降没降级」，
+#      降级就把 `degraded` 标进结果并留痕告警——绝不静默换模型。
 roles:
-  "架构·进度推手": { chain: [glm-5.3-flash, deepseek-v4.1-flash, codebuddy] }  # 打标/百分比，短任务为主，快档优先
-  "市场·客服":     { chain: [glm-5.3-flash, deepseek-v4.1-flash, codebuddy] }  # 高频短答，快档优先
+  "架构·进度推手": { chain: [glm-5.3-flash, deepseek-v4.1-flash, codebuddy, glm-5.3-flash] }  # 打标/百分比，短任务为主，快档优先
+  "市场·客服":     { chain: [glm-5.3-flash, deepseek-v4.1-flash, codebuddy, glm-5.3-flash] }  # 高频短答，快档优先
+
+  # 快档角色（用户要求「最起码快档里能用上和其他几个角色一样的模型」）：
+  #   chain = 档1 指定(glm-5.3-flash) → 档2 与其他角色一样(default.chain) → 档3 兜底(last_resort_model)
+  "架构·开发":     { chain: [glm-5.3-flash, deepseek-v4.1-flash, codebuddy, glm-5.3-flash] }  # 读写码主力，回合多、要回合快
 
 # ⑥ 渠道不通的判定信号（触发降级）
 unavailable_signals:
@@ -86,3 +108,17 @@ unavailable_signals:
   - "502"
   - "503"
   - "504"
+
+# ⑥' 平台 npc:go 可控参数（与模型绑定的能力参数 · Issue #182 追问「换模型≠提速」）
+#   ★ 显式指定自定义 model 时，平台**不再继承**默认模型配置，回落到内置默认
+#     （medium / 1m / 48k / 500）；这里写死期望值，防「以为设了其实没设」。
+#   ★ 一致性由 tests/test_model_role_assign.sh ⑧ 机器核验（与 .cnb.yml 的 .npc_task 逐项相等）。
+npc_go:
+  # 推理深度：off / minimal / low / medium / high / xhigh / max
+  thinkingLevel: medium
+  # 上下文窗口：128k ~ 1m；降它有实际收益——单轮上下文变小，溢出压缩更少触发（「慢」的真实主因之一）。
+  contextWindow: 1m
+  # 单次输出上限
+  maxTokens: 48k
+  # 最大对话轮次
+  maxTurns: 500
