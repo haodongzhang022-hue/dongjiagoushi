@@ -48,6 +48,8 @@ class OpenAICompatBackend(LLMBackend):
         except Exception:  # noqa: BLE001
             _DEFAULT_MODEL = "deepseek-v4.1-flash"
         self.model = os.environ.get("LOCAL_AGENT_MODEL", _DEFAULT_MODEL)
+        # 最近一次调用的降级信息（None = 主档直通；非 None = 发生过降级，含来源与落点）
+        self.last_degraded = None
 
     def available(self):
         return bool(self.api_key)
@@ -100,13 +102,44 @@ class OpenAICompatBackend(LLMBackend):
         chain, _default_model = _resolve_backends(role)
         # Issue #182 复评：模型别名（alias）已在 engine.resolve_models 内集中收口，
         # 此处 chain 已是过映射后的真实模型名；未登记别名在解析期已显式报红（不放行）。
-        callers = {m: (lambda sp, ui, **k: self._call_model(m, sp, ui, **k)) for m in chain}
+        # ★ 闭包逐个绑定（model=m）：写成 `lambda ...: self._call_model(m, ...)` 会捕获
+        #   推导式的循环变量，循环结束后所有 caller 都指向**链尾模型**——多级降级链静默
+        #   退化成"只用最后一档"，还伪装成"每档都试过了"（Issue #192）。
+        callers = {ch: (lambda sp, ui, model=ch, **k: self._call_model(model, sp, ui, **k))
+                   for ch in chain}
         res = call_with_chain(callers, system_prompt=system_prompt,
                               user_input=user_input, role=role)
         if res["ok"]:
+            self._record_degrade(role, res)
             return res["output"]
         # 全链不通 → 显式失败（不静默、不假装成功）
+        self.last_degraded = {
+            "role": role, "from_model": chain[0] if chain else None,
+            "used_model": None, "reason": "all_channels_unavailable",
+            "attempts": [a.get("model") for a in res.get("attempts") or []],
+        }
         raise RuntimeError(
-            "all model channels unavailable (chain=%s): %s"
+            "all model channels unavailable (chain=%s, attempts=%s)"
             % (res.get("chain"), res.get("attempts"))
         )
+
+    def _record_degrade(self, role, res):
+        """降级就把「主档是谁、实际谁答的」标出来，绝不静默换模型。"""
+        attempts = res.get("attempts") or []
+        if not attempts:
+            self.last_degraded = None
+            return
+        self.last_degraded = {
+            "role": role,
+            "from_model": attempts[0].get("model"),
+            "used_model": res.get("model"),
+            "attempts": [a.get("model") for a in attempts],
+        }
+        try:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "[model-routing] 降级：role=%s 主档 %s 不通 → 实际用 %s（试过 %s）",
+                role, self.last_degraded["from_model"], res.get("model"),
+                self.last_degraded["attempts"])
+        except Exception:  # noqa: BLE001
+            pass
