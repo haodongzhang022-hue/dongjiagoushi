@@ -47,6 +47,7 @@
 | [0012-阶段链门控](0012-stage-chain-gate.md) | 开发→评审→测试走阶段链门控，不让本该串行的环节并行/重复触发 | Accepted |
 | [0013-写路径原子化+迁移下沉](0013-write-path-atomic-and-migration-sink.md) | 写路径事务包裹 + 冲突提案负数编号 + 迁移下沉建表入口 | Accepted |
 | [0014-dsh适配作为独立模块](0014-dsh-adapter-new-version.md) | dsh 适配独立模块化 + 版本闸门前置（不静默放行），loader 只 import 构建产物 | Accepted |
+| [0015-模型三档语义+显性降级](0015-model-fast-tier-and-explicit-degrade.md) | 渠道链按 指定/和其他角色一样/兜底 三档语义解读；降级每跳留痕并被结果标出，不静默换模型 | Accepted |
 
 ## 维护纪律
 

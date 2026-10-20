@@ -41,10 +41,13 @@ assert spec.default_chain()[0] == "deepseek-v4.1-flash"
 assert spec.role_chain("架构·进度推手")[0] == "glm-5.3-flash", spec.role_chain("架构·进度推手")
 assert spec.role_chain("市场·客服")[0] == "glm-5.3-flash", spec.role_chain("市场·客服")
 assert spec.is_role_specified("架构·进度推手") is True
-# 未显式指定的角色自然走 fallback（预期行为，不算空壳）
-assert spec.is_role_specified("架构·开发") is False
-assert list(spec.role_chain("架构·开发")) == list(spec.fallback_chain())
-print("  ✅ 差异化角色主档=glm-5.3-flash；非差异化角色走 fallback（specified=False）")
+# 开发角色本轮也挂了三档（用户 PR #185：快档里要用上和其他角色一样的模型）
+assert spec.role_chain("架构·开发")[0] == "glm-5.3-flash", spec.role_chain("架构·开发")
+assert spec.is_role_specified("架构·开发") is True
+# 未显式指定的角色仍自然走 fallback（预期行为，不算空壳）
+assert spec.is_role_specified("架构·评审") is False
+assert list(spec.role_chain("架构·评审")) == list(spec.fallback_chain())
+print("  ✅ 快档角色主档=glm-5.3-flash；未列出角色（架构·评审）走 fallback（specified=False）")
 PY
 
 echo "---- ④ 角色别名归一（全称 ↔ 短名，双向一致） ----"
@@ -55,8 +58,11 @@ from model_routing import spec
 assert spec.role_chain("进度推手") == spec.role_chain("架构·进度推手"), \
     (spec.role_chain("进度推手"), spec.role_chain("架构·进度推手"))
 assert spec.is_role_specified("进度推手") == spec.is_role_specified("架构·进度推手")
-# 非差异化角色：全称与短名都走 fallback，仍一致（无断裂）
-assert tuple(spec.role_chain("开发")) == tuple(spec.role_chain("架构·开发")) == tuple(spec.fallback_chain())
+# 快档角色：全称与短名落到同一条三档链（无断裂）
+assert tuple(spec.role_chain("开发")) == tuple(spec.role_chain("架构·开发"))
+assert spec.role_chain("开发")[0] == "glm-5.3-flash"
+# 未列出角色：全称与短名都走 fallback，仍一致（无断裂）
+assert tuple(spec.role_chain("测试")) == tuple(spec.role_chain("架构·测试")) == tuple(spec.fallback_chain())
 print("  ✅ 进度推手==架构·进度推手；开发==架构·开发（短名不断裂）")
 PY
 
@@ -139,4 +145,168 @@ assert m.group(1) == spec.default_chain()[0], (m.group(1), spec.default_chain()[
 print("  ✅ .cnb.yml model ==", m.group(1), "== models.yml default.chain[0]")
 PY
 
-echo "==== ✅ 角色按需指定模型信号灯全绿（7/7 · 含两链一致 + 别名/链一致） ===="
+echo "---- ⑧ 平台参数 + 别名键（PR #185）：npc_go/.cnb.yml 一致、家族号不误伤、空登记报红 ----"
+python3 - <<'PY'
+import os, sys, re, tempfile, yaml; sys.path.insert(0, '.')
+from model_routing import spec
+
+# ⑧-1 平台可控参数：models.yml npc_go 与 .cnb.yml .npc_task 必须逐项一致
+#     （npc:go 只认流水线 options，不读 models.yml；两边漂移 = 配置看着对、线上不生效）
+params = spec.npc_go_params()
+assert params, "models.yml 缺 npc_go 块（平台参数无人声明）"
+text = open("../.cnb.yml", encoding="utf-8").read()
+for k, v in params.items():
+    m = re.search(r"^\s*%s:\s*(\S+)" % re.escape(k), text, re.M)
+    assert m, f".cnb.yml 缺 {k}（与 models.yml npc_go 不一致）"
+    got = m.group(1).strip().rstrip("#").strip()
+    assert got == str(v), f"{k} 不一致：.cnb.yml={got!r} models.yml={v!r}"
+# 平台合法域（文档 zh/build/internal-steps/npc/go.md）——写错平台直接报错
+assert params.get("thinkingLevel") in {"off", "minimal", "low", "medium", "high", "xhigh", "max"}, params
+cw = str(params.get("contextWindow"))
+assert re.fullmatch(r"\d+k|\d+m|\d+", cw.lower()), f"contextWindow 写法非法: {cw}"
+
+# ⑧-2 版本串判据不误伤模型家族号（minimax-3 / glm-5 是家族号，不是版本串）
+assert spec.resolve_alias("minimax-3.1-flash") == "minimax-3.1-flash", "minimax 家族号被判成未登记别名"
+assert spec.resolve_alias("glm-5.3-flash") == "glm-5.3-flash"
+try:
+    spec.resolve_alias("minimax-3.1-flash-1017")
+    raise AssertionError("版本串未报红（应显式拦截）")
+except RuntimeError as e:
+    assert "未登记别名" in str(e), str(e)
+
+# ⑧-3 别名**键**体检：登记了却没接线 → 报 alias_unused（右值写坏也测不出来）
+raw = yaml.safe_load(open(spec.config_path(), encoding="utf-8"))
+raw["alias"] = {"minimax-3.1-flash": "some-unverified-id"}
+fd, tmp = tempfile.mkstemp(suffix=".yml"); os.close(fd)
+yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
+os.environ["MODEL_ROUTING_CONFIG"] = tmp
+try:
+    issues = spec.audit_roles()
+    assert any(i["reason"] == "alias_unused" for i in issues), f"登记未接线未报红: {issues}"
+    # 真接线后（写进角色链）→ 不该再报
+    raw["roles"] = dict(raw.get("roles") or {},
+                        **{"架构·测试": {"chain": ["minimax-3.1-flash", "deepseek-v4.1-flash"]}})
+    yaml.safe_dump(raw, open(tmp, "w", encoding="utf-8"), allow_unicode=True)
+    issues2 = [i for i in spec.audit_roles() if i["reason"] == "alias_unused"]
+    assert not issues2, f"接线后仍报 alias_unused: {issues2}"
+finally:
+    os.environ.pop("MODEL_ROUTING_CONFIG", None); os.unlink(tmp)
+
+# ⑧-4 CLI 真跑
+import subprocess
+out = subprocess.run([sys.executable, "-m", "model_routing.cli", "params"],
+                     capture_output=True, text=True, check=True).stdout
+assert "npc_go" in out and "thinkingLevel" in out, out
+print("  ✅ npc_go 与 .cnb.yml 逐项一致；家族号不误伤；空登记报 alias_unused；接线后自愈；cli params 通")
+PY
+
+echo "---- ⑨ 三档语义：档1 指定 / 档2 与其他角色一样 / 档3 兜底（用户 PR #185） ----"
+python3 - <<'PY'
+import sys; sys.path.insert(0, '.')
+from model_routing import spec
+# 快档角色（开发/进度推手/客服）必须是三档，且档2 与其他角色同一套模型
+for role in ("架构·开发", "架构·进度推手", "市场·客服"):
+    assert spec.is_fast_role(role), f"{role} 未挂快档链"
+    view = spec.tier_view(role)
+    kinds = [t["tier"] for t in view["tiers"]]
+    assert kinds[0] == "fast", (role, kinds)
+    assert "same" in kinds, (role, kinds)
+    same_models = [t["model"] for t in view["tiers"] if t["tier"] == "same"]
+    assert set(same_models).issubset(set(spec.fallback_chain())), (role, same_models)
+    assert spec.last_resort_model(), role
+# 未列出的角色：链上没有任何「指定快档」的档位，全是「和其他角色一样」
+view = spec.tier_view("架构·评审")
+assert spec.is_fast_role("架构·评审") is False, view
+assert all(t["tier"] == "same" for t in view["tiers"]), view
+print("  ✅ 快档角色三档齐备（fast → same → 兜底可解析）；未列出角色纯 same 链")
+PY
+
+echo "---- ⑩ 显性降级：档1 挂 → 降档2，结果与留痕都标 degraded（不静默） ----"
+python3 - <<'PY'
+import sys, os, json; sys.path.insert(0, '.')
+from model_routing import engine
+tf = engine._TRACE_FILE
+before = sum(1 for _ in open(tf, encoding='utf-8')) if os.path.exists(tf) else 0
+def caller(model, s, u, **k):
+    if model == "deepseek-v4.1-flash":   # 默认链首档挂
+        raise RuntimeError("timeout: channel unavailable")
+    return f"ok:{model}"
+res = engine.route_call(caller, system_prompt="s", user_input="u")
+assert res["ok"] and res["model"] == "codebuddy", res
+assert res["degraded"] is True, res
+assert res["from_model"] == "deepseek-v4.1-flash", res
+assert res["used_tier"] == "fallback", res
+lines = [json.loads(l) for l in open(tf, encoding='utf-8').read().splitlines()[before:]]
+assert any(e.get("event") == "model.call.degraded" for e in lines), [e.get("event") for e in lines]
+fails = [e for e in lines if e.get("event") == "model.call.fail"]
+assert fails and fails[0].get("degraded") == 1 and fails[0].get("next") == "codebuddy", fails
+print("  ✅ 降级显性：结果 degraded=True /", res["from_model"], "→", res["model"], "；留痕含 model.call.degraded")
+PY
+
+echo "---- ⑪ 主档直通 → 不带 degraded（不误报降级） ----"
+python3 - <<'PY'
+import sys; sys.path.insert(0, '.')
+from model_routing import engine
+res = engine.route_call(lambda m, s, u, **k: f"ok:{m}", system_prompt="s", user_input="u")
+assert res["ok"] and res["degraded"] is False, res
+assert res["from_model"] is None and res["used_tier"] == "primary", res
+print("  ✅ 主档直通 degraded=False（不误报）")
+PY
+
+echo "---- ⑫ 全链耗尽 → degraded=True 且显式失败（不假装成功） ----"
+python3 - <<'PY'
+import sys; sys.path.insert(0, '.')
+from model_routing import engine
+def caller(m, s, u, **k):
+    raise RuntimeError("timeout: all down")
+res = engine.route_call(caller, system_prompt="s", user_input="u", role="架构·开发")
+assert res["ok"] is False and res["degraded"] is True, res
+assert res["reason"] == "all_channels_unavailable", res
+assert res["attempts"][0]["next"] == res["chain"][1]
+assert res["attempts"][-1]["next"] is None
+print("  ✅ 全挂：degraded=True / 末档 next=None / 显式失败")
+PY
+
+echo "---- ⑬ 后端把降级标出来（llm 层读同一结果，不另立口径） ----"
+python3 - <<'PY'
+import sys; sys.path.insert(0, '.')
+import llm.openai_compat as oc
+import model_routing.spec as spec
+b = oc.OpenAICompatBackend()
+assert b.last_degraded is None
+b.api_key = "x"
+chain = list(spec.role_chain("架构·开发"))
+calls = []
+def fake(model, sp, ui, **k):
+    calls.append(model)
+    raise RuntimeError("timeout: unavailable")
+b._call_model = fake
+# 传输全挂时后端必须显式抛错（不假装成功）；但每跳的降级关系要能被读到
+try:
+    b.call("sp", "ui", role="架构·开发")
+    raise AssertionError("全挂未抛错")
+except RuntimeError as e:
+    assert "degraded=True" in str(e), str(e)
+assert calls == chain, calls
+# 主档挂、第二档通 → 后端记下 last_degraded（编排层/日志可明示，不静默）
+calls.clear(); b.last_degraded = None
+def fake2(model, sp, ui, **k):
+    calls.append(model)
+    if model == chain[0]:
+        raise RuntimeError("timeout: unavailable")
+    return "answer"
+b._call_model = fake2
+out = b.call("sp", "ui", role="架构·开发")
+assert out == "answer", out
+# 后端按 role 解析渠道链：**逐档真的换了模型**（不是每档都打同一个模型）
+# ——这是 PR #185 实测抓到的静默 bug：闭包捕获循环变量导致所有档都调链尾模型。
+assert calls == chain[:2], (calls, chain)
+assert b.last_degraded and b.last_degraded["from_model"] == chain[0], b.last_degraded
+assert b.last_degraded["used_model"] == chain[1]
+print("  ✅ 后端 last_degraded 标出主档→实际档：", b.last_degraded["from_model"], "→", b.last_degraded["used_model"])
+PY
+
+echo "---- ⑭ CLI tiers 真跑（人可读俯瞰三档） ----"
+python3 -m model_routing.cli tiers 架构·开发 >/dev/null && echo "  ✅ cli tiers"
+
+echo "==== ✅ 角色按需指定模型信号灯全绿（14/14 · 含三档语义 + 显性降级） ===="

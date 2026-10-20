@@ -90,41 +90,106 @@ def route_call(caller, system_prompt="", user_input="", policy=None, role=None, 
     caller: 可调用对象 (model, system_prompt, user_input, **kw) -> text
             测试/真实后端均可注入，核心降级逻辑不受传输影响。
     role:   角色名；未指定走通用默认（不指定就默认通用）。
+
+    ★ 显性降级（用户 2026-10-20 PR #185）：
+      降级**不是静默换模型**——每一跳都写 `degraded=1` + `fallback_from` + `next`，
+      结果里带 `degraded/from_model/used_tier`，让调用方一眼看到「本轮不是主档回答的」。
+      全链耗尽时同样如实报 `degraded=True`，不假装成功。
     """
     models = resolve_models(policy, role=role)
     attempts = []
+    from_model = None  # 第一档（用户指定的那一档）原模型，用于显性标注降级来源
     for idx, model in enumerate(models):
         tier = _tier_role(idx)
+        if idx == 0:
+            from_model = model
         try:
             out = caller(model, system_prompt, user_input, **kw)
+            degraded = idx > 0
             rec = record_trace({
                 "event": "model.call.ok",
                 "model": model,
                 "role": tier,
                 "attempt": idx + 1,
                 "chain": models,
+                "degraded": 1 if degraded else 0,
+                "fallback_from": from_model if degraded else None,
             })
+            if degraded:
+                # 显性降级留痕：单独一条，供监控/调用方 grep，无需回看整条链
+                record_trace({
+                    "event": "model.call.degraded",
+                    "model": model,
+                    "role": tier,
+                    "fallback_from": from_model,
+                    "attempt": idx + 1,
+                    "skipped": [a["model"] for a in attempts],
+                })
             return {"ok": True, "model": model, "role": tier,
                     "output": out, "attempts": attempts, "trace": rec,
-                    "chain": models}
+                    "chain": models,
+                    "degraded": degraded,
+                    "from_model": from_model if degraded else None,
+                    "used_tier": tier}
         except Exception as e:  # noqa: BLE001
             unavailable = is_unavailable(e)
+            nxt = models[idx + 1] if idx + 1 < len(models) else None
             attempts.append({"model": model, "role": tier, "error": str(e),
-                             "unavailable": unavailable})
+                             "unavailable": unavailable, "next": nxt})
+            # 显性降级：失败这一跳当场留痕「降去哪」，不留到用户去猜
             record_trace({
                 "event": "model.call.fail",
                 "model": model,
                 "role": tier,
                 "unavailable": unavailable,
                 "error": str(e),
+                "degraded": 1 if nxt else 0,
+                "fallback_from": model if nxt else None,
+                "next": nxt,
             })
             # 当前档不通 → 继续降级到下一档；非「不通」型错误也继续尝试下一档（保可用）
             continue
     record_trace({"event": "model.call.exhausted",
-                  "models": models, "attempts": attempts})
+                  "models": models, "attempts": attempts,
+                  "fallback_from": from_model, "degraded": 1 if len(models) > 1 else 0})
     return {"ok": False, "model": None, "role": None, "output": None,
             "attempts": attempts, "reason": "all_channels_unavailable",
-            "chain": models}
+            "chain": models, "degraded": len(models) > 1, "from_model": from_model,
+            "used_tier": None}
+
+
+def last_degraded():
+    """读留痕判断**最近一次**调用是否发生过降级（供 llm 层把降级标进结果）。
+
+    为什么读留痕而不是让调用方自己判：降级发生在 route_call 内部，调用方只看得到
+    最终文本；若调用方另记一份状态，就会出现「库说降级、实际没降」的两套口径。
+    唯一事实源仍是 model_routing_trace.jsonl。
+    """
+    if not os.path.exists(_TRACE_FILE):
+        return None
+    try:
+        last = None
+        with open(_TRACE_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    last = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+        if not last:
+            return None
+        ev = last.get("event")
+        if ev in ("model.call.ok", "model.call.exhausted"):
+            return {"degraded": bool(last.get("degraded")),
+                    "model": last.get("model"),
+                    "fallback_from": last.get("fallback_from"),
+                    "chain": last.get("chain") or last.get("models"),
+                    "ts": last.get("ts")}
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 
 def trace_overview():
