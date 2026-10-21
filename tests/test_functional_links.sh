@@ -97,41 +97,50 @@ else
   bad "F1.2 拉取到真实 Issue 数>0 (实际=$ISSUE_COUNT)"
 fi
 
-# 1.3 用真实 Issue 数据，通过生成器自带的解析函数验证声明头可解析
+# F1.3 / F1.4 拆成两件事，不再混为一谈：
+#   F1.3 解析能力（确定性，不受线上 Issue 现状影响）：声明头样本必须解析出模块；
+#        无声明头样本必须解析为空。抓的是「解析器把声明头丢了」这类真 bug。
+#   F1.4 线上覆盖率（信息项，不判红）：统计当前线上有多少 Issue 带声明头。归零通常意味着
+#        open Issue 全是收尾/探针单，是台账真实状态、不是解析链路坏了。此前写成硬断言，
+#        每次收尾清零就必然红一条，长期挂在「pre-existing 红」里被当噪音忽略，反而掩盖真信号。
 if [ -f scripts/generate-dashboard.py ]; then
-  PARSE_OUT="$(python3 - "$REPO" <<'PY'
-import sys, json, importlib.util
-repo = sys.argv[1]
-# 只加载解析逻辑（复用生成器的 fetch/parse 函数），不执行 main
-src = open("scripts/generate-dashboard.py").read()
-# 用 exec 但拦截 main 执行：生成器应有 if __name__=="__main__" 保护
-spec = importlib.util.spec_from_loader("gen", loader=None)
-# 简化：直接用正则解析生成器的 parse_decl 逻辑不可靠，改为加载模块
+  PARSE_OUT="$(python3 - <<'PY'
 import types
+src = open("scripts/generate-dashboard.py").read()
 mod = types.ModuleType("gen")
 mod.__file__ = "scripts/generate-dashboard.py"
-try:
-    exec(compile(src, "scripts/generate-dashboard.py", "exec"), mod.__dict__)
-    issues = mod.fetch_issues()
-    decls = [mod.parse_decl(i.get("body","")) for i in issues]
-    modules = sorted(set(d.get("module") for d in decls if d.get("module")))
-    print("ISSUES=%d MODULES=%d LIST=%s" % (len(issues), len(modules), ",".join(modules)))
-except Exception as e:
-    print("ISSUES=0 MODULES=0 LIST=ERR:%s" % e)
+exec(compile(src, "scripts/generate-dashboard.py", "exec"), mod.__dict__)
+
+d1 = mod.parse_decl("module: hybrid\nmodule_version: v2.0.0\ntype: update\n")
+d2 = mod.parse_decl("协助管理这俩issue和5个pr\n")
+ok_decl = 1 if (d1.get("module") == "hybrid" and d1.get("module_version") == "v2.0.0") else 0
+ok_plain = 1 if not d2.get("module") else 0
+
+issues = mod.fetch_issues() or []
+with_decl, mods = 0, set()
+for i in issues:
+    d = mod.parse_decl(i.get("body", "") or "")
+    if d.get("module"):
+        with_decl += 1
+        mods.add(d["module"])
+print("PARSE_DECL=%d PARSE_PLAIN=%d ISSUES=%d WITH_DECL=%d MODULES=%s"
+      % (ok_decl, ok_plain, len(issues), with_decl, ",".join(sorted(mods))))
 PY
 )"
-  MODS="$(echo "$PARSE_OUT" | grep -oE 'MODULES=[0-9]+' | cut -d= -f2)"
-  MODULE_LIST="$(echo "$PARSE_OUT" | grep -oE 'LIST=.*' | cut -d= -f2)"
-  if [ "${MODS:-0}" -gt 0 ] 2>/dev/null; then
-    ok "F1.3 真实解析 Issue 声明头 (识别 $MODS 个模块)"
+  PARSED="$(echo "$PARSE_OUT" | grep -oE 'PARSE_DECL=[0-9]+' | cut -d= -f2)"
+  PLAIN="$(echo "$PARSE_OUT" | grep -oE 'PARSE_PLAIN=[0-9]+' | cut -d= -f2)"
+  TOTAL_ISSUES="$(echo "$PARSE_OUT" | grep -oE 'ISSUES=[0-9]+' | cut -d= -f2)"
+  WITH_DECL="$(echo "$PARSE_OUT" | grep -oE 'WITH_DECL=[0-9]+' | cut -d= -f2)"
+  MODULE_LIST="$(echo "$PARSE_OUT" | grep -oE 'MODULES=.*' | cut -d= -f2-)"
+
+  if [ "${PARSED:-0}" = "1" ] && [ "${PLAIN:-0}" = "1" ]; then
+    ok "F1.3 声明头解析器可解析（有声明→出模块，无声明→解析为空）"
   else
-    bad "F1.3 真实解析 Issue 声明头 (识别 ${MODS:-0} 个模块)"
+    bad "F1.3 声明头解析器异常 (PARSE_DECL=${PARSED:-0} PARSE_PLAIN=${PLAIN:-0} 原始=$PARSE_OUT)"
   fi
-  if [ "${MODS:-0}" -gt 0 ] 2>/dev/null && [ -n "$MODULE_LIST" ]; then
-    ok "F1.4 解析出模块声明头（实际=$MODULE_LIST）"
-  else
-    bad "F1.4 解析出模块声明头 (实际=${MODULE_LIST:-空})"
-  fi
+
+  echo "  i  F1.4 线上 Issue 声明头覆盖：${WITH_DECL:-0}/${TOTAL_ISSUES:-0} 条带声明头（模块=${MODULE_LIST:-无}）"
+  echo "     —— 归零意味着当前 open Issue 都是无声明头的收尾/探针单，不是解析链路故障"
 else
   bad "F1.3 生成器脚本缺失，无法验证数据获取"
 fi
@@ -170,14 +179,42 @@ if [ -f scripts/generate-dashboard.py ]; then
   else
     bad "F2.1 生成器真实运行成功 (rc=$GEN_RC)"
   fi
-  # 校验产物完整（标题/模块行/真实 Issue 链接），保证「跑通」≠「产出空壳」
-  if [ -s "$TMPDIR/DASHBOARD.md" ] \
-     && grep -q '模块版本演进看板' "$TMPDIR/DASHBOARD.md" \
-     && grep -q '模块 `' "$TMPDIR/DASHBOARD.md" \
-     && grep -qE 'issues/[0-9]+' "$TMPDIR/DASHBOARD.md"; then
-    ok "F2.1b 生成产物完整（标题/模块行/真实 Issue 链接）"
+  # 结构断言 + 「声明头→看板」链路真实可用性。
+  # 不拿「线上此刻是否恰好有带声明头的 Issue」当断言（与 F1.4 同理，那取决于台账现状）：
+  # 归零时用一条已知带声明头的样本**自证**渲染链路没断，线上有数据时再用线上数据复核。
+  if [ -s "$TMPDIR/DASHBOARD.md" ] && grep -q '模块版本演进看板' "$TMPDIR/DASHBOARD.md"; then
+    ok "F2.1b 生成产物含看板结构"
   else
-    bad "F2.1b 生成产物不完整"
+    bad "F2.1b 生成产物缺失看板结构"
+  fi
+  if [ "${WITH_DECL:-0}" -gt 0 ] 2>/dev/null; then
+    if grep -q '模块 `' "$TMPDIR/DASHBOARD.md" && grep -qE 'issues/[0-9]+' "$TMPDIR/DASHBOARD.md"; then
+      ok "F2.1c 线上声明头已渲染为模块行+Issue 链接（${WITH_DECL} 条）"
+    else
+      bad "F2.1c 线上有 ${WITH_DECL} 条声明头，但看板无模块行/Issue 链接"
+    fi
+  else
+    SELF_RC=0
+    python3 - <<'PY' > "$TMPDIR/selfcheck.log" 2>&1 || SELF_RC=$?
+import types
+src = open("scripts/generate-dashboard.py").read()
+mod = types.ModuleType("gen")
+mod.__file__ = "scripts/generate-dashboard.py"
+exec(compile(src, "scripts/generate-dashboard.py", "exec"), mod.__dict__)
+fake = [{"number": "1", "state": "open", "title": "自证样本",
+         "body": "module: selfcheck-sample\nmodule_version: v0.0.1\ntype: init\n"}]
+mod.fetch_issues = lambda: fake
+content, _issues, _by_module = mod.render()
+ok = ("模块 `selfcheck-sample`" in content) and ("issues/1" in content)
+print("SELF_RENDER_OK" if ok else "SELF_RENDER_FAIL")
+raise SystemExit(0 if ok else 1)
+PY
+    if [ $SELF_RC -eq 0 ]; then
+      ok "F2.1c 声明头→看板链路自证通过（线上暂无带声明头 Issue，用样本证明渲染链路未断）"
+    else
+      bad "F2.1c 声明头→看板链路自证失败（见 $TMPDIR/selfcheck.log）"
+      cat "$TMPDIR/selfcheck.log" 2>/dev/null | head -5
+    fi
   fi
   AFTER="$(cat docs/DASHBOARD.md | md5sum | awk '{print $1}')"
   if [ "$BEFORE" = "$AFTER" ]; then
