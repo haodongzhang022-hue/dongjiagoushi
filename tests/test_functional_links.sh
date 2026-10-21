@@ -160,16 +160,31 @@ done
 if [ "${CNB_AVAILABLE:-0}" = "1" ]; then
 
 if [ -f scripts/generate-dashboard.py ]; then
+  # ★ 写临时文件而非仓库内 docs/DASHBOARD.md：校验「生成器能跑通并产出完整看板」，
+  #   但不允许测试改脏工作区（此前直接覆写仓库文件，会让 `git status` 出现假改并掩盖真实 diff）。
   BEFORE="$(cat docs/DASHBOARD.md 2>/dev/null | md5sum | awk '{print $1}')"
   GEN_RC=0
-  timeout 120 python3 scripts/generate-dashboard.py > "$TMPDIR/gen.log" 2>&1 || GEN_RC=$?
+  timeout 120 python3 scripts/generate-dashboard.py --out "$TMPDIR/DASHBOARD.md" > "$TMPDIR/gen.log" 2>&1 || GEN_RC=$?
   if [ $GEN_RC -eq 0 ] && grep -q "ok" "$TMPDIR/gen.log"; then
     ok "F2.1 生成器真实运行成功 (rc=$GEN_RC)"
   else
     bad "F2.1 生成器真实运行成功 (rc=$GEN_RC)"
   fi
+  # 校验产物完整（标题/模块行/真实 Issue 链接），保证「跑通」≠「产出空壳」
+  if [ -s "$TMPDIR/DASHBOARD.md" ] \
+     && grep -q '模块版本演进看板' "$TMPDIR/DASHBOARD.md" \
+     && grep -q '模块 `' "$TMPDIR/DASHBOARD.md" \
+     && grep -qE 'issues/[0-9]+' "$TMPDIR/DASHBOARD.md"; then
+    ok "F2.1b 生成产物完整（标题/模块行/真实 Issue 链接）"
+  else
+    bad "F2.1b 生成产物不完整"
+  fi
   AFTER="$(cat docs/DASHBOARD.md | md5sum | awk '{print $1}')"
-  echo "  ℹ️ F2.8 生成前后 DASHBOARD.md md5: ${BEFORE:0:8}→${AFTER:0:8}（无 diff=看板已与真实数据一致）"
+  if [ "$BEFORE" = "$AFTER" ]; then
+    ok "F2.8 测试未改动仓库内 DASHBOARD.md"
+  else
+    bad "F2.8 测试污染了仓库内 DASHBOARD.md"
+  fi
 else
   bad "F2.1 生成器脚本缺失，无法验证看板呈现"
 fi

@@ -21,15 +21,21 @@ assert '*default_chain' in seg or '<<' in seg or re.search(r'fallback_chain:\s*\
 print(f"  ✅ 两链一致: {fb} | fallback_chain 引用 default.chain（无重复字面量）")
 PY
 
-echo "---- ② 无空壳链：显式列出的角色链不全等于 default（空壳已撤销） ----"
+echo "---- ② 无空壳链：显式列出的角色必须「叫得出为什么在 roles 里」 ----"
 python3 - <<'PY'
 import os, sys; sys.path.insert(0, '.')
 from model_routing import spec
+# 「空壳」定义（Issue #199 拍板后收紧）：显式写进 roles，但链既不是快档锚定、
+# 又不比 default 链多出任何模型 —— 纯粹复制 default 却不承担任何语义，才是空壳。
+# 快档角色（档序锚定 fast→same→last_resort）不算空壳：它显式承担「三档语义」契约，
+# 由 is_fast_role 可判定；这在 #199 把第一优先定为 default 链首后尤其重要。
 ov = spec.role_overrides()
-shells = [r for r in ov if ov[r].get('chain') == list(spec.default_chain())]
-assert len(shells) < len(ov), f"仍有空壳链: {shells}"
-assert shells == [], f"存在与 default 逐字相同的空壳链: {shells}"
-print(f"  ✅ 显式角色 {len(ov)} 个，空壳链 0 个（差异化真实生效）")
+dflt = set(spec.default_chain())
+shells = [r for r in ov
+          if not spec.is_fast_role(r)
+          and set(ov[r].get('chain') or []) <= dflt]
+assert shells == [], f"存在空壳链（既不锚定快档又不引入新模型）: {shells}"
+print(f"  ✅ 显式角色 {len(ov)} 个，空壳链 0 个；快档锚定 {[r for r in ov if spec.is_fast_role(r)]}")
 PY
 
 echo "---- ③ 按角色指定真实生效（差异化角色主档异于默认） ----"
@@ -37,17 +43,22 @@ python3 - <<'PY'
 import os, sys; sys.path.insert(0, '.')
 from model_routing import spec
 assert spec.default_chain()[0] == "deepseek-v4.1-flash"
-# 差异化角色：进度推手 / 客服 主档应为 glm-5.3-flash
-assert spec.role_chain("架构·进度推手")[0] == "glm-5.3-flash", spec.role_chain("架构·进度推手")
-assert spec.role_chain("市场·客服")[0] == "glm-5.3-flash", spec.role_chain("市场·客服")
+# 差异化角色：进度推手 / 客服 主档 = Issue #199 拍板的快档第一优先 deepseek-v4.1-flash
+assert spec.role_chain("架构·进度推手")[0] == "deepseek-v4.1-flash", spec.role_chain("架构·进度推手")
+assert spec.role_chain("市场·客服")[0] == "deepseek-v4.1-flash", spec.role_chain("市场·客服")
 assert spec.is_role_specified("架构·进度推手") is True
 # 开发角色本轮也挂了三档（用户 PR #185：快档里要用上和其他角色一样的模型）
-assert spec.role_chain("架构·开发")[0] == "glm-5.3-flash", spec.role_chain("架构·开发")
+assert spec.role_chain("架构·开发")[0] == "deepseek-v4.1-flash", spec.role_chain("架构·开发")
+# 快档角色不得自排档序：档序必须与 Issue #199 拍板一致（deepseek→minimax→glm 末位兜底）
+for _r in ("架构·开发", "架构·进度推手", "市场·客服"):
+    _c = spec.role_chain(_r)
+    assert _c[0] == "deepseek-v4.1-flash" and _c[1] == "minimax-3.1-flash", (_r, _c)
+    assert _c[-1] == "glm-5.3-flash", (_r, _c)
 assert spec.is_role_specified("架构·开发") is True
 # 未显式指定的角色仍自然走 fallback（预期行为，不算空壳）
 assert spec.is_role_specified("架构·评审") is False
 assert list(spec.role_chain("架构·评审")) == list(spec.fallback_chain())
-print("  ✅ 快档角色主档=glm-5.3-flash；未列出角色（架构·评审）走 fallback（specified=False）")
+print("  ✅ 快档角色主档=deepseek-v4.1-flash（档序服从 #199 拍板）；未列出角色（架构·评审）走 fallback（specified=False）")
 PY
 
 echo "---- ④ 角色别名归一（全称 ↔ 短名，双向一致） ----"
@@ -60,7 +71,7 @@ assert spec.role_chain("进度推手") == spec.role_chain("架构·进度推手"
 assert spec.is_role_specified("进度推手") == spec.is_role_specified("架构·进度推手")
 # 快档角色：全称与短名落到同一条三档链（无断裂）
 assert tuple(spec.role_chain("开发")) == tuple(spec.role_chain("架构·开发"))
-assert spec.role_chain("开发")[0] == "glm-5.3-flash"
+assert spec.role_chain("开发")[0] == "deepseek-v4.1-flash"
 # 未列出角色：全称与短名都走 fallback，仍一致（无断裂）
 assert tuple(spec.role_chain("测试")) == tuple(spec.role_chain("架构·测试")) == tuple(spec.fallback_chain())
 print("  ✅ 进度推手==架构·进度推手；开发==架构·开发（短名不断裂）")

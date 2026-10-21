@@ -44,7 +44,7 @@ def _monitor():
     return CostMonitor()
 
 
-# 内建：仓库全部 CPU 密集测试脚本（云端 37 个中的纯 CPU 部分）
+# 内建：仓库全部 CPU 密集测试脚本（清单长度即总数，测试按实际长度动态断言）
 BUILTIN_CPU_SCRIPTS = [
     "local-agent/tests/test_router_integration.sh",
     "local-agent/tests/test_scale.sh",

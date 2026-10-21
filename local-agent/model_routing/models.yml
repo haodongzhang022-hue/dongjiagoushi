@@ -80,11 +80,13 @@ role_aliases:
 #    写规则：chain 第一档是主档；后面是降级顺序。
 #    未在此列出的角色 → 走 fallback_chain（= default.chain），不在配置里堆空壳链。
 #    当前差异化的角色（依据：该岗一轮吞吐的 token 规模 / 任务回合频率）：
-#      - 进度推手 / 客服：高频短答、不需长上下文 → 快档 glm-5.3-flash 优先；
-#      - 开发：主力读写码、回合最多，要的是「回合快」→ 同样挂三档。
+#      - 进度推手 / 客服：高频短答、不需长上下文 → 挂快档三档；
+#      - 开发：主力读写码、回合最多，要的是「回合快」→ 同样挂快档三档。
+#    ★ 档序统一服从 Issue #199 人类拍板：deepseek-v4.1-flash → minimax-3.1-flash
+#      → glm-5.3-flash（快档角色不得自排档序，与 default 链同序）。
 #
 #    三档语义（用户 2026-10-20 PR #185 定调 · Issue #199 确认快档档序；引擎 spec.tier_view 可读）：
-#      档1 **指定**（tier=fast）——直指快档模型。真实快档 ID 待人类确认，
+#      档1 **指定**（tier=fast）——直指快档第一优先（deepseek-v4.1-flash，Issue #199 拍板）。真实快档 ID 待人类确认，
 #            确认后登记 alias、再改这一处即全角色生效（先 `probe` 验真，未验真不登记，
 #            防 #177 式 stage error）；
 #      档2 **和其他角色一样**（tier=same）——不另造名字，直接用 `fallback_chain`
@@ -95,12 +97,12 @@ role_aliases:
 #      degraded=1, fallback_from, next）；llm 层读同一份留痕判「本轮降没降级」，
 #      降级就把 `degraded` 标进结果并留痕告警——绝不静默换模型。
 roles:
-  "架构·进度推手": { chain: [glm-5.3-flash, deepseek-v4.1-flash, minimax-3.1-flash, codebuddy, glm-5.3-flash] }  # 打标/百分比，短任务为主，快档优先
-  "市场·客服":     { chain: [glm-5.3-flash, deepseek-v4.1-flash, minimax-3.1-flash, codebuddy, glm-5.3-flash] }  # 高频短答，快档优先
+  "架构·进度推手": { chain: [deepseek-v4.1-flash, minimax-3.1-flash, codebuddy, glm-5.3-flash] }  # 打标/百分比，短任务为主，快档优先
+  "市场·客服":     { chain: [deepseek-v4.1-flash, minimax-3.1-flash, codebuddy, glm-5.3-flash] }  # 高频短答，快档优先
 
   # 快档角色（用户要求「最起码快档里能用上和其他几个角色一样的模型」）：
-  #   chain = 档1 指定(glm-5.3-flash) → 档2 与其他角色一样(default.chain) → 档3 兜底(last_resort_model)
-  "架构·开发":     { chain: [glm-5.3-flash, deepseek-v4.1-flash, minimax-3.1-flash, codebuddy, glm-5.3-flash] }  # 读写码主力，回合多、要回合快
+  #   chain = 档1 指定(deepseek-v4.1-flash) → 档2 与其他角色一样(default.chain) → 档3 兜底(last_resort_model)
+  "架构·开发":     { chain: [deepseek-v4.1-flash, minimax-3.1-flash, codebuddy, glm-5.3-flash] }  # 读写码主力，回合多、要回合快
 
 # ⑥ 渠道不通的判定信号（触发降级）
 unavailable_signals:

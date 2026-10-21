@@ -203,18 +203,18 @@ assert top_share >= 0, '占比应为正'
 print(f'顶agent占比={top_share:.1%}, 异常数={len(anoms)}')
 print('imbalance 工作量口径通过')
 "
-assert_python "project 下钻统一 key 不再查空" '
-import sys, os; sys.path.insert(0, "local-agent")
-os.environ["DB_PATH"] = "$TEST_DB"
+assert_python "project 下钻统一 key 不再查空" "
+import sys, os; sys.path.insert(0, 'local-agent')
+os.environ['DB_PATH'] = '$TEST_DB'
 from data import schema, db; schema.init_schema()
-db.execute("INSERT INTO messages (msg_id, topic, from_agent, to_agent, payload, status, ts) VALUES (?,?,?,?,?,?,?)",
-           ("pdx", "PROJ-A", "ag-1", "ag-2", "hi", "sent", "2026-08-28 10:00:00"))
+db.execute('INSERT INTO messages (msg_id, topic, from_agent, to_agent, payload, status, ts) VALUES (?,?,?,?,?,?,?)',
+           ('pdx', 'PROJ-A', 'ag-1', 'ag-2', 'hi', 'sent', '2026-08-28 10:00:00'))
 from monitor_bi.stats import drill_down
-items = drill_down("project", "PROJ-A")
-assert len(items) > 0, "project 下钻应查到 message 明细"
-assert items[0]["kind"] == "message", "下钻应为 message 明细"
-print("project 下钻统一 key 通过")
-'
+items = drill_down('project', 'PROJ-A')
+assert len(items) > 0, 'project 下钻应查到 message 明细'
+assert items[0]['kind'] == 'message', '下钻应为 message 明细'
+print('project 下钻统一 key 通过')
+"
 
 # T5 CLI
 echo "--- T5 CLI 入口 ---"
