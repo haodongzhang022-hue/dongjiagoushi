@@ -66,13 +66,21 @@ API_FACES = [
      "note": "ctx.tools.register(defineTool({...})) 为工具注册唯一入口"},
     {"id": "patch-overlay", "since": "0.1.6-alpha.1",
      "note": "有序 patch overlay（--patch / cordis.patch.yml）按 id 定位替换 config"},
+    {"id": "output-render", "since": "0.2.0-alpha.1",
+     "note": "defineTool 的 output.render(args, value) 成为必调渲染钩子：缺它定义仍能构造，"
+             "但每次调用都抛 TypeError（dsh-tools 0.0.1-rc.1 实测）——必须显式提供"},
+    {"id": "bundles-manifest", "since": "0.2.0-rc.1",
+     "note": "profile 由 dsh.profile.bundles 有序组合包 + patch 层叠加（dsh 0.2.x 契约）"},
 ]
 
 # 测试矩阵（适配目标的"当前"值）
 DSH_COMPAT = {
     "min_version": "0.1.5-rc.1",
-    "target_version": "0.1.6-alpha.2",
-    "tested_against": ["0.1.6-alpha.2", "0.1.5-rc.2", "0.1.5-rc.1"],
+    "target_version": "0.2.1-rc.2",
+    # ★ 2026-10-21（Issue #202 收尾）只用真实 dsh-tools 0.0.1-rc.1 实测过 output.render
+    #   必调面；0.1.x 一代没拿真实包跑过，故不再列「已测」（保留在 minVersion 之上，
+    #   走降级模式 + 版本闸门自检），避免再次出现"测试全绿、真实运行时一用就崩"。
+    "tested_against": ["0.2.1-rc.2", "0.2.1-alpha.5"],
     "required_faces": ["cordis-all-plugin", "defineTool", "profile-bundle"],
 }
 
@@ -108,7 +116,8 @@ def check_version(version):
     if version not in DSH_COMPAT["tested_against"]:
         return {"state": "degrade", "version": version, "faces": faces,
                 "missing_faces": missing,
-                "message": "dsh %s 具备所需 API 面但未在测试矩阵内，按降级模式加载" % version}
+                "message": "dsh %s 具备所需 API 面但未在测试矩阵内（已实测：%s），按降级模式加载"
+                   % (version, ", ".join(DSH_COMPAT["tested_against"]))}
     return {"state": "ok", "version": version, "faces": faces, "missing_faces": missing,
             "message": "dsh %s 兼容（API 面：%s）" % (version, ", ".join(faces))}
 
@@ -123,7 +132,8 @@ def compat_matrix():
         "required_faces": DSH_COMPAT["required_faces"],
         "api_faces": API_FACES,
         "matrix": {v: check_version(v)["state"]
-                   for v in ["0.1.6-alpha.2", "0.1.5-rc.2", "0.1.5-rc.1",
+                   for v in ["0.2.1-rc.2", "0.2.1-alpha.5", "0.1.6-alpha.2",
+                             "0.1.5-rc.2", "0.1.5-rc.1",
                              "0.1.3-alpha.2", "0.1.2-rc.1", "0.0.1-rc.1"]},
     }
 

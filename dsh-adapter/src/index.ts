@@ -50,6 +50,27 @@ export interface AdapterConfig {
 }
 
 /**
+ * 纯值 → ContentBlock[] 渲染（dsh-tools ≥0.2 的 `output.render` **必调**钩子）。
+ *
+ * 为什么必须显式给：真实 `@deepseek-ai/dsh-tools` 的 `defineTool` 只在构造时
+ * 存引用、不校验，`output.render` 缺失时定义照样"注册成功"，但**模型每次调用
+ * 都会抛 `TypeError: d.output.render is not a function`**——一种典型的"装上了
+ * 但一用就崩"的静默失效。仓库自带的离线桩不校验这一点，所以旧测试全绿也漏了它。
+ *
+ * @param _args 本次调用参数（当前不参与渲染，保持纯函数可重放）。
+ * @param value 已按 output.schema 校验过的规范值。
+ */
+function renderValueContent(_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? null, null, 2)
+  return [{ type: 'text', text }]
+}
+
+/** 桥接工具的统一参数面（单一事实源，工具注册与文档共用）。 */
+const BRIDGE_PARAMETERS = {
+  args: { type: 'array' as const, description: '透传给 local-agent 子命令的位置参数' },
+}
+
+/**
  * Cordis 函数插件入口。
  * @param ctx 上下文；`ctx.tools` 已由 inject 保证就绪。
  * @param config 插件配置。
@@ -73,6 +94,16 @@ export function apply(ctx: Context, config: AdapterConfig = {}): void {
     throw new Error(`[${name}] dsh 版本不兼容：${compat.message}`)
   }
 
+  // ── 1' 输出渲染面自检（真实 dsh-tools ≥0.2 才有这个必调钩子）──
+  // 缺该面时工具**能注册但一调用就崩**，属于最难发现的静默失效；
+  // 这里主动喊出来（不阻断加载：老版本运行时确实没有这个面，工具仍可用）。
+  if (!compat.faces.includes('output-render')) {
+    ctx.logger?.warn?.(
+      `[${name}] 当前运行时（${detected}）无 output-render 面：`
+      + '工具仍按旧契约注册，若后续升级到 dsh ≥0.2 请回归本插件（output.render 必调）',
+    )
+  }
+
   const root = resolveRoot(bridgeOpts)
 
   // ── 2. 注册 compat 自检工具（无需 Python，纯 TS 判定）──
@@ -82,7 +113,7 @@ export function apply(ctx: Context, config: AdapterConfig = {}): void {
     parameters: {
       version: { type: 'string', description: '待检查的 dsh 版本；缺省用检测值' },
     },
-    output: { schema: { type: 'json' } },
+    output: { schema: { type: 'json' }, render: renderValueContent },
     async execute(args: { version?: string }) {
       const v = args.version || detected
       const r = checkVersion(v)
@@ -105,10 +136,8 @@ export function apply(ctx: Context, config: AdapterConfig = {}): void {
     ctx.tools.register(defineTool({
       name: cap.tool,
       description: `${cap.description}（桥接 local-agent · ${cap.module}）`,
-      parameters: {
-        args: { type: 'array', description: '透传给 local-agent 子命令的位置参数' },
-      },
-      output: { schema: { type: 'json' } },
+      parameters: BRIDGE_PARAMETERS,
+      output: { schema: { type: 'json' }, render: renderValueContent },
       async execute(args: { args?: string[] }) {
         const argv = ['-m', cap.module, ...(args.args ?? [])]
         const res = await callLocalAgent<unknown>(argv, { ...bridgeOpts, root })

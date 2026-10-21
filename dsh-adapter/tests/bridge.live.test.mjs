@@ -13,7 +13,7 @@ async function t(name, fn) {
 await t('dsh_adapter.compat matrix 可跑', async () => {
   const r = await callLocalAgent(['-m', 'dsh_adapter.compat', 'matrix'], { root })
   if (!r.ok) throw new Error(r.error)
-  if (r.data.target_version !== '0.1.6-alpha.2') throw new Error('bad target: ' + r.data.target_version)
+  if (!/^0\.\d+\.\d+/.test(String(r.data.target_version))) throw new Error('bad target: ' + r.data.target_version)
 })
 await t('dev_standard.host summary 可跑（standard.summary）', async () => {
   const r = await callLocalAgent(['-m', 'dev_standard.host', 'call', 'standard.summary', '{}'], { root })

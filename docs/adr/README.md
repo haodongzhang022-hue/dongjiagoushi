@@ -51,6 +51,7 @@
 | [0016-模型三档语义+降级显性](0016-model-fast-tier-and-explicit-degrade.md) | 模型按「档1 指定 / 档2 与其他角色一样 / 档3 兜底」配置，降级必须留痕可见（不静默换模型） | Accepted |
 | [0017-快档档序落定+兜底归glm](0017-model-fast-tier-ordering.md) | 快档档序 deepseek→minimax→codebuddy→glm 由人类拍板；兜底由 AI 代选的 claude 改为 glm-5.3-flash；alias 仍留空（未验真不登记） | Accepted |
 | [0018-快档角色档序对齐](0018-fast-role-tier-order-alignment.md) | 快档角色档序服从人类拍板（补齐 0017 未落到 roles 的缺口）；快档语义=锚定档序非另排一套 | Accepted |
+| [0019-dsh适配面以真实包实测为准](0019-dsh-output-render-required.md) | output.render 为必调钩子，每个工具显式提供纯函数 render；适配面只认真实包实测，离线桩不得冒充通过 | Accepted |
 
 ## 维护纪律
 

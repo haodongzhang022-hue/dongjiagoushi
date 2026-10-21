@@ -110,6 +110,17 @@ export const API_FACES: ApiFace[] = [
     since: '0.1.6-alpha.1',
     note: '有序 patch overlay（--patch / cordis.patch.yml）按 id 定位并替换条目 config',
   },
+  {
+    id: 'output-render',
+    since: '0.2.0-alpha.1',
+    note: "defineTool 的 output.render(args, value) 成为**必调**渲染钩子：缺它定义仍能构造，"
+      + "但每次调用都抛 TypeError（dsh-tools 0.0.1-rc.1 实测）——必须显式提供",
+  },
+  {
+    id: 'bundles-manifest',
+    since: '0.2.0-rc.1',
+    note: 'profile 由 dsh.profile.bundles 有序组合包 + patch 层叠加（dsh 0.2.x 契约）',
+  },
 ]
 
 /** 本插件对 DSH 的最低要求与测试矩阵（唯一事实源）。 */
@@ -117,9 +128,14 @@ export const DSH_COMPAT = {
   /** 最低可用版本（低于此判 incompatible）。 */
   minVersion: '0.1.5-rc.1',
   /** 优先适配的最新版本（适配目标的"当前"值）。 */
-  targetVersion: '0.1.6-alpha.2',
-  /** 已实测/声明兼容的版本清单。 */
-  testedAgainst: ['0.1.6-alpha.2', '0.1.5-rc.2', '0.1.5-rc.1'],
+  targetVersion: '0.2.1-rc.2',
+  /**
+   * 已实测/声明兼容的版本清单。
+   * ★ 2026-10-21（Issue #202 收尾）只用**真实** dsh-tools 0.0.1-rc.1 实测过
+   *   output.render 必调面；0.1.x 一代未用真实包跑过，故不再列为"已测"，
+   *   只保留在 minVersion 之上（降级模式加载 + 版本闸门自检）。
+   */
+  testedAgainst: ['0.2.1-rc.2', '0.2.1-alpha.5'],
   /** 本插件要求的 API 面（缺任一即不完整）。 */
   requiredFaces: ['cordis-all-plugin', 'defineTool', 'profile-bundle'],
 } as const
@@ -198,7 +214,7 @@ export function checkVersion(version: string): CompatReport {
       parsed,
       faces,
       missingFaces,
-      message: `dsh ${version} 具备所需 API 面但未在测试矩阵内（已测：${DSH_COMPAT.testedAgainst.join(', ')}），按降级模式加载，请回归`,
+      message: `dsh ${version} 具备所需 API 面但未在测试矩阵内（已实测：${DSH_COMPAT.testedAgainst.join(', ')}），按降级模式加载，请回归`,
     }
   }
   return {

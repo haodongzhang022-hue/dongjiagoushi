@@ -91,7 +91,7 @@ printf '%s' "$PKG" >/dev/null
 if python3 -c "
 import sys; sys.path.insert(0,'local-agent')
 from dsh_adapter.compat import check_version
-assert check_version('0.1.6-alpha.2')['state'] == 'ok', '新版必须兼容'
+assert check_version('0.2.1-rc.2')['state'] == 'ok', '新版必须兼容'
 assert check_version('0.1.2-rc.1')['state'] == 'incompatible', '旧版必须 incompatible'
 assert check_version('garbage-ver')['state'] == 'incompatible', '乱版必须显式失败'
 assert check_version('0.1.4-rc.1')['state'] == 'incompatible', '缺必需 API 面必须 incompatible'
