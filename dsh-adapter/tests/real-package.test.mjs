@@ -32,6 +32,11 @@ const version = realToolsVersion()
 if (!version) {
   console.log('[dsh-adapter/real-package] SKIP 未安装真实 @deepseek-ai/dsh-tools（显式跳过，不假装通过）')
   console.log('  提示：npm i -D @deepseek-ai/dsh-tools  后重跑')
+  // 收尾行统一为 `pass=N fail=0` 形态（与 compat/plugin/bundle 一致）：
+  // 调用方按 `tail -1 | grep -q 'fail=0'` 判定，SKIP 若不打印收尾行会被误判成
+  // 红（CI 无 dsh-tools 时必然 SKIP）。SKIP 不等于通过 —— 是否真跑过由
+  // 首行 SKIP 标记 + 本行 `pass=0` 同时暴露，日志里一眼可见。
+  console.log('\n[dsh-adapter/real-package] pass=0 fail=0（SKIP：未跑真实包，仅离线可证部分）')
   process.exit(0)
 }
 

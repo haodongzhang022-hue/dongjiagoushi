@@ -24,7 +24,12 @@ DSH_DIR="$ROOT/../dsh-adapter"
 
 pass=0; fail=0
 t() { local d="$1"; shift; _last_item="$d"; if eval "$*" >/tmp/dshad_out.txt 2>&1; then
+  # t() 把整项输出重定向到 /tmp/dshad_out.txt（保持信号灯干净），但"没真跑"
+  # 的证据就在被吞掉的输出里（SKIP 首行 + pass=0）——绿项也回显它，否则
+  # 一眼看去是绿的、实际一条真实包断言都没跑（假绿）。这里把 SKIP/pass=0
+  # 的首行一并回显；正常项的收尾行（pass=N fail=0）不刷屏，跳过。
   echo "  OK $d"; pass=$((pass+1))
+  grep -q 'SKIP\|pass=0 ' /tmp/dshad_out.txt 2>/dev/null && sed -n '1,2p' /tmp/dshad_out.txt || true
 else
   echo "  XX $d"; cat /tmp/dshad_out.txt; fail=$((fail+1))
 fi }
@@ -104,7 +109,12 @@ if [ "$NODE_TS_READY" != "1" ]; then
 elif [ -e "$DSH_DIR/node_modules/@deepseek-ai/dsh-tools" ]; then
   t "桥接实际调用（dsh_adapter/dev_standard/relay 真跑）" "node --experimental-strip-types '$DSH_DIR/tests/bridge.live.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "真实 defineTool 装载探针（7 工具注册）" "node --experimental-strip-types '$DSH_DIR/tests/real-load.probe.mjs' | tail -1 | grep -q 'REAL-LOAD-OK'"
-  t "真实包装载测试（output.render 必调面）" "node --experimental-strip-types '$DSH_DIR/tests/real-package.test.mjs' | tail -1 | grep -q 'fail=0'"
+  # 判据：收尾行 pass=/fail= 且 fail=0。**未装真实包时该测试自体 SKIP
+  # （pass=0 fail=0 + 首行 SKIP 标记），此处据此亮灯但显式喊出"没真跑"**，
+  # 不把「跳过」当「失败」（CI 未装 dsh-tools 时曾经全红），也不把跳过当
+  # 「真实包装载通过」——真跑证据由首行 SKIP 缺席给出。
+  t "真实包装载测试（output.render 必调面；未装真实包则 SKIP ·非红且不冒充通过）" \
+    "node --experimental-strip-types '$DSH_DIR/tests/real-package.test.mjs' > /tmp/dshad_realpkg.txt 2>&1 || { cat /tmp/dshad_realpkg.txt; false; }; if grep -q 'SKIP' /tmp/dshad_realpkg.txt; then sed -n '1,2p' /tmp/dshad_realpkg.txt; else grep 'fail=0' /tmp/dshad_realpkg.txt; fi"
 else
   echo "  -- 未链接真实 dsh，跳过真实装载探针；桥接实跑仍验证"
   echo "  !! 注意：离线桩不校验 output.render，真实 dsh 一调用即 TypeError（Issue #202）。" 
