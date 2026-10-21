@@ -83,12 +83,12 @@ python3 -m model_routing.cli roles      # 逐角色实际生效主档 + specifie
 
 信号灯：`bash tests/test_model_role_assign.sh`（7 组，含「两链一致」「摘掉短名别名 → 审计立刻报红」反向验证）。
 
-**真正差异化的依据**（只列确实不同的，不堆空壳）：
+**快档锚定角色**（档序服从 Issue #199 拍板，不自排；不堆空壳）：
 
 | 角色 | 主档 | 理由 |
 |---|---|---|
-| 架构·进度推手 / 市场·客服 | `glm-5.3-flash`（快档优先） | 打标/百分比/短答，不需长上下文，要回合快 |
-| 架构·开发 | `glm-5.3-flash`（快档优先） | 主力读写码、回合最多，要的是「回合快」（PR #185） |
+| 架构·进度推手 / 市场·客服 | `deepseek-v4.1-flash`（快档锚定） | 打标/百分比/短答，不需长上下文，要回合快 |
+| 架构·开发 | `deepseek-v4.1-flash`（快档锚定） | 主力读写码、回合最多，要的是「回合快」（PR #185） |
 | 其余角色 | 走 `fallback_chain`（= default） | 未显式指定即走默认，specified=False，可审计 |
 
 ### 2.1.1 三档语义 + 显性降级（PR #185 · 用户定调）
@@ -98,7 +98,7 @@ python3 -m model_routing.cli roles      # 逐角色实际生效主档 + specifie
 
 | 档 | 语义 | 配置写法 | 说明 |
 |---|---|---|---|
-| 档1 `fast` | **指定** | `roles[角色].chain[0]` | 该角色专属快档。带版本后缀的真实平台 ID（如 `deepseek-v4.1-flash-1017`）待人类给出原文并 `probe` 验真后登记 `alias`（Issue #199：人类给的是档序优先级，不是 ID 原文） |
+| 档1 `fast` | **指定** | `roles[角色].chain[0]` | 该角色专属快档 = 快档第一优先 `deepseek-v4.1-flash`（Issue #199 拍板，快档角色不自排档序）。带版本后缀的真实平台 ID（如 `deepseek-v4.1-flash-1017`）待人类给出原文并 `probe` 验真后登记 `alias`（Issue #199：人类给的是档序优先级，不是 ID 原文） |
 | 档2 `same` | **和其他角色一样** | chain 里与 `fallback_chain` 同名的档位 | 不另造名字、不重复字面量，直接是通用链那套模型 |
 | 档3 `last_resort` | **现在的兜底** | `last_resort_model`（顶层单值，现为 `glm-5.3-flash`） | `npc:go` 只接受单 model，平台侧一定跑得起来的那一道 |
 

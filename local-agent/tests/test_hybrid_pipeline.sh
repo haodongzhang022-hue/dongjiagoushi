@@ -61,18 +61,23 @@ echo "  cli classify: $R"
 if echo "$R" | grep -q "test_unit_cpu.sh → local"; then ok "CLI classify 纯CPU→local"; else bad "CLI classify local 失败: $R"; fi
 if echo "$R" | grep -q "llm_knowledge_update → cloud"; then ok "CLI classify LLM→cloud"; else bad "CLI classify cloud 失败: $R"; fi
 
-# 6. CLI route（37 脚本全部判 local 或 cloud，总数为 37）
+# 6. CLI route（全部内建脚本均被判 local 或 cloud，数量以清单实际长度为准）
+N_EXPECT=$(python3 -c "import sys;sys.path.insert(0,'$ROOT');from hybrid.cli import BUILTIN_CPU_SCRIPTS as B;print(len(B))")
 R=$(cd "$ROOT" && python3 -m hybrid.cli route | python3 -c "import sys,json;d=json.load(sys.stdin);print(str(d['total'])+'|'+str(d['local'])+'|'+str(d['cloud']))")
-echo "  cli route: $R"
-if [ "$(echo "$R" | cut -d'|' -f1)" = "37" ]; then ok "CLI route 覆盖37个脚本"; else bad "CLI route 数量不符: $R"; fi
+echo "  cli route: $R (expected total=$N_EXPECT)"
+if [ "$(echo "$R" | cut -d'|' -f1)" = "$N_EXPECT" ] && [ "$(( $(echo "$R" | cut -d'|' -f2) + $(echo "$R" | cut -d'|' -f3) ))" = "$N_EXPECT" ]; then
+  ok "CLI route 覆盖全部 $N_EXPECT 个脚本且均归类"
+else
+  bad "CLI route 数量不符: $R (expect total=$N_EXPECT)"
+fi
 
 # 7. CLI all（dry-run 完整链路）
 R=$(cd "$ROOT" && python3 -m hybrid.cli all --dry --timeout 5 | python3 -c "import sys,json;d=json.load(sys.stdin);print(str(d['run']['pass'])+'/'+str(d['run']['total'])+'|'+str(d['sync']['synced']))")
 echo "  cli all: $R"
-if [ "$(echo "$R" | cut -d'|' -f1)" = "37/37" ] && [ "$(echo "$R" | cut -d'|' -f2)" = "True" ]; then
-  ok "CLI all 完整链路 37 全通过 + 同步成功"
+if [ "$(echo "$R" | cut -d'|' -f1)" = "$N_EXPECT/$N_EXPECT" ] && [ "$(echo "$R" | cut -d'|' -f2)" = "True" ]; then
+  ok "CLI all 完整链路 $N_EXPECT 全通过 + 同步成功"
 else
-  bad "CLI all 失败: $R"
+  bad "CLI all 失败: $R (expect $N_EXPECT/$N_EXPECT)"
 fi
 
 # 8. scripts/local-exec.sh 本地执行入口（only cost）

@@ -568,7 +568,16 @@ def render():
 
 
 def main():
-    output_path = os.path.join(os.path.dirname(__file__), "..", "docs", "DASHBOARD.md")
+    # 支持 `--out PATH`：测试/校验场景写临时文件，避免污染仓库里的 docs/DASHBOARD.md
+    # （此前 test_functional_links F2.1 直接跑生成器，会把工作区改脏并掩盖真实 diff）。
+    argv = sys.argv[1:]
+    out_override = None
+    if "--out" in argv:
+        i = argv.index("--out")
+        if i + 1 < len(argv):
+            out_override = argv[i + 1]
+    output_path = out_override or os.path.join(
+        os.path.dirname(__file__), "..", "docs", "DASHBOARD.md")
     content, issues, by_module = render()
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(content)

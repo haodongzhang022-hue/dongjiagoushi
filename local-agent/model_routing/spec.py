@@ -209,12 +209,22 @@ def tier_view(role=None):
 
 
 def is_fast_role(role):
-    """该角色是否挂了「快档优先」的三档链（显式指定且首档异于默认链首）。"""
+    """该角色是否挂了「快档优先」的三档链（显式写进 roles 且档序与快档档序一致）。
+
+    判据（Issue #199 拍板后收紧，确定性、不靠感觉）：
+      ① 角色**显式**写进 `roles`（不是走 fallback 的未列出角色）；
+      ② 其链**首档 = 快档第一优先**（`default_chain()[0]`，即 `deepseek-v4.1-flash`），
+         且**末档 = `last_resort_model`**（`glm-5.3-flash`）。
+    不再用「首档异于默认链首」——人类把第一优先定成了默认链首，那条判据会让
+    快档角色恒为 False（自相矛盾）。现在的语义是「显式锚定快档档序」，而非「另排一套」。
+    """
     if not is_role_specified(role):
         return False
     c = role_chain(role)
     d = default_chain()
-    return bool(c) and bool(d) and c[0] != d[0]
+    if not c or not d:
+        return False
+    return c[0] == d[0] and c[-1] == last_resort_model()
 
 
 def default_chain():
@@ -396,15 +406,29 @@ def audit_roles():
     for role, blk in (_raw().get("roles") or {}).items():
         if not isinstance(blk, dict):
             continue
-        if _chain_of(blk) == tuple(fb):
+        # 空壳判据(Issue #199 拍板后收紧)：链与 fallback 逐字相同 **且** 不承担快档锚定语义。
+        # 快档角色即便档序与 default 同构，也显式承担「档1指定/档2一样/档3兜底」契约
+        # (is_fast_role 可判定)，不算空壳 —— 否则人类把第一优先定为 default 链首后，
+        # 快档角色会被误判为空壳而反复制造删-加抖动。
+        if _chain_of(blk) == tuple(fb) and not is_fast_role(role):
             bad.append({"role": role, "reason": "shell_chain",
-                        "detail": "roles 里显式列出但链与 fallback_chain 逐字相同，属空壳，应删"})
+                        "detail": "roles 里显式列出但链与 fallback_chain 逐字相同且不锚定快档，属空壳，应删"})
     # ②③ 全称 + 短名双体检
     for role in declared:
         rc = list(role_chain(role))
         if not rc:
             bad.append({"role": role, "reason": "empty_chain",
                         "detail": "声明角色解析出空链"})
+            continue
+        # 别名断裂判据（Issue #199 拍板后收紧）：不能只比「短名链 ≠ 规范名链」——
+        # 快档锚定角色的链与 fallback 同构后，短名缺失也会解析出同样的链，
+        # 断了根本比不出来（静默盲区）。改为**直接查 role_aliases 声明**：
+        # 显式写进 roles 的角色，其短名必须真在 role_aliases 里登记，缺即报红。
+        _ra = (_raw().get("role_aliases") or {})
+        _decl = _ra.get(role)
+        if role in (_raw().get("roles") or {}) and not _decl:
+            bad.append({"role": role, "reason": "alias_broken",
+                        "detail": "roles 里显式列出但 role_aliases 未登记短名（短名会静默走 fallback）"})
             continue
         for short in short_names(role):
             sc = list(role_chain(short))
