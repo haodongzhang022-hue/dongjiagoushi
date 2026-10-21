@@ -21,15 +21,20 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.1.5-rc.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0",
     "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true }
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
   },
   "dsh": {
     "bundle": {
@@ -37,8 +42,16 @@
     }
   },
   "dshCompat": {
-    "testedAgainst": ["0.1.6-alpha.2", "0.1.5-rc.2", "0.1.5-rc.1"],
+    "testedAgainst": [
+      "0.2.1-rc.2",
+      "0.2.1-alpha.5"
+    ],
     "minVersion": "0.1.5-rc.1",
-    "apiFace": "cordis-all-plugin+defineTool+dsh.bundle.patch"
+    "targetVersion": "0.2.1-rc.2",
+    "apiFace": "cordis-all-plugin+defineTool+output-render+dsh.bundle.patch"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1"
   }
 }

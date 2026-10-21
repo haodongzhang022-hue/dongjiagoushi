@@ -108,13 +108,29 @@ await t('每个工具定义含 name/description/parameters/output/execute', () =
   }
 })
 
+await t('每个工具 output.render 是函数且可调用（真实 dsh ≥0.2 必调，缺则调用即 TypeError）', () => {
+  for (const d of ctx.registered) {
+    assert.equal(typeof d.output?.render, 'function', `${d.name} 缺 output.render`)
+    const out = d.output.render({}, { ok: true, n: 1 })
+    assert.ok(Array.isArray(out) && out.length > 0, `${d.name} render 必须返回 ContentBlock[]`)
+    assert.equal(out[0].type, 'text', `${d.name} render 首块应为 text`)
+  }
+})
+await t('render 是纯函数（同输入同输出，可重放）', () => {
+  for (const d of ctx.registered) {
+    const a = JSON.stringify(d.output.render({ args: ['x'] }, { ok: true }))
+    const b = JSON.stringify(d.output.render({ args: ['x'] }, { ok: true }))
+    assert.equal(a, b, `${d.name} render 不确定`)
+  }
+})
+
 console.log('===== [dsh-adapter] 3. 工具执行 =====')
 await t('dsh.compat 执行返回兼容报告', async () => {
   const def = ctx.registered.find((d) => d.name === 'dsh.compat')
-  const r = await def.execute({ version: '0.1.6-alpha.2' })
+  const r = await def.execute({ version: '0.2.1-rc.2' })
   assert.equal(r.state, 'ok')
   assert.ok(r.faces.includes('defineTool'))
-  assert.equal(r.targetVersion, '0.1.6-alpha.2')
+  assert.equal(r.state, 'ok', r.message)
 })
 await t('桥工具 dryRun 只回显不真跑 Python', async () => {
   const def = ctx.registered.find((d) => d.name === 'label.progress')

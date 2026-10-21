@@ -13,6 +13,7 @@ import {
   parseVersion,
   compareVersion,
   apiFaceOf,
+  API_FACES,
   checkVersion,
   DSH_COMPAT,
 } from '../src/compat.ts'
@@ -73,12 +74,15 @@ t('旧版 0.1.2 无 cordis-all-plugin（只有 python-sdk/profile-bundle）', ()
 })
 
 console.log('===== [dsh-adapter] 4. 兼容判定 =====')
-t('0.1.6-alpha.2 → ok（测试矩阵内）', () => {
-  assert.equal(checkVersion('0.1.6-alpha.2').state, 'ok')
+t('targetVersion → ok（测试矩阵内）', () => {
+  assert.equal(checkVersion(DSH_COMPAT.targetVersion).state, 'ok')
 })
-t('0.1.5-rc.2 / 0.1.5-rc.1 → ok', () => {
-  assert.equal(checkVersion('0.1.5-rc.2').state, 'ok')
-  assert.equal(checkVersion('0.1.5-rc.1').state, 'ok')
+t('0.1.5-rc.2 / 0.1.5-rc.1 → degrade（API 面齐但未用真实包实测，不谎报 ok）', () => {
+  for (const v of ['0.1.5-rc.2', '0.1.5-rc.1']) {
+    const r = checkVersion(v)
+    assert.equal(r.state, 'degrade', `${v}: ${r.state}`)
+    assert.equal(r.missingFaces.length, 0, `${v} 不该缺必需面`)
+  }
 })
 t('0.1.3-alpha.2 → incompatible（缺 cordis/defineTool）', () => {
   const r = checkVersion('0.1.3-alpha.2')
@@ -93,9 +97,10 @@ t('乱版 → incompatible（显式暴露，不静默）', () => {
   assert.equal(r.state, 'incompatible')
   assert.ok(r.message.includes('无法解析'))
 })
-t('targetVersion 已指向新版 0.1.6-alpha.2', () => {
-  assert.equal(DSH_COMPAT.targetVersion, '0.1.6-alpha.2')
-  assert.ok(DSH_COMPAT.testedAgainst.includes('0.1.6-alpha.2'))
+t('targetVersion 在 testedAgainst 内（唯一事实源自洽）', () => {
+  assert.ok(DSH_COMPAT.testedAgainst.includes(DSH_COMPAT.targetVersion))
+  // 真实 dsh-tools 0.0.1-rc.1 实测出的必调面必须在面表里
+  assert.ok(API_FACES.some((f) => f.id === 'output-render'))
 })
 
 console.log(`\n[dsh-adapter/compat] pass=${pass} fail=${fail}`)

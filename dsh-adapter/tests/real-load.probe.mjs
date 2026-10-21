@@ -49,7 +49,7 @@ for (const d of registered) {
   if (!d.parameters || !d.output?.schema) { console.error('FAIL: incomplete tool', d.name); process.exit(1) }
 }
 const compat = registered.find((d) => d.name === 'dsh.compat')
-const r = await compat.execute({ version: '0.1.6-alpha.2' })
+const r = await compat.execute({ version: '0.2.1-rc.2' })
 console.log('dsh.compat →', r.state, r.faces.join(','))
 if (r.state !== 'ok') process.exit(1)
 console.log(`REAL-LOAD-OK: ${registered.length} tools registered via ${source} defineTool`)

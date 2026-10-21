@@ -38,9 +38,11 @@ t('peer 依赖声明 dsh-tools + cordis（新版 API 面）', () => {
   assert.ok(pkg.peerDependencies['@deepseek-ai/dsh-tools'])
   assert.ok(pkg.peerDependencies['@deepseek-ai/cordis'])
 })
-t('dshCompat 声明测试矩阵且含 0.1.6-alpha.2', () => {
-  assert.ok(pkg.dshCompat.testedAgainst.includes('0.1.6-alpha.2'))
-  assert.equal(pkg.dshCompat.targetVersion ?? pkg.dshCompat.testedAgainst[0], '0.1.6-alpha.2')
+t('dshCompat 声明测试矩阵且 targetVersion 在矩阵内', () => {
+  const target = pkg.dshCompat.targetVersion ?? pkg.dshCompat.testedAgainst[0]
+  assert.ok(pkg.dshCompat.testedAgainst.includes(target),
+    `targetVersion ${target} 不在 testedAgainst 内`)
+  assert.ok(pkg.engines?.dsh, 'engines.dsh 必须声明（新版运行时据此做装机前版本检查）')
 })
 t('engines.node 对齐 dsh 要求（^22.19 || >=24）', () => {
   assert.ok(pkg.engines.node.includes('22.19'))

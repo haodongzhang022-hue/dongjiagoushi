@@ -7,7 +7,9 @@
 #   3. 组合包契约（package.json dsh.bundle.patch + cordis.patch.yml）
 #   4. 插件 API 面（Cordis apply + inject + defineTool）与工具注册
 #   5. Agent Directory 注册 6 角色 + 默认入口锁秘书
-#   6. 旧版→新版判据（0.1.2 判 incompatible，0.1.6-alpha.2 判 ok）
+#   6. 旧版→新版判据（0.1.2 判 incompatible，targetVersion 判 ok）
+#   7. **真实包**装载面（Issue #202）：output.render 必调钩子 —— 离线桩不校验它，
+#      只有真实 @deepseek-ai/dsh-tools 才能暴露"注册成功但一调用就 TypeError"的静默失效
 set -e
 cd "$(dirname "$0")/.."
 # 失败落点显式化（Issue #175）：CI 上 `t()` 把每项输出重定向到临时文件，若脚本因
@@ -28,12 +30,14 @@ else
 fi }
 
 echo "===== [dsh-adapter] 1. Python 侧版本矩阵 ====="
-t "check 0.1.6-alpha.2 → ok" "$PY - <<'EOF'
+t "check targetVersion → ok" "$PY - <<'EOF'
 import sys; sys.path.insert(0,'.')
 from dsh_adapter import compat
-r = compat.check_version('0.1.6-alpha.2')
+r = compat.check_version(compat.DSH_COMPAT['target_version'])
 assert r['state'] == 'ok', r
 assert 'defineTool' in r['faces'] and 'cordis-all-plugin' in r['faces']
+# 真实 dsh-tools 0.0.1-rc.1 实测出的必调渲染面必须在面表里
+assert 'output-render' in r['faces'], r['faces']
 print('ok 新版兼容', r['state'])
 EOF
 "
@@ -58,15 +62,16 @@ t "matrix 覆盖新版+旧版档位" "$PY - <<'EOF'
 import sys; sys.path.insert(0,'.')
 from dsh_adapter import compat
 m = compat.compat_matrix()
-assert m['target_version'] == '0.1.6-alpha.2', m['target_version']
-assert m['matrix']['0.1.6-alpha.2'] == 'ok'
+assert m['matrix'][m['target_version']] == 'ok', m['target_version']
 assert m['matrix']['0.1.2-rc.1'] == 'incompatible'
+# 0.1.5.x 是 API 面齐但未用真实包实测的一代 → degrade（不谎报 ok）
+assert m['matrix']['0.1.5-rc.2'] == 'degrade', m['matrix']['0.1.5-rc.2']
 assert len(m['api_faces']) >= 5
 print('ok 矩阵 target=%s 档位=%d' % (m['target_version'], len(m['matrix'])))
 EOF
 "
 t "CLI: python -m dsh_adapter.compat check 退出码正确" \
-  "cd '$ROOT' && $PY -m dsh_adapter.compat check 0.1.6-alpha.2 >/dev/null && $PY -m dsh_adapter.compat matrix >/dev/null"
+  "cd '$ROOT' && $PY -m dsh_adapter.compat check 0.2.1-rc.2 >/dev/null && $PY -m dsh_adapter.compat matrix >/dev/null"
 
 echo "===== [dsh-adapter] 2. TS 侧兼容层（Node 原生 TS 剥离） ====="
 # 门控按**真实能力**判定，不按「有没有 node」（Issue #175）：CI 镜像装到的可能是
@@ -84,7 +89,7 @@ fi
 if [ "$NODE_TS_READY" = "1" ]; then
   t "TS compat 测试 15 项全绿" "node --experimental-strip-types '$DSH_DIR/tests/compat.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "组合包契约测试 15 项全绿" "node '$DSH_DIR/tests/bundle.test.mjs' | tail -1 | grep -q 'fail=0'"
-  t "插件加载测试 9 项全绿" "node --experimental-strip-types '$DSH_DIR/tests/plugin.test.mjs' | tail -1 | grep -q 'fail=0'"
+  t "插件加载测试全绿（含 output.render 契约）" "node --experimental-strip-types '$DSH_DIR/tests/plugin.test.mjs' | tail -1 | grep -q 'fail=0'"
 else
   echo "  -- 跳过 TS 侧：${NODE_NOTE}（CI 由 scripts/ci-ensure-node.sh 保证可用）"
 fi
@@ -99,8 +104,11 @@ if [ "$NODE_TS_READY" != "1" ]; then
 elif [ -e "$DSH_DIR/node_modules/@deepseek-ai/dsh-tools" ]; then
   t "桥接实际调用（dsh_adapter/dev_standard/relay 真跑）" "node --experimental-strip-types '$DSH_DIR/tests/bridge.live.test.mjs' | tail -1 | grep -q 'fail=0'"
   t "真实 defineTool 装载探针（7 工具注册）" "node --experimental-strip-types '$DSH_DIR/tests/real-load.probe.mjs' | tail -1 | grep -q 'REAL-LOAD-OK'"
+  t "真实包装载测试（output.render 必调面）" "node --experimental-strip-types '$DSH_DIR/tests/real-package.test.mjs' | tail -1 | grep -q 'fail=0'"
 else
   echo "  -- 未链接真实 dsh，跳过真实装载探针；桥接实跑仍验证"
+  echo "  !! 注意：离线桩不校验 output.render，真实 dsh 一调用即 TypeError（Issue #202）。" 
+  echo "     本条绿≠真实包装得上，装机前务必 npm i -D @deepseek-ai/dsh-tools 跑 real-package 测试。"
   t "桥接实际调用（Python 引擎可达）" "cd '$DSH_DIR' && node --experimental-strip-types tests/bridge.live.test.mjs | tail -1 | grep -q 'fail=0'"
 fi
 
@@ -112,6 +120,7 @@ t "peer 依赖声明 dsh-tools + cordis" "grep -q '@deepseek-ai/dsh-tools' '$DSH
 echo "===== [dsh-adapter] 4. 插件新版 API 面 ====="
 t "src/index.ts 用 Cordis apply + inject + defineTool" "grep -q 'export function apply(ctx' '$DSH_DIR/src/index.ts' && grep -q \"inject = \\['tools'\\]\" '$DSH_DIR/src/index.ts' && grep -q 'defineTool(' '$DSH_DIR/src/index.ts'"
 t "加载即版本闸门（checkVersion + throw）" "grep -q 'checkVersion(' '$DSH_DIR/src/index.ts' && grep -q 'throw new Error' '$DSH_DIR/src/index.ts'"
+t "每个工具都带 output.render（真实 dsh ≥0.2 必调，缺则一调用就崩）" "test \$(grep -c 'render: renderValueContent' '$DSH_DIR/src/index.ts') -ge 2"
 t "桥接契约表 BRIDGE_MAP 覆盖 dev-standard/label/relay" "grep -q 'dev_standard.host' '$DSH_DIR/src/bridge.ts' && grep -q 'label.cli' '$DSH_DIR/src/bridge.ts' && grep -q 'relay_card' '$DSH_DIR/src/bridge.ts'"
 
 echo "===== [dsh-adapter] 5. Agent Directory ====="

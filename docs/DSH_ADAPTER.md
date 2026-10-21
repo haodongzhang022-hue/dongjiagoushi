@@ -1,6 +1,6 @@
-# dsh 适配模块（DSH_ADAPTER · dsh-adapter v0.1.0）
+# dsh 适配模块（DSH_ADAPTER · dsh-adapter v0.2.0）
 
-> 面向 DSH（**DeepSeek Harness**）新版（`0.1.6-alpha.2`）的适配模块：把架构师体系
+> 面向 DSH（**DeepSeek Harness**）新版（适配目标 `0.2.1-rc.2`，兼容 `>= 0.1.5-rc.1`）的适配模块：把架构师体系
 > `local-agent/` 的能力暴露为 DSH 工具，并把"版本兼容"做成**前置闸门**。
 > 触发：Issue #145「dsh 已经有新版的了，适配一下最新版本……完成适配新版」。
 > 决策记录见 `docs/adr/0014-dsh-adapter-new-version.md`。
@@ -22,8 +22,25 @@ DSH 处于 **0.x 技术预览期**，minor/rc 间存在 schema/行为变化。�
 旧适配插件（`@dsh-dongjiagoushi/adapter`）是**旧形态**且从未进版本库，装不上新版——
 故本轮把适配重做为独立模块 `dsh-adapter/`。
 
-**版本判据（可核验）**：npm `@deepseek-ai/dsh` 的 `latest = 0.1.5-rc.2`，
-`alpha = 0.1.6-alpha.2`（最新）。本模块适配目标 = `0.1.6-alpha.2`，兼容 `>= 0.1.5-rc.1`。
+**版本判据（可核验）**：npm `@deepseek-ai/dsh` 的 `latest = 0.2.1-rc.2`、
+`alpha = 0.2.1-alpha.5`（2026-10-21 实测）。本模块适配目标 = `0.2.1-rc.2`，
+兼容 `>= 0.1.5-rc.1`（更老一代走 `degrade` 降级模式，不谎报 ok）。
+
+### 0.2.x 的关键差异：`output.render` 变成必调钩子
+
+真实 `@deepseek-ai/dsh-tools`（实测 `0.0.1-rc.1`）里，`defineTool` 的 `output.render`
+**只在构造时存引用、不做校验**。缺它的工具：
+
+- ✅ 定义照样构造成功、注册进 `ctx.tools`、`tools/change` 照常触发；
+- ❌ **模型每次调用都抛 `TypeError: d.output.render is not a function`**。
+
+也就是"装上了、注册了、一用全崩"的典型静默失效。本模块 v0.2.0 起为**每个工具显式提供
+`render`**（纯函数：值 → `ContentBlock[]`，可重放），并把 `output-render` 登记为
+API 面、加载时若运行时缺该面则 `logger.warn` 显式喊出来。
+
+> ⚠️ **离线桩不校验 `output.render`**——这正是旧信号灯全绿却验不出该问题的原因。
+> 自 v0.2.0 起必须装真实包跑 `tests/real-package.test.mjs`（拿不到真实包时显式 SKIP，
+> 不假装通过）。
 
 ---
 
@@ -42,11 +59,12 @@ dsh-adapter/
 └── tests/
     ├── compat.test.mjs           # 兼容层 15 项
     ├── bundle.test.mjs           # 组合包契约 15 项
-    ├── plugin.test.mjs           # 插件加载/注册 9 项
+    ├── plugin.test.mjs           # 插件加载/注册（含 output.render 契约）
     ├── bridge.live.test.mjs      # 桥接实跑（真实 Python 引擎）
-    └── real-load.probe.mjs       # 真实/桩 defineTool 装载探针
+    ├── real-load.probe.mjs       # 真实/桩 defineTool 装载探针
+    └── real-package.test.mjs     # ★ 真实包装载（output.render 必调面；无真实包则显式 SKIP）
 local-agent/dsh_adapter/compat.py # ★ Python 侧版本矩阵（与 TS 侧同源）
-local-agent/tests/test_dsh_adapter.sh   # 18 组信号灯（统一入口）
+local-agent/tests/test_dsh_adapter.sh   # 20 组信号灯（统一入口）
 ```
 
 ---
@@ -77,7 +95,7 @@ local-agent/tests/test_dsh_adapter.sh   # 18 组信号灯（统一入口）
 
 ```bash
 # Python 侧
-python3 -m dsh_adapter.compat check 0.1.6-alpha.2   # → ok
+python3 -m dsh_adapter.compat check 0.2.1-rc.2   # → ok
 python3 -m dsh_adapter.compat matrix                # → 完整矩阵
 # 插件内：apply() 加载即自检；DSH_VERSION 可显式指定，缺省用 targetVersion 兜底
 ```
@@ -130,11 +148,11 @@ dsh --profile headless --dump-config | grep dongjiagoushi-dsh-adapter
 CNB 平台已有 DSH 生态（`cnpc/dsh` = 官方 CLI 的 NPC、`fuliai/deepseek-harness` = 官方镜像等）。
 本模块在 **CI 的真实 DSH 新版**上做验证（`.cnb.yml` 的 `dsh adapter compat test` 任务）：
 
-1. 离线信号灯：版本矩阵 + 组合包契约 + API 面 + Agent Directory（18 组）；
-2. 真实装载：`npm i @deepseek-ai/dsh@0.1.6-alpha.2` → 构建 `lib/` → `dsh plugin add`
+1. 离线信号灯：版本矩阵 + 组合包契约 + API 面 + Agent Directory + 真实包装载（20 组）；
+2. 真实装载：`npm i -D @deepseek-ai/dsh-tools` → 构建 `lib/` → `dsh plugin add`
    → `--dump-config` 确认 bundle patch 生效 → 真实 loader import 成功。
 
-> 本地复现：`npm i @deepseek-ai/dsh@0.1.6-alpha.2` 后按「四」的步骤操作即可。
+> 本地复现：`cd dsh-adapter && npm i -D @deepseek-ai/dsh-tools` 后按「四」的步骤操作即可。
 > 网络受限时真实装载步骤自动跳过（离线信号灯仍阻断不合规变更）。
 
 ---
