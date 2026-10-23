@@ -238,14 +238,31 @@ def collect_cloud_result(handle_id, cloud_state=None, pr_ids=None, result=None,
         if probe is not None:
             cloud_state = probe.get("mapped")
         if not cloud_state:
-            # 读不到确定结论 → 不推进到 collected，显式暴露
+            # 读不到确定结论 → 不推进到 collected，显式暴露。
+            # 同时附一份**定向探查结论**（在跑 / 真故障 / 卡没生效），
+            # 让调用方知道"到底在等还是在出问题"——但这里**不做任何动作**。
             handle["updated_at"] = datetime.utcnow().isoformat()
             handle["cloud_probe"] = probe
+            try:
+                verdict = _probe_verdict(handle, self_author=self_author)
+            except Exception as e:                   # noqa: BLE001
+                # 探查是"附加信息"，绝不能把 collect 主流程带崩
+                verdict = {"verdict": "unknown",
+                           "reason": "探查异常：{}: {}".format(type(e).__name__, e),
+                           "next_action": "先修探查；不要重发"}
+            handle["cloud_verdict"] = verdict
             handles[handle_id] = handle
             _save_handles(handles)
             st = (probe or {}).get("detail", {}).get("state") or "unknown"
-            return {"ok": False, "error": "云端状态未确定（不默认 done）",
-                    "state": st, "probe": probe, "handle": handle}
+            out = {"ok": False, "error": "云端状态未确定（不默认 done）",
+                   "state": st, "probe": probe, "handle": handle}
+            if verdict:
+                out["verdict"] = verdict.get("verdict")
+                out["next_action"] = verdict.get("next_action")
+                out["verdict_reason"] = verdict.get("reason")
+                # 明确告诉调用方：本函数只探查，不重发
+                out["auto_resent"] = False
+            return out
 
     handle["status"] = "collected"
     handle["updated_at"] = datetime.utcnow().isoformat()
@@ -265,6 +282,29 @@ def collect_cloud_result(handle_id, cloud_state=None, pr_ids=None, result=None,
     handles[handle_id] = handle
     _save_handles(handles)
     return {"ok": True, "handle": handle}
+
+
+def _probe_verdict(handle, self_author=None):
+    """附一份定向探查结论（只读）。失败/关闭时返回 None，**绝不影响 collect 主流程**。
+
+    开关：`BRIDGE_PROBE=off` 时跳过（离线/不想发只读请求时用）。
+    探查本身只读——它**不会**发卡、不会重试。要不要补发由人决定。
+    """
+    if (os.environ.get("BRIDGE_PROBE") or "").strip().lower() in ("off", "0", "false"):
+        return None
+    try:
+        from entries.probe import probe_by_handle
+    except Exception:                                # noqa: BLE001
+        try:
+            from probe import probe_by_handle        # type: ignore  # noqa: F401
+        except Exception:                            # noqa: BLE001
+            return None
+    try:
+        return probe_by_handle(handle, self_author=self_author)
+    except Exception as e:                           # noqa: BLE001
+        return {"verdict": "unknown",
+                "reason": "探查异常：{}: {}".format(type(e).__name__, e),
+                "next_action": "先修探查；不要重发"}
 
 
 def _probe_cloud_state(handle, self_author=None):

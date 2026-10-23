@@ -30,10 +30,16 @@ PY
 T2=$(run <<'PY'
 import sys, time
 sys.path.insert(0, ".")
-from entries.probe import probe, AWAITING
-# 刚发出的卡：流水线可能还没出现，绝不能判故障
-g = probe("dongdongxiaozu/dongjiagoushi", 999999, sent_at=time.time())
-assert g["verdict"] == AWAITING, f"刚发出应 awaiting，实际 {g['verdict']}"
+from entries import probe as P
+
+# 注入"没有流水线"与"无回执"，不碰网络/真实 Issue
+P.pipeline_state = lambda repo, number, since_ts=None: {"state": "none", "builds": [], "reason": "无"}
+P.check_receipt = lambda repo, number, role=None, self_author=None: {
+    "state": "pending", "receipts": [], "cards": [], "count": 1,
+    "complete": True, "reason": "读全但尚无真回执"}
+
+g = P.probe("o/r", 1, sent_at=time.time())
+assert g["verdict"] == P.AWAITING, f"刚发出应 awaiting，实际 {g['verdict']}"
 assert "不要重发" in g["next_action"] or "等待" in g["next_action"]
 print("ok")
 PY
@@ -43,9 +49,15 @@ PY
 T3=$(run <<'PY'
 import sys, time
 sys.path.insert(0, ".")
-from entries.probe import probe, NO_PIPELINE
-g = probe("dongdongxiaozu/dongjiagoushi", 999999, sent_at=time.time() - 3600)
-assert g["verdict"] == NO_PIPELINE, g["verdict"]
+from entries import probe as P
+
+P.pipeline_state = lambda repo, number, since_ts=None: {"state": "none", "builds": [], "reason": "无"}
+P.check_receipt = lambda repo, number, role=None, self_author=None: {
+    "state": "pending", "receipts": [], "cards": [], "count": 1,
+    "complete": True, "reason": "读全但尚无真回执"}
+
+g = P.probe("o/r", 1, sent_at=time.time() - 3600)
+assert g["verdict"] == P.NO_PIPELINE, g["verdict"]
 assert "人工决定" in g["next_action"]
 print("ok")
 PY
@@ -55,17 +67,34 @@ PY
 T4=$(run <<'PY'
 import sys, time
 sys.path.insert(0, ".")
-from entries.probe import probe, LOST, SLOW
-# 同一事实，宽限期不同 → 结论不同（证明判定依赖宽限而非"等得久"）
-a = probe("dongdongxiaozu/dongjiagoushi", 236, sent_at=time.time() - 3600, grace_s=900,
-          self_author="zhongguoliandanshidongdong")
-assert a["verdict"] in (LOST, SLOW), a["verdict"]
-if a["verdict"] == LOST:
-    assert "禁止循环重发" in a["next_action"]
+from entries import probe as P
+
+# 不依赖真实 Issue：构建列表会随时间滚出窗口，依赖它会让测试随机变红。
+# 注入"流水线 success + 无回执"，只验 lost / slow 的宽限分界。
+def fake_pipe(repo, number, since_ts=None):
+    return {"state": "success", "builds": [{"sn": "x"}],
+            "latest": {"createTime": "2026-10-23T20:02:37Z"},
+            "reason": "构建状态=success"}
+
+def fake_receipt(repo, number, role=None, self_author=None):
+    return {"state": "pending", "receipts": [], "cards": [], "count": 1,
+            "complete": True, "reason": "读全但尚无真回执"}
+
+orig_pipe, orig_rcpt = P.pipeline_state, P.check_receipt
+P.pipeline_state, P.check_receipt = fake_pipe, fake_receipt
+try:
+    lost = P.probe("o/r", 1, sent_at=time.time() - 3600, grace_s=900)
+    slow = P.probe("o/r", 1, sent_at=time.time() - 60, grace_s=900)
+finally:
+    P.pipeline_state, P.check_receipt = orig_pipe, orig_rcpt
+
+assert lost["verdict"] == P.LOST, lost["verdict"]
+assert "禁止循环重发" in lost["next_action"]
+assert slow["verdict"] == P.SLOW, slow["verdict"]
 print("ok")
 PY
 )
-[ "$(echo "$T4" | tail -1)" = "ok" ] && ok "超宽限 → lost 且明写禁止循环重发" || no "lost 判据" "$T4"
+[ "$(echo "$T4" | tail -1)" = "ok" ] && ok "超宽限→lost / 宽限内→slow（注入式，不依赖真实构建）" || no "lost/slow 判据" "$T4"
 
 T5=$(run <<'PY'
 import sys
