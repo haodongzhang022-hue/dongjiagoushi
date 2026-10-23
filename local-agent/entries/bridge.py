@@ -215,26 +215,48 @@ def get_handle(handle_id):
 # 三、云端结果收集（云端完成/打标 merged/done 后回传本地，跨 PR 归集）
 # ---------------------------------------------------------------------------
 def collect_cloud_result(handle_id, cloud_state=None, pr_ids=None, result=None,
-                         transport=None):
+                         transport=None, auto_read=True, self_author=None):
     """收集一次云端异步开发的产出，状态流转 in_cloud_dev → collected。
 
-    cloud_state：云端完成信号（'merged'/'done'/'need_fix'/'blocked'）——
-    对应评审打标 merge_ready/merged / need_fix（REVIEW_DISPOSITION 规范标签）。
+    cloud_state：云端完成信号（'merged'/'done'/'need_fix'/'blocked'）。
+      不传且 `auto_read=True` 时，**自动去读**云端正本（评论回执 + 标签），
+      见 `entries/cloud_state.py`。
     pr_ids：云端实际产生的 PR 列表（跨 PR 归集）。
+
+    ⚠️ 原实现是 `cloud_state or ... or "done"` —— **调用方不给就默认 done**，
+       等于「判不出来就当通过」。现在改为：读不到就显式 `unknown` 并留在
+       in_cloud_dev，绝不默认完成。
     """
     handles = _load_handles()
     handle = handles.get(handle_id)
     if not handle:
         return {"ok": False, "error": f"handle 不存在: {handle_id}"}
-    state = cloud_state or handle.get("cloud_result", {}).get("state") or "done"
+
+    probe = None
+    if not cloud_state and auto_read:
+        probe = _probe_cloud_state(handle, self_author=self_author)
+        if probe is not None:
+            cloud_state = probe.get("mapped")
+        if not cloud_state:
+            # 读不到确定结论 → 不推进到 collected，显式暴露
+            handle["updated_at"] = datetime.utcnow().isoformat()
+            handle["cloud_probe"] = probe
+            handles[handle_id] = handle
+            _save_handles(handles)
+            st = (probe or {}).get("detail", {}).get("state") or "unknown"
+            return {"ok": False, "error": "云端状态未确定（不默认 done）",
+                    "state": st, "probe": probe, "handle": handle}
+
     handle["status"] = "collected"
     handle["updated_at"] = datetime.utcnow().isoformat()
     handle["cloud_result"] = {
-        "state": state,
+        "state": cloud_state,
         "pr_ids": list(pr_ids or handle.get("pr_ids") or []),
         "result": result or {},
         "collected_at": datetime.utcnow().isoformat(),
     }
+    if probe is not None:
+        handle["cloud_result"]["probe"] = probe
     if transport:  # 真实传输可把确认回执给云端
         try:
             _transport_ack(transport, handle)
@@ -243,6 +265,35 @@ def collect_cloud_result(handle_id, cloud_state=None, pr_ids=None, result=None,
     handles[handle_id] = handle
     _save_handles(handles)
     return {"ok": True, "handle": handle}
+
+
+def _probe_cloud_state(handle, self_author=None):
+    """去读云端正本。返回 {mapped, detail} 或 None（模块不可用）。"""
+    try:
+        from entries.cloud_state import cloud_state as _cs, to_cloud_state_kw
+    except Exception:                                # noqa: BLE001
+        try:
+            from cloud_state import cloud_state as _cs, to_cloud_state_kw  # type: ignore
+        except Exception:                            # noqa: BLE001
+            return None
+    ref = handle.get("cloud_ref") or {}
+    number = ref.get("issue_id")
+    repo = ref.get("repo") or handle.get("target_repo")
+    if not number or not repo:
+        return {"mapped": None,
+                "detail": {"state": "unknown", "reason": "句柄缺云端锚点(issue/repo)"}}
+    # mock 句柄的历史值（sim-issue）或任何非数字锚点：不能当成真实 Issue 去读
+    try:
+        number_int = int(str(number))
+    except (TypeError, ValueError):
+        return {"mapped": None,
+                "detail": {"state": "unknown",
+                           "reason": "云端锚点不是真实 Issue 编号：{!r}"
+                                     "（mock 句柄？真实传输需 BRIDGE_TRANSPORT=cnb）"
+                                     .format(number)}}
+    role = (handle.get("meta") or {}).get("role")
+    detail = _cs(str(repo), number_int, role=role, self_author=self_author)
+    return {"mapped": to_cloud_state_kw(detail), "detail": detail}
 
 
 # ---------------------------------------------------------------------------
