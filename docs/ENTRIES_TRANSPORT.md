@@ -51,12 +51,46 @@ executor:  {"name": str, "run": fn(scripts)->dict}
 ```
 
 回归：`test_bridge_loop.sh` 9/0、`test_platform_adapter.sh` 13/0、
-新增 `test_entries_transport.sh` 7/0。
+新增 `test_entries_transport.sh` 7/0、`test_entries_cloud_state.sh` 6/0。
+
+## 4.5 云端完成态自动判定（entries.cloud_state）
+
+原 `collect_cloud_result` 是 `state = cloud_state or ... or "done"` —— **不传就默认完成**。
+现在不传会**自动去读**（`auto_read=True` 默认开）：
+
+| 正本 | 读什么 | 命令 |
+|---|---|---|
+| 评论回执 | 是否真有目标角色的 `[接单]` | `comment_stream.read_comments` |
+| 标签 | `merge_ready` / `merged` / `need_fix` / `blocked` | `cnb issues get-issue --verbose` |
+
+**三态，不许二值化**：
+
+- `confirmed` → 映射为 `merged` / `done` / `need_fix`，可推进；
+- `pending` → 继续等，**不产生状态**；
+- `unknown` → 读不全/读不到/锚点非真实编号 → **不折叠成 pending**，`collect` 返回
+  `ok=False` 且句柄停在 `in_cloud_dev`。
+
+### 为什么不用现成的 `has_receipt()`（实测假绿）
+
+`comment_stream.has_receipt()` 只要正文含 `[接单]` 就判 `received=True`，而**派发卡正文里
+就写着「请回执 [接单]」**——于是「只有自己发的卡」也被判成已回执，且 `degraded=False`，
+看起来完全正常。实测：
+
+```
+仅自己发的卡 → {'received': True, 'suspects': 1, 'degraded': False}   ← 假绿
+```
+
+所以本模块自建三道窄判据：① 不含 `[触发:`；② 作者 ≠ 派发方；③ 命中 `[接单]`。
+
+### 另一个坑：别把角色名当必要条件
+
+真实回执常写「`[接单]` 已接单，但 need_fix」，**不会再重复一遍角色名**。
+把角色名当硬门槛会漏判真回执（实测踩过），故角色名只作 `role_match` 标注。
 
 ## 五、边界（不假装有）
 
-- **云端角色回执**仍靠事件（`issue.comment@npc`）驱动，本层只负责「把锚点建出来」；
-  要端到端闭环（本地发卡 → 云端角色 `[接单]` → 本地 collect）需在 Issue 上再发一张接力卡；
-- `collect_cloud_result` 的 `cloud_state` 目前由调用方给（或由上游打标驱动），
-  **本层不去猜云端状态**；
+- **云端角色回执**仍靠事件（`issue.comment@npc`）驱动，本层负责「建锚点 + 读回执」；
+  端到端闭环还需在锚点 Issue 上再发一张 `[触发:角色]` 接力卡；
+- `collect_cloud_result` 现在**能自动读**，但只在 `auto_read=True` 且句柄带真实 Issue 锚点时生效；
+  `BRIDGE_TRANSPORT` 非 `cnb` 时锚点是 `sim-issue`，会显式 `unknown`（这是对的，不是故障）；
 - 配额护栏（`CLOUD_LOCAL_COOP` 2.3）未在本层接线，仍按原文档执行。
