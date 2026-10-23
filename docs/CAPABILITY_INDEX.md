@@ -13,7 +13,8 @@
 |---|---|---|---|---|---|
 | **入口** | 架构·秘书（强制入口+路由）| 秘书/入口/接待/先看看 | `.cnb/settings.yml` + `AGENTS.md·默认入口协议` | docs/SECRETARY_SENSE.md | module_version 声明头 |
 | **入口** | 三入口归一化（platform-adapter）| 三入口/入口归一化/网页对话/cnb/local/多宿主/谁当入口 | `local-agent/entries/` | docs/PLATFORM_ADAPTERS.md | Issue #105 · module platform-adapter v0.2.0 |
-| **桥接闭环** | 本地⇄云端桥接闭环（entries.bridge）| 最常用链路/本地deepseek harness/网页gemini工具桥/云开发请求/异步句柄/跨对话/跨PR/跨仓库/本地数据对齐/本地测试先行/云端建环境贵 | `local-agent/entries/bridge.py` | docs/PLATFORM_ADAPTERS.md 三.6 | Issue #105 · module platform-adapter v0.3.0 |
+| **桥接闭环** | 本地⇄云端桥接闭环（entries.bridge）| 最常用链路/本地deepseek harness/网页gemini工具桥/云开发请求/异步句柄/跨对话/跨PR/跨仓库/本地数据对齐/本地测试先行/云端建环境贵 | `local-agent/entries/bridge.py` | docs/PLATFORM_ADAPTERS.md 三.6 | Issue #105 · module platform-adapter v0.3.0（**传输/执行默认 mock，真实实现见下一行**）|
+| **真实传输/执行** | 传输与本地执行器（entries.transport）| 真实传输/CnbTransport/建Issue锚点/本地真跑/shell executor/cnb启动器/BRIDGE_TRANSPORT/BRIDGE_LOCAL_EXEC | `local-agent/entries/transport.py` | docs/ENTRIES_TRANSPORT.md | Issue #105 · 补 v0.3.0 的 mock 欠债（默认仍 mock，环境变量显式启用）|
 | **聚合控制页** | 跨端聚合控制页（entries.dashboard）| 聚合控制/fastapi聚合页/状态显示/每端面板/跨端交互/控制台/健康灯/一键控制/overview/panel | `local-agent/entries/dashboard.py` | docs/PLATFORM_ADAPTERS.md 三.7 | Issue #105 · module platform-adapter v0.4.0 |
 | **dsh 适配** | dsh 新版适配（dsh-adapter · 0.1.6-alpha.2）| dsh/deepseek harness/适配新版/新版本/cordis/bundle/defineTool/版本闸门/兼容 | `dsh-adapter/` | docs/DSH_ADAPTER.md | Issue #145 · module dsh-adapter v0.1.0 |
 | **需求** | 架构·产品（需求澄清）| 需求/澄清/用户故事/边界 | `.cnb/settings.yml` + roles/product.py | docs/ISSUE_MANAGEMENT.md | agent_version |

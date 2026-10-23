@@ -77,13 +77,43 @@ def declare_assignments(assignments):
 # ============================================================
 # L2 分发：拆分任务 + 分配角色 + 投池 + 创建 Issue
 # ============================================================
+def _cnb_launcher():
+    """解析 cnb CLI 的可执行前缀。
+
+    Windows 上 `cnb` 只是 `cnb.ps1`/`cnb.cmd` 包装脚本，`subprocess.run(["cnb",...])`
+    会抛 `FileNotFoundError`（WinError 2）；而原实现把它和 TimeoutExpired
+    一起 `return None` —— 真实发卡在 Windows 上**静默失败**，看起来像「云端没接」。
+    统一走 entries.transport 的解析（node + cnb.js），找不到再退回 PATH。
+    """
+    try:
+        from entries.transport import resolve_cnb_launcher
+        found = resolve_cnb_launcher()
+        if found:
+            return found
+    except Exception:                            # noqa: BLE001
+        pass
+    import shutil
+    exe = shutil.which("cnb")
+    return [exe] if exe else None
+
+
 def _create_issue(repo, title, body):
     """调用 cnb CLI 创建独立 Issue（平台留痕）。返回 issue_number 或 None。"""
     if not repo:
         return None
+    launcher = _cnb_launcher()
+    if not launcher:
+        # 显式留痕：找不到 CLI 与「建 Issue 被拒」是两回事，不能都变成 None
+        try:
+            from data import admin as _admin
+            _admin.record_event("dispatcher", "issue.create.skipped",
+                                {"repo": repo, "reason": "cnb CLI not found"}, "")
+        except Exception:                        # noqa: BLE001
+            pass
+        return None
     try:
-        cmd = ["cnb", "issues", "create-issue",
-               "--repo", repo, "--title", title, "--body", body]
+        cmd = launcher + ["issues", "create-issue",
+                          "--repo", repo, "--title", title, "--body", body]
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=30,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},

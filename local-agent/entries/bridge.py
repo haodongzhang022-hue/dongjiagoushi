@@ -120,19 +120,72 @@ def request_cloud_dev(req, entry="local", target_repo=None, issue_id="", pr_ids=
         "cloud_result": None,
         "meta": meta,
     }
-    # 通过传输通道把云开发请求投递给云端（默认本地模拟 = 入列 pending）
-    tr = transport or {"name": "mock", "send": _mock_send}
+    # 通过传输通道把云开发请求投递给云端。
+    # 默认仍是 mock（向后兼容、可离线单测）；真实投递显式注入 transport
+    # （见 entries/transport.py::CnbTransport，或运行环境设 BRIDGE_TRANSPORT=cnb）。
+    tr = transport or _default_transport(target_repo)
     try:
-        sent = tr["send"](handle)
+        send_fn, transport_name = _transport_send(tr)
+        sent = send_fn(handle)
         handle["cloud_ref"] = sent.get("cloud_ref", {})
         handle["status"] = sent.get("status", "in_cloud_dev")
+        # 真实传输才带得了云端可核验锚点；mock 的 sim-issue 不当真
+        handle["transport_name"] = transport_name
+        handle["real_send"] = transport_name != "mock"
     except Exception as e:  # noqa: BLE001
         handle["status"] = "pending"
         handle["send_error"] = str(e)
+        handle["real_send"] = False
     handle["updated_at"] = datetime.utcnow().isoformat()
     handles[handle_id] = handle
     _save_handles(handles)
     return handle
+
+
+def _transport_attr(tr, attr, default=None):
+    """从 transport 取方法：**dict 与对象两种形态都认**。
+
+    契约历史上只说 "transport 是个 dict"，但真实实现（CnbTransport）是对象；
+    混用会在 `tr["send"]` 处抛 `TypeError: object is not subscriptable`（实测踩过）。
+    这里收口一次，两种形态都给得通。
+    """
+    if isinstance(tr, dict):
+        return tr.get(attr, default)
+    return getattr(tr, attr, default)
+
+
+def _transport_send(tr):
+    """返回 (send_callable, transport_name)。取不到 send 就抛错，不静默。"""
+    fn = _transport_attr(tr, "send")
+    if not callable(fn):
+        raise TypeError("transport 缺少可调用的 send(handle)")
+    name = _transport_attr(tr, "name", None)
+    if name is None:
+        name = "cnb" if type(tr).__name__ == "CnbTransport" else "unknown"
+    return fn, name
+
+
+def _transport_ack(tr, handle):
+    """transport 可选的 ack；没有就当作无需回执。"""
+    fn = _transport_attr(tr, "ack")
+    if callable(fn):
+        return fn(handle)
+    return {"ok": True}
+
+
+def _default_transport(target_repo=None):
+    """选默认传输：mock（离线/单测）或 cnb（真实投递）。
+
+    `BRIDGE_TRANSPORT=cnb` 时走 `entries.transport.CnbTransport`，真的建 Issue；
+    其他任何值（含未设）都走 mock —— 默认不联网，避免测试/演练误发到云端。
+    """
+    if (os.environ.get("BRIDGE_TRANSPORT") or "").strip().lower() == "cnb":
+        try:
+            from entries.transport import CnbTransport
+        except Exception:                       # 兼容以 local-agent 为根的执行方式
+            from transport import CnbTransport  # type: ignore  # noqa: F401
+        return CnbTransport(target_repo or "dongdongxiaozu/dongjiagoushi")
+    return {"name": "mock", "send": _mock_send}
 
 
 def _mock_send(handle):
@@ -184,7 +237,7 @@ def collect_cloud_result(handle_id, cloud_state=None, pr_ids=None, result=None,
     }
     if transport:  # 真实传输可把确认回执给云端
         try:
-            transport.get("ack", lambda h: {"ok": True})(handle)
+            _transport_ack(transport, handle)
         except Exception:  # noqa: BLE001
             pass
     handles[handle_id] = handle
@@ -267,12 +320,28 @@ def local_test_first(handle_id, test_scripts=None, executor=None):
         "handle_id": handle_id,
         "routed_local": scripts,
         "skipped_cloud_build": True,          # 不再在云端重复建环境跑这批
-        "executor": executor or {"name": "mock-local-exec",
-                                 "run": _mock_local_run},
+        "executor": executor or _default_executor(),
         "cost_note": "云端建环境贵：CPU密集测试已下放本地执行，云端只保留LLM强相关",
         "created_at": datetime.utcnow().isoformat(),
     }
     return plan
+
+
+def _default_executor():
+    """选默认本地执行器：mock 或真跑 shell（`BRIDGE_LOCAL_EXEC=shell`）。
+
+    本地 CPU 便宜、云端建环境贵 —— 但「下放」要真跑才算下放，
+    所以 shell 模式直接执行 tests/*.sh，返回逐条 rc。
+    """
+    if (os.environ.get("BRIDGE_LOCAL_EXEC") or "").strip().lower() == "shell":
+        try:
+            from entries.transport import ShellExecutor
+        except Exception:                       # 兼容以 local-agent 为根的执行方式
+            from transport import ShellExecutor  # type: ignore  # noqa: F401
+        impl = ShellExecutor(cwd=_HERE)
+        # 契约要求 dict（消费方用 .get()），不能直接塞对象
+        return {"name": impl.name, "run": impl.run}
+    return {"name": "mock-local-exec", "run": _mock_local_run}
 
 
 def _mock_local_run(scripts):
@@ -334,26 +403,30 @@ def handle_summary(handle_id):
 # 七、CLI 便捷：本地⇄云端桥接闭环 一步触发
 # ---------------------------------------------------------------------------
 def cli_bridge(req, entry="local", action="request", handle_id=None, collect_state=None,
-               pr_ids=None):
+               pr_ids=None, transport=None, executor=None):
     """run.py --bridge 的语义入口：request → collect → align → local-test 全链。
 
     action:
       request  发起云端异步开发请求（返回句柄）
       collect  按句柄收集云端产出（--collect-state merged/...  + --pr-ids）
       align    按句柄做本地数据对齐
-      localtest 按句柄下发本地测试先行计划
+      localtest 按句柄下发本地测试先行计划（可注入 executor 真跑）
       overview 闭环俯瞰
+
+    `transport` / `executor` 可显式注入；不传则按 `BRIDGE_TRANSPORT=cnb`
+    / `BRIDGE_LOCAL_EXEC=shell` 决定走真实实现还是 mock。
     """
     if action == "overview":
         return loop_overview()
     if action == "request":
-        return request_cloud_dev(req, entry=entry)
+        return request_cloud_dev(req, entry=entry, transport=transport)
     if not handle_id:
         return {"ok": False, "error": "--bridge collect/align/localtest 需要 --handle"}
     if action == "collect":
-        return collect_cloud_result(handle_id, cloud_state=collect_state, pr_ids=pr_ids)
+        return collect_cloud_result(handle_id, cloud_state=collect_state,
+                                    pr_ids=pr_ids, transport=transport)
     if action == "align":
         return align_local(handle_id)
     if action == "localtest":
-        return local_test_first(handle_id)
+        return local_test_first(handle_id, executor=executor)
     return {"ok": False, "error": f"未知 bridge action: {action}"}
