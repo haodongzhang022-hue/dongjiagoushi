@@ -198,7 +198,7 @@ data:
 
 ---
 
-## 七、验收标准（`local-agent/tests/test_manager.sh` 22 组信号灯（含 YAML 解析回归））
+## 七、验收标准（`local-agent/tests/test_manager.sh` 20 组信号灯）
 
 1. 计划即命令：单路 EXECUTE / 多路取首个 / 空 BLOCKED，无「纠结」出口；
 2. ACTIVATE 闸门：计划 → 逐条激活（任务 gid + 承接角色），空计划显式拒绝；
@@ -383,3 +383,85 @@ fullpath（完整 @org/repo(角色)）→ codebuddy（@CodeBuddy）→ direct_ha
 
 > 一句话记下来：**单测能过，是因为单测只测了我想到的那条路。**
 > 「功能写好了」和「主链路用上了」是两件事，第二件才算完成。
+
+## 九、四轮：验的时候又摸到三处「还是嘴巴」（Issue #239）
+
+用户上一轮的话是「实现好了」——所以我没做新功能，拿他给的尺子去量上一轮的成品。
+量出来三处，**全都不在新功能里，在"怎么算干了"这条判据上**。
+
+### 9.1 第一处：绿的其实是模拟器
+
+`ManagerEngine` 有个 `simulate={"*": "accept"}` 参数，测试里用它让对端"回执"，
+于是第 3、10 组信号灯全绿。可这条链在任何真实环境里**从没跑过**——
+绿的是模拟器，不是经理。
+
+现在把「证据」这件事分级（`manager/work.py` · `credential_of()`）：
+
+| 等级 | 来源 | 算不算干活 |
+|------|------|------------|
+| `external` | 平台可核验（Issue 回执 / PR / CI） | ✅ |
+| `role` | 承接方真回执 + 真写进度尺 | ✅ |
+| `simulated` | 演练注入 | ❌ **明确不算** |
+| `none` | 无证据 | ❌ |
+
+`supervise()` 只认 `READY_LEVELS = ("role", "external")`。演练回执现在判 `fake`，
+理由写「只有演练回执（simulated），没有真实承接方开工」。第 23 组信号灯锁死。
+
+### 9.2 第二处：交给小组长 = 换了个承接主体，活还在原地
+
+`delegate_to_lead()` 上一版返回一个 `leader_plan` 字典就结束了。**`LeadEngine` 从头到尾
+没被调用过**——于是"调配小组长"实际等于"把活改个名字挂到小组长名下"。
+
+现在 `drive=True`（默认）直接驱动小组长引擎：
+
+```
+派开发（N 个，各独立 gid） → 跑确定性闭环（客观验证） → 整合交付 / 超限上报
+```
+
+顺手挖出一个让小组根本没跑起来的 bug：`LeadEngine.dispatch_devs()` 把 `dev_id` 填成了
+子任务键（`任务::dev0`），而 `DevTeamEngine.devs` 的键是 `dev0/dev1`——`run_round()`
+一进来就抛「未知开发」。**小组长看起来"派了开发"，其实一轮都没跑。**
+
+### 9.3 第三处：通路"就绪"是伪的
+
+`lanes.readiness()` 用 `handle or role` 兜底，于是 `direct_handle` **永远 ready**，
+哪怕一个 @ 都没解析出来；`@CodeBuddy` 写了 `needs: ()`，没有 repo 也判就绪。
+
+现在：
+
+- `codebuddy` 需要 `repo`（没有会话载体就投不出去，判 ready 等于假装试过）；
+- `direct_handle` 只认**完整** `@org/repo(角色)`（`is_full_handle()`），角色名不算 handle。
+
+整条链不通时，通路表会诚实地红一片，而不是全绿。第 25 组信号灯锁死。
+
+### 9.4 四条配套
+
+| 新增 | 作用 |
+|------|------|
+| `RoleWorkFace`（`manager/work.py`） | 承接方标准工作面：`accept/start/progress/deliver`，任何角色都能真上工 |
+| `WorkerRegistry` | 经理按角色名取到会干活的承接方；`has(role)` 代码判"这人能不能干" |
+| `BaseRole.work_face()` | 全员挂载：每个角色都交得出自己的工作面 |
+| `ManagerRole.manager_workers()` | 一行装出团队承接方注册表（开发/评审/测试/小组长/交付） |
+
+### 9.5 自检口径也跟着纠了一次
+
+上一版 `self_check()` 要求「启下/找通路/自决」**本单必须出现**——可一次普通任务本来
+就不需要把六个手段全用一遍，于是全绿的链路自检报 false，红的是自检口径本身。
+
+现在：承上/行下/反馈（本单必须做）+ 启下/找通路/自决（本单做过 **或** 已具备即算），
+`capability_ready` 里写明来源。第 27 组信号灯锁死。
+
+### 9.6 验收
+
+`local-agent/tests/test_manager.sh` **22 → 27 组全绿**，23-27 组专锁本轮：
+
+| 组 | 锁什么 |
+|----|--------|
+| 23 | 演练回执判 `simulated` 不算干活；真承接方上工才判 `real` |
+| 24 | 交小组长必须真驱动 `LeadEngine`（有 `drive.status`/`approved`/`rounds`）|
+| 25 | 无 repo/无 cnb 时平台·接力·@CodeBuddy 一律未就绪；handle 只认完整 @ |
+| 26 | 标准工作面产出 `role`→`external` 凭据 + 真写进度尺 |
+| 27 | 经理带真承接方跑三条：全判 `real`，六项能力全具备（不因一单没调人判红）|
+
+> 一句话记下来：**「测过了」要先问"测的是谁"**。这次绿的从来不是经理，
+> 是那个替经理回执的模拟器。

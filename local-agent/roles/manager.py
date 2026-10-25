@@ -57,6 +57,11 @@ if _LOCAL_AGENT_DIR not in sys.path:
 from .base import BaseRole
 
 
+#: 默认承接方（经理派活的主要对象）：能真上工的角色
+DEFAULT_WORKER_ROLES = ("架构·开发", "架构·评审", "架构·测试",
+                        "架构·小组长", "架构·交付")
+
+
 class ManagerRole(BaseRole):
     name = "架构·经理"
 
@@ -130,8 +135,9 @@ class ManagerRole(BaseRole):
 - 阻塞升级（无人接单/二度停滞 → 总师 / 人类）
 """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, workers=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self._workers = workers
         self._manager_engine = None
 
     # ---------------- 引擎接入 ----------------
@@ -146,6 +152,7 @@ class ManagerRole(BaseRole):
             self._manager_engine = ManagerEngine(
                 repo=repo, owner=self.name,
                 devs_per_team=getattr(self, "devs_per_team", 2),
+                workers=self._workers,
             )
         return self._manager_engine
 
@@ -172,6 +179,26 @@ class ManagerRole(BaseRole):
     def manager_self_check(self):
         """六项自检：承上/行下/启下/反馈/找通路/自决（供人类判定及格）。"""
         return self.manager_engine.self_check()
+
+    def manager_workers(self, roles=None):
+        """把本团队角色的**标准工作面**装成承接方注册表（真驱动对端上工）。
+
+        这是「派下去就真有人干」的关键接线：不给承接方，经理只能投卡等回执；
+        给了承接方，`push()` / `carry()` 会直接驱动对端 accept→start→progress→deliver，
+        产出真实凭据（progress 事件 + goal_meters + 回执消息）。
+        """
+        from manager.work import WorkerRegistry
+        from . import get_role
+        reg = WorkerRegistry()
+        for name in (roles or DEFAULT_WORKER_ROLES):
+            try:
+                role = get_role(name)
+                if role is None:
+                    continue
+                reg.register(name, role.work_face())
+            except Exception:  # noqa: BLE001 单角色装载失败不阻断其他人
+                continue
+        return reg
 
     def manager_execute(self, plan, push=True, supervise=True):
         """一站式执行计划：激活 → 督促 → 监督。经理的**标准动作**。"""
