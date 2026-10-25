@@ -151,6 +151,43 @@
 **权限意识**：触发接单需对应角色有 @ 权限（`@dongdongxiaozu/dongjiagoushi (架构·经理)`
 或 CodeBuddy 兜底 / 专用派发 agent），权限不足导致派发断裂须显式上报，不静默失败。
 
+### 经理「真干活」硬约束（ManagerEngine / LeadEngine · 固定规则 · Issue #239）
+
+用户点名经理三条病：**假装分工不建 Issue、给了计划还纠结要不要走、不知道职责原地当嘴**。
+根因不是提示词不够好（上一版 prompt 已写满"L4 才算完成"，他照样只当嘴），而是
+**规划和执行之间没接线**——`dispatch_engine` 早就能 L1→L4，但经理节点只 `llm.call()`
+出一段文字就返回。所以补的不是话术，是**代码判定**（`local-agent/manager/`，
+详见 `docs/MANAGER.md`）。本规则为仓库级固定 rules，对经理/小组长及所有派发方生效：
+
+- **① ACTIVATE 闸门（不许只声明）**：经理的产出不是分工表，是**平台上的任务 Issue**。
+  `ManagerEngine.activate(plan)` 逐条建 Issue + 走 L1→L4；**建不出 Issue 一律标
+  `blocked_no_issue`**，绝不当已分工。真实模式下 `platform_activated` 才是激活数。
+  **⚠️ 已修真实断链（Issue #239）**：`cnb issues create-issue` 输出是 YAML 文本且编号
+  带引号（`number: "242"`），旧 `_create_issue()` 用 `int(val)` 解析必失败 → 恒返回 `None`
+  → 真实环境**永远激活不出 Issue**。已抽 `_parse_issue_number()` 双格式解析，
+  `test_manager.sh` 第 11 组锁死。**"他不干活"先怀疑链路，再怀疑态度。**
+- **② EXECUTE 闸门（计划即命令，单路无抉择）**：`resolve_choice()` 是纯函数查表——
+  单选项必然 `EXECUTE`（**不存在"要不要按计划走"这个分支**）、多选项取首个、
+  空才 `BLOCKED`（且要显式说要什么）。「原地纠结」不是合法输出。
+- **③ 职责硬表 + 越界拦截**：`DUTIES` 只给经理四件事（拆计划/真派发/督促落地/监督处置）；
+  需求澄清→产品、写代码→开发、评审→评审、测试→测试、合并→交付。
+  `guard()` 命中即拦并给出 `hand_to`。**计划进入执行入口视为派发意图**，
+  不因计划里提到"评审/测试"就整体拒绝（那是把派活误判成越界）。
+- **④ 督促兜底（活不掉地上）**：核客观证据（`[接单]` 回执 / 开工事件 / 进度尺）→
+  无证据再唤醒一次 → 仍无 → **调配小组长**（`delegate_to_lead`，给首动作 + 验收口径）。
+  不接单不是让经理发愁的事，是他该转手的事。
+- **⑤ 监督处置（假装配工现形）**：`supervise()` 逐条判——**回执了 `[接单]` 却没开工/
+  没进度 = `fake`（假装分工）**、连续 2 轮距离不变 = `stall`、最近 3 轮净进展 ≥ 0
+  （来回横跳）= `jump`；`fake`/`awaiting` 转小组长，`stall`/`jump` 交哨兵 `[打断]`。
+- **⑥ 小组长承接口（一起优化）**：小组长不得再"拆一张表"当交差。`LeadEngine`
+  三动作必须真做——**派开发**（组内 N 人各独立 gid）→ **带一轮**（执行→客观验证→
+  决策，全部 APPROVED 才放行）→ **收口**（整合统一交付；超 `max_attempts` 上报经理）。
+  执行-验证分离：开发不自判合格；一个没过就不放行。
+
+> 触发：显式 `[触发:架构·经理]` / `[触发:架构·小组长]` / 语义命中「分配/调度/派活/
+> 推进度/假装分工/纠结/带队/整合交付」/ rules 固定。信号灯
+> `local-agent/tests/test_manager.sh`（10 组），红灯即能力缺失。
+
 ### 真实唤醒校验闸门（dispatch_verify · 固定规则 · Issue #100 防假装分配）
 
 "列个表 / 只投接力卡 / 只写字段" **都不等于派发完成**。任何派发方（秘书/经理/产品/开发）
@@ -722,6 +759,12 @@ docs/                                 # 架构文档（索引 / 路线图 / 八�
   ├── KNOWLEDGE.md                  # 知识库·架构上下文索引入口
   ├── ROADMAP.md                    # 工程实践路线图
   └── templates/issue-template.md     # Issue 结构化声明模板
+local-agent/manager/                  # ⭐ 经理/小组长「真干活」引擎（Issue #239）
+  ├── engine.py                        # ManagerEngine：计划→真激活(建Issue)→督促→监督（假装配工现形）
+  ├── lead_engine.py                   # LeadEngine：小组长派开发→客观验证→整合交付（复用 dev_team）
+  └── __init__.py                      # 导出 ManagerEngine / LeadEngine / parse_plan / resolve_choice
+docs/MANAGER.md                       # 经理与小组长能力完善说明（Issue #239）
+local-agent/tests/test_manager.sh     # 经理/小组长 10 组信号灯
 local-agent/depth/                    # 七层协作深度能力包（DepthAbility 全员能力 · Issue #47）
   ├── engine.py                        # 七层深度引擎（L1表述→L7全自动到结果，可执行）
   ├── ability.py                       # DepthAbility 能力封装（express/awake/persist/auto_run）
