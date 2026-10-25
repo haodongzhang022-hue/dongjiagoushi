@@ -186,7 +186,7 @@
 
 > 触发：显式 `[触发:架构·经理]` / `[触发:架构·小组长]` / 语义命中「分配/调度/派活/
 > 推进度/假装分工/纠结/带队/整合交付」/ rules 固定。信号灯
-> `local-agent/tests/test_manager.sh`（10 组），红灯即能力缺失。
+> `local-agent/tests/test_manager.sh`（11 组，含第 11 组 YAML 解析回归），红灯即能力缺失。
 
 ### 真实唤醒校验闸门（dispatch_verify · 固定规则 · Issue #100 防假装分配）
 
@@ -764,7 +764,7 @@ local-agent/manager/                  # ⭐ 经理/小组长「真干活」引�
   ├── lead_engine.py                   # LeadEngine：小组长派开发→客观验证→整合交付（复用 dev_team）
   └── __init__.py                      # 导出 ManagerEngine / LeadEngine / parse_plan / resolve_choice
 docs/MANAGER.md                       # 经理与小组长能力完善说明（Issue #239）
-local-agent/tests/test_manager.sh     # 经理/小组长 10 组信号灯
+local-agent/tests/test_manager.sh     # 经理/小组长 11 组信号灯（含 YAML 解析回归）
 local-agent/depth/                    # 七层协作深度能力包（DepthAbility 全员能力 · Issue #47）
   ├── engine.py                        # 七层深度引擎（L1表述→L7全自动到结果，可执行）
   ├── ability.py                       # DepthAbility 能力封装（express/awake/persist/auto_run）

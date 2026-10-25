@@ -552,7 +552,7 @@ class ManagerEngine:
         # interrupt：交哨兵按协议打断/重规划（1 级），二度命中由哨兵升级（2 级）
         try:
             import sentinel.engine as sentinel
-            meter_id = f"gm-{v['task_id']}"
+            meter_id = f"g-{v['task_id']}"
             sentinel.interrupt(meter_id, v["task_id"], v["role"],
                                v["verdict"], {"reason": v["reason"]})
             v["sentinel"] = "interrupted"

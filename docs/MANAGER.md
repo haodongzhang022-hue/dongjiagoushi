@@ -188,7 +188,7 @@ data:
 
 ---
 
-## 七、验收标准（`local-agent/tests/test_manager.sh` 10 组信号灯）
+## 七、验收标准（`local-agent/tests/test_manager.sh` 11 组信号灯（含 YAML 解析回归））
 
 1. 计划即命令：单路 EXECUTE / 多路取首个 / 空 BLOCKED，无「纠结」出口；
 2. ACTIVATE 闸门：计划 → 逐条激活（任务 gid + 承接角色），空计划显式拒绝；

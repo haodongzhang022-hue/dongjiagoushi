@@ -54,3 +54,8 @@ selector: scripts/feature-verify.sh: scripts/feature-verify\.sh|scripts/feature-
 # （否则"证据目录被误删/改名"会被静默放过，重开 #162 要消灭的假绿形状）。
 # 脚本随 #161 落地后，请去掉 `pending:` 前缀转正式登记（否则 --check-map 会提示 stale）。
 pending: collab: local-agent/collab/engine.py: local-agent/collab/(engine|store)\.py
+
+# 经理/小组长确定性「真干活」引擎（ManagerEngine / LeadEngine · Issue #239）
+# 实现源：local-agent/manager/ 引擎本体 + dispatch_engine.py（真派发闸门复用）
+#        + roles/manager.py / roles/team_lead.py 角色接线
+manager: local-agent/tests/test_manager.sh: local-agent/manager/|local-agent/dispatch_engine\.py|local-agent/roles/manager\.py|local-agent/roles/team_lead\.py|local-agent/tests/test_manager\.sh

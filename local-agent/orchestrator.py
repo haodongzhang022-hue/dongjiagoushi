@@ -33,6 +33,42 @@ def load_team():
 def _step_label(node):
     return f"[{node['id']}] {node['role']}：{node['action']}"
 
+
+def _run_role_engine(role, req, node):
+    """经理/小组长节点对接确定性引擎（缺则回退裸 run，返回 None）。
+
+    只接能确定转化为派发/带队意图的输入，避免过度猜测 LLM 文本。
+    经理：把需求/计划文本直接当计划派发（execute_plan 内部 parse_plan 兜底）。
+    小组长：把任务文本当一条任务，组内 devs_per_team 默认 2 做确定性闭环。
+    """
+    name = getattr(role, "name", "") or ""
+    try:
+        if name == "架构·经理":
+            from manager import ManagerEngine
+            eng = ManagerEngine(
+                devs_per_team=getattr(role, "devs_per_team", 2),
+            )
+            res = eng.execute_plan(req)
+            return (f"[经理引擎] 激活 {res['count']} 条 / 平台激活 "
+                    f"{res.get('platform_activated', 0)} 条 / "
+                    f"blocked_no_issue={res.get('blocked_no_issue', 0)}；"
+                    f"监督结论：{res['summary']}")
+        if name == "架构·小组长":
+            from manager import LeadEngine
+            eng = LeadEngine(
+                devs_per_team=getattr(role, "devs_per_team", 2),
+                owner=name, lead_id=name,
+            )
+            res = eng.drive({"task_key": req, "goal_total": 1.0})
+            agg = res.get("aggregate", {})
+            return (f"[小组长引擎] 派 {res['plan'].get('devs_per_team', 2)} 开发 / "
+                    f"轮次 verdict={res['round'].get('verdict')} / "
+                    f"整合 status={agg.get('status')}")
+    except Exception as e:
+        return f"[引擎调用异常] {type(e).__name__}: {e}"
+    return None
+
+
 def _run_one(role, req, llm, card, node):
     """执行单个角色节点，返回输出。
 
@@ -42,7 +78,11 @@ def _run_one(role, req, llm, card, node):
     """
     user_input = req
     try:
-        output = role.run(llm, user_input)
+        _eng_out = _run_role_engine(role, req, node)
+        if _eng_out is not None:
+            output = _eng_out
+        else:
+            output = role.run(llm, user_input)
     except Exception as e:
         output = f"[执行异常] {e}"
     # 编排层：跨节点共享 req 前缀（稳定需求描述 → 命中缓存）
