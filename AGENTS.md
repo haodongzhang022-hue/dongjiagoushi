@@ -145,6 +145,33 @@
 - **市场获客分层（通用基建）**：工具层 / 数据层 / 渠道层 / 客服层 / 销售层 为平台级通用能力，既服务对外获客，也服务对内需求开发，可多次复用。
 - 承载：`local-agent/team.yaml`（DAG 定义）+ `local-agent/graph.py`（DAG 引擎）+ `local-agent/fractal.py`（分形引擎 + devs_per_team）。详见 `docs/FRAMEWORK_V2.md`。
 
+### 小组长脑子（Lead Brain · 固定规则 · Issue #232）
+
+「小组长不只是拆任务的手，是**经理的脑子 + 监察**」——用户原话：「小组长我还没见到，
+需要补充上，经理现在智力严重不足，需要小组长当脑子用给他增强，看着他别犯傻」。
+本规则为仓库级固定 rules，对「架构·小组长」与所有派活方生效（详见 `docs/LEAD_BRAIN.md`）：
+
+- **① 方案先过脑子（补全）**：经理（及任何派活方）的分工方案必须先过 `diagnose` 诊断缺口——
+  目标 / 负责人 / 干什么（不许是"开发"这种空词）/ 输入 / 输出 / 验收标准 / 派活深度 / 编号唯一，
+  再由 `advise` 给修正动作（补字段 / 拆细 / 改派 / 加派 / 修正方案 / 升总师）。
+  **缺口不齐不许往下派**（`ready=False` 即拦截），不带窟窿往下走。
+- **② 行动再看住（监察）**：派活前过 `watch`/`watch_manager_orders`，确定性拦住六类犯傻——
+  跳深度（不到 L4）、重复派发（同一实体 >2 次）、超次返工（打回 >3 次）、空转（进度零推进）、
+  抢单、无主派发；每条必须给**替代动作**，不是只说"不行"。
+- **③ 二度上报**：同一问题二度命中 → `blocked_escalate` 标 blocked 上报总师，
+  不让经理自己硬扛；较大的改框架交「总师助理」，保总师上下文纯净。
+- **④ 全员可挂、不私有**：`lead_brain_ability` 挂在 `BaseRole`，任何角色可 `enhance_plan()`/
+  `watch_orders()`——脑子是通用能力，经理自己派活前也先过一遍。
+- **⑤ 确定性判定**：判定是代码不是感觉（阈值唯一事实源在 `lead_brain/ability.py` 的
+  `REQUIRED_FIELDS` / `DEFAULTS`），同样输入必给同样结论，可核验、可留痕（`report["lead_brain"]`）。
+- **⑥ 只补窟窿不碰边界**：小组长补方案的可执行性，做什么/为何做仍归总师与经理；
+  判不了的标 `escalate` 显式暴露，不猜。
+
+> 触发：显式 `[触发:架构·小组长]` / 语义命中「拆任务/子任务/协调/排期/整合/进度尺/
+> 经理方案/看住经理/别犯傻」/ rules 固定。规则层已落地 `local-agent/lead_brain/` +
+> `roles/team_lead.py` + `orchestrator._lead_brain_enhance()` + `tests/test_lead_brain.sh`
+> （6 组信号灯），云端人设见 `.cnb/settings.yml`「架构·小组长」。
+
 ### 分发递进深度模型（dispatch depth L1→L4 · 固定规则）
 
 派活不是"分了就完事"，而是有**递进关系**的四层深度。只声明是最浅层，**要的是最深层的
@@ -885,6 +912,9 @@ local-agent/dispatch/                 # 通用派发能力包（DispatchAbility 
   ├── ability.py                      # 通用派发能力类（L1→L4 + 接单闭环）
   └── __init__.py                     # 导出 DispatchAbility
   └── templates/issue-template.md     # Issue 结构化声明模板
+local-agent/lead_brain/               # ⭐ 小组长脑子（LeadBrainAbility 全员能力 · Issue #232）
+  ├── ability.py                      # 诊断经理方案缺口 + 看住经理犯傻（确定性阈值唯一事实源）
+  └── __init__.py                     # 导出 LeadBrainAbility
 local-agent/dev-standard/              # 开发规范体系（StandardAbility 全员能力 · Issue #83）
   ├── specs.py                        # 规范条目注册表（唯一事实源）
   ├── checker.py                      # 确定性规范检查器（非 LLM 判断）
