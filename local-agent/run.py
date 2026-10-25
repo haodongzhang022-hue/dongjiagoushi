@@ -171,6 +171,10 @@ def main():
                         help="--bridge request 走真实 cnb.cool 传输通道（默认真实，用户：模拟数据不可信）")
     parser.add_argument("--bridge-via", default=None,
                         help="--bridge request 指定真实宿主传输: cnb-live/local-harness/web-bridge(或别名)，v0.6.0 三宿主注册表；--bridge via-overview 看三宿主可达矩阵")
+    parser.add_argument("--to-role", default=None, help="--bridge render 承接角色（生成合规 [触发] 标记）")
+    parser.add_argument("--card-file", default=None, help="--bridge verify 待核验卡文本文件")
+    parser.add_argument("--bridge-run", action="store_true",
+                        help="--bridge localtest 真跑本地测试（rc 非 0 如实报 ok=False）")
     # ---- 真实 cnb.cool 传输通道（Issue #105 · entries.cnb_live · v0.5.0）----
     parser.add_argument("--live", default=None,
                         help="真实 cnb.cool 通道 action: probe/transport (发送信号探测真实配合)")
@@ -242,10 +246,21 @@ def main():
             return 0
         via = args.bridge_via
         # 真实 CLI：--bridge request 默认走真实 cnb.cool 通道（用户：模拟数据不可信）
+        # 句柄自足卡（v0.3.1）：--card-file 供 verify 核验外部卡文本
+        card_text = None
+        if getattr(args, "card_file", None):
+            try:
+                with open(args.card_file, "r", encoding="utf-8") as f:
+                    card_text = f.read()
+            except Exception as e:  # noqa: BLE001
+                print("[bridge verify] 读卡失败: %s" % e)
+                return 1
         out = bridge.cli_bridge(
             args.req or "", entry=args.entry or "local", action=args.bridge,
             handle_id=args.handle, collect_state=args.collect_state, pr_ids=pr_ids,
-            live=args.bridge_live or args.bridge == "request", via=via)
+            live=args.bridge_live or args.bridge == "request", via=via,
+            to_role=getattr(args, "to_role", None), card_text=card_text,
+            run=bool(getattr(args, "bridge_run", False)))
         if args.bridge == "overview":
             print(json.dumps(out, ensure_ascii=False, indent=2))
         elif args.bridge == "request":
@@ -266,10 +281,24 @@ def main():
             print("[bridge 本地对齐] ok=%s | relay=%s | data=%s"
                   % (out.get("ok"), out.get("relay_aligned"), out.get("data_archived")))
         elif args.bridge == "localtest":
-            print("[bridge 本地测试先行] ok=%s | 下放本地=%s | skipped_cloud_build=%s"
+            print("[bridge 本地测试先行] ok=%s | 下放本地=%s | skipped_cloud_build=%s | 真跑=%s"
                   % (out.get("ok"), len(out.get("routed_local", [])),
-                     out.get("skipped_cloud_build")))
+                     out.get("skipped_cloud_build"), out.get("executed")))
             print("  成本注记: %s" % out.get("cost_note"))
+            for r in out.get("results", []):
+                print("  - %s rc=%s ok=%s" % (r.get("script"), r.get("returncode"), r.get("ok")))
+        elif args.bridge == "render":
+            print(out.get("card") or out.get("error"))
+            print("\n[自足核验] relay_ok=%s %s"
+                  % (out.get("relay_ok"),
+                     "" if out.get("relay_ok") else out.get("relay_reasons")))
+        elif args.bridge == "verify":
+            print("[bridge 卡自足核验] ok=%s | self_contained=%s | handle=%s"
+                  % (out.get("ok"), out.get("self_contained"), out.get("handle_id")))
+            for m in out.get("missing", []):
+                print("  ❌ 缺: %s" % m)
+        elif args.bridge == "relaunch":
+            print("[bridge 本地可达标记] ok=%s | handle=%s" % (out.get("ok"), out.get("handle_id")))
         return 0
 
     # ---- 跨端聚合控制页（Issue #105 最常用链路 · entries.dashboard · v0.5.0 真实本地实测）----

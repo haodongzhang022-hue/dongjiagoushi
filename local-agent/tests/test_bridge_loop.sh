@@ -110,8 +110,10 @@ plan = bridge.local_test_first(h['handle_id'])
 assert plan['ok'] is True
 assert plan['skipped_cloud_build'] is True
 assert len(plan['routed_local']) >= 1
-assert '建环境' in plan['cost_note']
-print('本地测试先行 ok: 下放=', plan['routed_local'])
+# Issue #232：本地不可达时如实标注「无本地测试证据」，不许假装已跑到（假绿灯）
+assert plan['executed'] is False
+assert ('无本地测试证据' in plan['cost_note']) or ('建环境' in plan['cost_note'])
+print('本地测试先行 ok: 下放=', plan['routed_local'], '| executed=', plan['executed'])
 print('  cost_note:', plan['cost_note'])
 EOF
 "

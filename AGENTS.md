@@ -77,6 +77,16 @@
   **每端一个面板** web/cnb/local / `control` 一键动作回写真实桥状态机非假状态 / `html_page` 人可读
   HTML 聚合页），run.py 加 `--dashboard action` + `--dashboard-html`，全链可调。详见
   `docs/PLATFORM_ADAPTERS.md` 三.7 + ADR-0008。
+  **句柄自足 + 脑区判定（跨执行地交付形态 · Issue #232 · platform-adapter v0.3.1）**：
+  跨执行地交付**不许只传一个 id**——本仓工作面在不同执行地之间是**断开**的（云端读不到
+  本地 `entries/_bridge_state/`，该目录也不进版本库），只传句柄 id 时云端等于空手。
+  `bridge.render_handle_card` 生成**自足卡**（目的/验收/不做边界/所在仓库+issue+PR/脑区/
+  证据缺口/自检清单）+ **卡自带合规接力卡标记**（完整 `@org/repo(角色)` + `[触发:角色全称]`，
+  过 `relay_card.check`）；`verify_handle_card` 拦残卡；`analyze_locus` 按**动作**判「云端能做 /
+  必须本地 / 必须人工」，本地不可达时 `evidence_available=False` + 缺口清单（**不做≠不会**）；
+  `local_test_first(run=True)` 以 rc 为准，**rc 非 0 / 脚本缺失不许假绿灯**。详见
+  `docs/PLATFORM_ADAPTERS.md` 三.6.1 + ADR-0020。
+
   **真实本地实测通道（模拟数据不可信 → 默认真实传输 · entries.cnb_live · v0.5.0）**：
   用户点名「使用模拟数据的我们一般认为是不可信的…发送信号尝试做配合，不行再适配」——
   bridge/dashboard 默认从 mock transport 升级为**真实 cnb.cool 传输**。落地为

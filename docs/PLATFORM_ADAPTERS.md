@@ -84,6 +84,41 @@ support 系模板强制经秘书；harness 内嵌因调用方已定角色允许�
 
 **成本模型**：云端建环境贵 → CPU 密集测试下放本地（对齐 `CLOUD_LOCAL_COOP.md`），云端只保留
 LLM 强相关 + 评审；本地测试先行让长时云端开发（跨对话/跨 PR/跨仓库）的验收不等云端重复建环境。
+
+### 三.6.1 句柄自足 + 脑区判定（Issue #232 · module platform-adapter v0.3.1）
+
+> 症状（用户实测）：本地发起的云开发请求，交付时**只带了一个桥接句柄 id**；本地服务一关，
+> 云端**只剩 id，等于空手**——不知道在哪干活、做到哪算完、能不能动手。
+
+**根因（三条，都不是"设计如此"）**：
+1. **桥不是纯投递**：`request_cloud_dev` 的 docstring 写"一句话/多行均可"，但跨端实际传输的
+   只有 `handle_id` + 首行 40 字的 `req_key`；上下文（目的/边界/验收/仓库/PR）全留在本地
+   `_bridge_state/`，而该目录**本就不进版本库** → 云端读代码也读不到。
+2. **假绿灯**：`local_test_first` 默认执行器是 mock，`run()` 恒返 `{"ok": True}`，且脚本不存在
+   也不报错 → 云端会把"本地没跑"当"本地过了"。
+3. **脑区是空话**：只有"本地/云端/hybrid"一个 `locus` 标签，没有按**动作**判定，云端不知道
+   哪些做了算有效、哪些做了等于没做、哪些必须人工。
+
+**落地**（`entries/bridge.py`）：
+- `render_handle_card(handle, purpose/acceptance/scope_not/next_step/relaunch/role)`：
+  **一个 id 重建全部上下文**的自足卡——含目的 / 验收 / 不做边界 / 所在仓库/entry/issue/PR /
+  脑区（云端可做、必须本地、必须人工）/ 证据缺口 / 自检清单；**卡自带合规接力卡标记**
+  （完整 `@org/repo(角色)` + `[触发:角色全称]`，直接过 `relay_card.check`），交付即合规不靠自觉。
+- `verify_handle_card(text, handle_id)`：核验卡是否真自足（目的/验收/不做/仓库/句柄 id/触发标记），
+  残卡逐项列缺——把用户遇到的"信息不全"变成**机器可拦**。
+- `analyze_locus(actions, local_reachable)`：**脑区判定表**（`LOCUS_ACTION_TABLE` 唯一事实源）——
+  按动作判「云端能做 / 必须本地 / 必须人工」，未知动作宁拦不放；并做**证据保全**：本地不可达时
+  `evidence_available=False` + 缺口清单，绝不把"没数据"误读成"没问题"。
+- `local_test_first(..., run=False)`：默认只出计划不假跑；`run=True` 走真实 `_shell_executor`，
+  **rc 非 0 / 脚本不存在如实 `ok=False`**；本地不可达时 `cost_note` 明说"本轮无本地测试证据（≠通过）"。
+- `mark_relaunch(handle_id)`：本地可达后翻正脑区与证据。
+- CLI：`--bridge render|verify|relaunch`（+ `--to-role` / `--card-file` / `--bridge-run`）。
+- 测试 `local-agent/tests/test_bridge_handle_selfcontained.sh`（10 项信号灯）。
+
+**交付形态结论（回答"第一次交付要不要带全信息"）**：
+**要**。但"带全"不等于"带很多"——带的是**能重建上下文的骨架**（目的/边界/验收/在哪/脑区），
+10 行左右、可机器校验；不是把整段对话搬过去。桥只负责"投递"时，一次断链就全断；
+句柄自足后云端**不只可以操作，还能判断该不该操作、在哪操作**。
 ### 三.7 跨端聚合控制页（最常用链路深化 · module platform-adapter v0.4.0）
 
 > 背景：用户（Issue #105）点名「做一个方便控制的聚合，类似于 fastapi 聚合页包括状态显示，
