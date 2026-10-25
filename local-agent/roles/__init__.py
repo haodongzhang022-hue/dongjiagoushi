@@ -74,6 +74,17 @@ ROLE_REGISTRY = {
 }
 
 
+#: 团队名册（**单一事实源**）：`get_role(name)` 取不到实例 = 名册上没有这个人。
+#: 经理的"谁能承接"「@ 召唤谁」、交付的"谁来收尾"都从这里派生——
+#: 不许各自写死角色名列表（写死就会漂移成"派给一个不存在的角色"）。
+TEAM_ROSTER = tuple(ROLE_REGISTRY.keys())
+
+
+def roster_available():
+    """真能装载出实例的角色清单（代码判定，不靠"我以为有他"）。"""
+    return [n for n in TEAM_ROSTER if get_role(n) is not None]
+
+
 def get_role(name):
     """按角色名取角色实例；找不到返回 None。
 

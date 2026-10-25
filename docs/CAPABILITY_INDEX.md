@@ -33,6 +33,7 @@
 | **调度** | 经理**找通路**（多通路穷举 + 权责内自决）| 找通路/一条路断了/换下一条/CodeBuddy兜底/申请授权/权责内自决/SELF/HUMAN/末端员工 | `local-agent/manager/lanes.py` | docs/MANAGER.md §8.3-8.4 | Issue #239 二轮 · module manager-lane v0.1.0 |
 | **调度** | 经理**证据闸门 + 承接方工作面**（演练不算干活）| 证据分级/simulated/演练不算/真上工/工作面/work_face/承接方/注册表/换主体 | `local-agent/manager/work.py` + `roles/base.py`(work_face) | docs/MANAGER.md §九 | Issue #239 四轮 · module manager-work v0.1.0 |
 | **调度** | 小组长**带证据上交 / 跨岗借角色** | 带证据上交/无人承接/跨岗借角色/lead_escalate/lead_borrow/接单不是终点 | `roles/team_lead.py` | docs/MANAGER.md §8.6 | Issue #239 二轮 |
+| **调度** | 经理**判据不自证**（回执不是成果 / 演练不污染真任务 / 借人从名册派生）| 回执不是成果/开工不算成果/自证清白/演练污染/借人写死/名册派生/borrow_candidates/trigger=False | `local-agent/manager/engine.py` + `manager/work.py` + `roles/__init__.py`(TEAM_ROSTER) | docs/MANAGER.md §十 | Issue #239 收尾轮 · module manager-judge v0.1.0 |
 | **调度** | 分发深度模型 L1-L4 | 派发/派活深度/接单 | AGENTS.md·分发递进深度 | docs/DISPATCH_DEPTH.md | Issue #33 |
 | **全员** | 对结果负责·真实唤醒闸门 | 假装分配/断链/待回执/不报L4 | `dispatch_engine.py`·真实唤醒闸门 | docs/DISPATCH_DEPTH.md | Issue #100 |
 | **全员** | 派发能力（DispatchAbility）| 派发/接单/分发 | `local-agent/dispatch/` | docs/DISPATCH_ABILITY.md | Issue #33 |

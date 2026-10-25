@@ -57,9 +57,13 @@ if _LOCAL_AGENT_DIR not in sys.path:
 from .base import BaseRole
 
 
-#: 默认承接方（经理派活的主要对象）：能真上工的角色
-DEFAULT_WORKER_ROLES = ("架构·开发", "架构·评审", "架构·测试",
-                        "架构·小组长", "架构·交付")
+#: 默认承接方（经理派活的主要对象）：**从团队名册派生，不写死**。
+#: 写死角色名的代价是真实的：`borrow_role()` 曾硬啃「架构·开发」，于是「借角色」
+#: 在开发本来就接不了的时候永远借同一个、必失败，再退回来报"跨岗借不到"。
+#: 现在谁能承接 = 名册里谁真能装载出实例（代码判，可漂移可扩展）。
+def default_worker_roles():
+    from . import roster_available
+    return tuple(roster_available())
 
 
 class ManagerRole(BaseRole):
@@ -190,7 +194,7 @@ class ManagerRole(BaseRole):
         from manager.work import WorkerRegistry
         from . import get_role
         reg = WorkerRegistry()
-        for name in (roles or DEFAULT_WORKER_ROLES):
+        for name in (roles or default_worker_roles()):
             try:
                 role = get_role(name)
                 if role is None:

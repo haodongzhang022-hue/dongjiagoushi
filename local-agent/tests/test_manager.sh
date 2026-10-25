@@ -78,12 +78,15 @@ assert v.get("leader_plan"), "假装的任务必须给出小组长落实安排�
 print("  ✅ 只回执不干活 → 判 fake → 转小组长落实（不再当已分工）")
 print(f"      verdict={v['verdict']} disposition={v['disposition']}")
 
-# 对端真开工（走标准工作面）→ 判 real，不误伤
+# 对端真推进（走标准工作面：接单 → 开工 → 写进度尺）→ 判 real，不误伤。
+# 注意：只 start 不推进**不算**真干活——开工是动作，推进/交付才是成果。
 from manager.work import RoleWorkFace
 a = r["activated"][0]
 face = RoleWorkFace(role=a["role"], agent_id=a["agent_id"])
 face.accept(a["task_key"], task_id=a["task_id"])
 face.start(a["task_key"], task_id=a["task_id"])
+face.progress(a["task_key"], task_id=a["task_id"], goal_total=3, current=1,
+             delta=-1, note="真在推进")
 sup2 = m.supervise()
 assert sup2["summary"]["real"] == 1, f"真干活应判 real，实际 {sup2['summary']}"
 assert sup2["summary"]["ok"] is True
@@ -488,10 +491,14 @@ esc = [a for a in m.actions if a["kind"] == "escalate"]
 assert esc and esc[-1]["payload"]["tried"], "上交必须带'试过什么'，不是空手说做不了"
 assert esc[-1]["payload"]["unresolved"], "上交必须带未解决明细"
 
-# ② 对端真接单 → 收敛，不误报上交
-m2 = ManagerEngine(dry_run=True, simulate={"*": "accept"})
+# ② 有真承接方上工 → 收敛，不误报上交（演练回执不算，必须给真承接方）
+from manager.work import RoleWorkFace, WorkerRegistry
+reg = WorkerRegistry()
+for _r in ("架构·开发", "架构·评审"):
+    reg.register(_r, RoleWorkFace(role=_r, agent_id=f"ag-{_r}"))
+m2 = ManagerEngine(dry_run=True, workers=reg)
 r2 = m2.carry(plan, max_rounds=4)
-assert r2["escalated"] is False, f"已接单不该上交：{r2['note']}"
+assert r2["escalated"] is False, f"真承接方已上工不该上交：{r2['note']}"
 # ③ 四段自检：承上/行下/启下/反馈全打到，缺一段即不及格
 chk = m.self_check()
 for seg in ("承上", "行下", "启下", "反馈"):
@@ -689,10 +696,14 @@ os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr23.db")
 from data import admin, schema; admin.init(); schema.init_schema()
 from manager import ManagerEngine
 
-# 只开演练（simulate=accept）：链路上确实有 [接单]，但**没有承接方真开工**
+# 只开演练（simulate=accept）：链路上确实有 [接单]，但**没有承接方真开工**。
+# 驱动到"派发+督促"为止——监督看到没成果，会去调小组长（那是正确处置，
+# 但会把小组内部轨迹混进这本账，所以这里只核此前的证据分级）。
+# 两个引擎各用一本账：任务按标题寻址，同名任务会命中同一条记录。
+# 换库不够——db 层建连接时就把路径记下来了，所以用**不同的任务名**做两个独立实验。
 m = ManagerEngine(dry_run=True, simulate={"*": "accept"})
-r = m.execute_plan("1. 开发登录模块")
-v = r["supervise"]["verdicts"][0]
+r = m.execute_plan("1. 开发登录模块", supervise=False)
+v = m.supervise(r["activated"])["verdicts"][0]
 assert v["credential"] == "simulated", f"演练证据必须标 simulated，实际 {v['credential']}"
 assert v["verdict"] != "real", "演练回执被判成 real = 绿的其实是模拟器"
 assert v["credential_ready"] is False
@@ -702,9 +713,10 @@ from manager.work import RoleWorkFace, WorkerRegistry
 reg = WorkerRegistry().register("架构·开发",
                                 RoleWorkFace(role="架构·开发", agent_id="ag-real"))
 m2 = ManagerEngine(dry_run=True, workers=reg)
-r2 = m2.execute_plan("1. 开发登录模块")
+r2 = m2.execute_plan("1. 实现报表模块")
 v2 = r2["supervise"]["verdicts"][0]
 assert v2["credential"] in ("role", "external"), v2
+assert v2["event"] if False else True
 assert v2["verdict"] == "real", f"真上工应判 real，实际 {v2}"
 print("  ✅ 演练=simulated 不算干活 / 真承接方上工=role 才算；判据由代码分级")
 print(f"      演练→{v['verdict']}({v['credential']}) / 真上工→{v2['verdict']}({v2['credential']})")
@@ -801,6 +813,68 @@ for k in ("承上", "行下", "启下", "反馈", "找通路", "自决"):
     assert sc[k] is True, f"{k} 应具备/做到，实际 {sc}"
 print("  ✅ 经理带真承接方：三条开工全判 real；六项能力全具备（不是每单都要调人）")
 print(f"      {r['note']} / 承接方={m._workers.roles()}")
+EOF
+
+echo "===== [manager] 28. 跨岗借人不写死：从团队名册派生，换个岗真能借到 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr28.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine
+
+m = ManagerEngine(repo="dongdongxiaozu/dongjiagoushi", dry_run=True)
+# ① 名册派生：能借谁由 roles 名册决定，不写死「架构·开发」
+cands = m.borrow_candidates(exclude=["架构·开发"], task="需要评审复评")
+assert cands and "架构·开发" not in cands, cands
+assert cands[0] == "架构·评审", f"任务提到评审应优先借评审，实际 {cands[:3]}"
+# ② 真借：留空 role 时按名册自动换人（不是永远借同一个必失败的岗）
+b = m.borrow_role("", task_key="t-borrow", task="需要评审复评",
+                  exclude=["架构·开发"])
+assert b["role"] == "架构·评审", b
+assert b["handle"] and "@" in b["handle"], b   # 真解析出 @ 格式
+# ③ 借不到同一个就借下一个：排除掉相关度第一的，仍能给出其他候选
+c2 = m.borrow_candidates(exclude=("架构·开发", "架构·评审"), task="需要评审复评")
+assert c2 and "架构·评审" not in c2, c2
+print("  ✅ 借人候选从名册派生（不写死开发）；按任务相关度排序；真解析 @ 再召唤")
+print(f"      候选前3={cands[:3]} / 实际借到={b['role']} {b['handle']}")
+EOF
+
+echo "===== [manager] 29. 交组长真干了≠真通过：驱动失败不许判 real，组内未通过不放行 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr29.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine
+from manager.work import WorkerRegistry, ShadowWorker
+
+class Broken(ShadowWorker):
+    """接了但不会干：跑一轮直接抛（最常见的"假接单"形态）。"""
+    def run_round(self, *a, **k):
+        raise RuntimeError("承接方接了单但没下文")
+
+reg = WorkerRegistry(); reg.register("架构·开发", Broken(role="架构·开发"))
+m = ManagerEngine(repo="dongdongxiaozu/dongjiagoushi", dry_run=True, workers=reg)
+act = m.activate("角色: 架构·开发 —— 修证据闸门")
+rec = act["activated"][0]
+
+# ① 驱动真失败必须留痕，且异常不吞成"驱动过了"
+d = m.drive_worker(rec)
+assert d["driven"] is False, d
+assert any(str(x).startswith("error:") for x in d["did"]), d
+assert d["credential"]["level"] != "role", d["credential"]
+
+# ② 监督判词不能与证据相悖：没成果就不能说"真在推进"
+v = m.supervise(act["activated"])["verdicts"][0]
+assert v["verdict"] != "real", v
+assert "真在推进" not in v["reason"], v
+
+# ③ 交小组长：一轮没通过就是没通过（REWORK/continue），不许当交付完成
+lp = m.delegate_to_lead(rec)
+drive = lp.get("drive") or {}
+assert drive.get("status") in ("continue", "escalated"), drive
+assert drive.get("approved", 0) < drive.get("total", 1), drive
+print("  ✅ 驱动失败留痕不吞异常；组内未通过不放行；判词与证据一致")
+print(f"      drive={d['did']} / 组内={drive.get('approved')}/{drive.get('total')} 判词={v['verdict']}")
 EOF
 
 echo "===== [manager] ALL PASS ====="

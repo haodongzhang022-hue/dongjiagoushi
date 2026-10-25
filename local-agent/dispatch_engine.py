@@ -617,7 +617,7 @@ def dispatch_verify(assignments):
     }
 
 
-def dispatch(repo, assignments, enable_issue=True):
+def dispatch(repo, assignments, enable_issue=True, trigger=True):
     """
     经理四层次分发一站式入口（含真实唤醒校验 · Issue #100）。
 
@@ -631,6 +631,8 @@ def dispatch(repo, assignments, enable_issue=True):
     输入：
       repo: 仓库名（如 "dongdongxiaozu/dongjiagoushi"）
       assignments: [{task_key, title, role, domain, depends_on, priority, detail}]
+      trigger:    False = **不投接力卡、不开工**（演练用：避免派发方自己写出
+                  `work_started` 污染真任务证据）。默认 True。
 
     输出：{ L1_declare, L2_dispatch, L3_trigger, L4_start,
             verification(真实唤醒核验), awaiting_receipt(待真实唤醒任务),
@@ -664,8 +666,8 @@ def dispatch(repo, assignments, enable_issue=True):
                 "priority": a.get("priority", "P1"),
                 "status": "dispatched",
             })
-    # L3 触发接单
-    l3 = dispatch_trigger(l2)
+    # L3 触发接单（trigger=False 时只登记不投卡：演练不往真任务上记别人的动作）
+    l3 = dispatch_trigger(l2) if trigger else []
     # ---- 真实唤醒回执校验（防假装分配 · Issue #100）----
     # 只在本地消息管线投了 [触发] 接力卡≠真唤醒。必须对端回执 [接单] 才算 L3 完成，
     # 才能放行到 L4。未回执的任务标 awaiting_receipt，不假装开工。

@@ -330,8 +330,11 @@ class ManagerFlow:
                     action["added"] = added
                     action["executed"] = bool(added)
                 elif code == "borrow_role":
-                    borrow = self.engine.borrow_role("架构·开发",
-                                                     task_key=v["task_key"])
+                    # 借人是"这个岗接不住才去别处借"——不能写死借「架构·开发」
+                    # （开发本来就是接不住的那个，借同一个名字等于原地等死）。
+                    borrow = self.engine.borrow_role(
+                        "", task_key=v["task_key"], task=v.get("title") or "",
+                        exclude=(v["role"],))
                     action["borrow"] = borrow
                     action["executed"] = bool(borrow.get("ok"))
                 elif code == "split":

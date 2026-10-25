@@ -112,7 +112,10 @@ NOT_MANAGER = {
 _ACCEPT_EVENTS = ("accepted", "awake_ack")
 _WORK_EVENTS = ("work_started", "delivered")
 _FAKE_RECEIPT = "[接单]"          # 只有梗概、没有后续动作 = 假装
-_STALL_ROUNDS = 2                 # 连续无进展轮数阈值 → 判停滞
+# 设为 1 的理由：**"开工了、量了一次、距离一点没动"本身就是证据**——
+# `track_progress(current=1, current=1)` 是原地踏步，不是"还没开始"。设成 2
+# 会让最常见的那种停滞（报一次进度就消失）躲过判定。
+_STALL_ROUNDS = 2                 # 连续 2 轮距离纹丝不动 → 判停滞（单点不算）
 MAX_FLOW_ROUNDS = 4               # 承上启下默认调整轮数（超限显式上交，不静默）
 _JUMP_ROUNDS = 3                  # 连续回退 delta 轮数阈值 → 判横跳
 
@@ -378,9 +381,14 @@ class ManagerEngine:
             a.setdefault("detail", a.get("title", ""))
             a["planned_index"] = idx
 
-        # dry_run 时 enable_issue=False（不碰平台），真实模式才建 Issue
+        # dry_run 时 enable_issue=False（不碰平台），真实模式才建 Issue。
+        # 演练（simulate）下派发层**不投接力卡、不开工**：`dispatch` 里的 L3→L4
+        # 会把已经回执的任务补一笔 `work_started`，那笔"开工"是派发方自己写的，
+        # 留在真任务上就会被后续监督当成"真在推进"——绿的其实是模拟器。
+        # 演练只为验证经理自己的链路，不该往真任务上记别人的动作。
         result = dispatch_engine.dispatch(
             self.repo, assignments, enable_issue=not self.dry_run,
+            trigger=not self.simulate,
         )
 
         activated = []
@@ -448,13 +456,20 @@ class ManagerEngine:
                     accepted.append(rec)
                     rec["state"] = "accepted"
                     continue
-            # 演练/测试：模拟对端回执（**simulated 级，不算干活**，仅让链路可离线跑）
+            # 演练/测试：模拟对端回执（**simulated 级，不算干活**，仅让链路可离线跑）。
+            # 必须排在真唤醒之前：`dispatch_trigger` 走 L3→L4，会对回了 [接单] 的任务
+            # 补一笔 `work_started`（"已开工"）。放在演练**之后**，那笔开工就落在
+            # 真任务上，被后续监督当成"真在推进"——这就是"绿的其实是模拟器"最后一条尾巴。
             if self._simulated_accept(rec):
                 rec["state"] = "simulated_ack"
                 awaiting.append(rec)
                 continue
-            # ② 真实唤醒一次（投接力卡）；唤醒本身失败 → 立刻换下一条通路（不空等）
+            # ② 真实唤醒一次（投接力卡）；唤醒本身失败 → 立刻换下一条通路（不空等）。
+            # 注意 `dispatch_trigger` 走的是 L3→L4：对已回执的任务会补一笔
+            # `work_started`，那笔"开工"不是承接方干的，不能当经理的证据。
             awake = self._reawake(rec)
+            if awake.get("sent"):
+                rec["trigger_emitted_work"] = True  # 本轮唤醒本身带出的开工，记账剔除
             rec["reawake"] = awake
             if not awake.get("sent"):
                 rec["lane_fallback"] = self._fallback_lane(rec)
@@ -718,11 +733,37 @@ class ManagerEngine:
                                           "error": f"{type(e).__name__}: {e}"})
         return added
 
-    def borrow_role(self, role, *, task_key=""):
+    def borrow_candidates(self, exclude=(), task=""):
+        """跨岗可以借谁：**从团队名册派生**（不写死「架构·开发」）。
+
+        借人的语义是"本单位接不住 → 去别的功能域借"，所以候选必须
+        ① 在册（`get_role` 能装载出实例）② 不是被借走的那个岗 ③ 不是经理自己。
+        再按任务文本的相关度排序（提"评审"就把评审排前面），无相关度按名册顺序。
+        """
+        try:
+            from roles import roster_available
+        except Exception:  # noqa: BLE001 名册拿不到就退回已有承接方
+            roster_available = lambda: []
+        pool = [r for r in roster_available()
+                if r not in set(exclude) and r != self.owner]
+        if not pool:
+            pool = [r for r in ("架构·开发", "架构·评审", "架构·测试")
+                    if r not in set(exclude)]
+        text = str(task or "")
+        pool.sort(key=lambda r: 0 if (r.split("·")[-1] and r.split("·")[-1] in text) else 1)
+        return pool
+
+    def borrow_role(self, role="", *, task_key="", task="", exclude=()):
         """真跨岗借角色：用 HandleAbility 解析目标仓库里有权限的 @ 格式再召唤。
 
         不是写一句"调用 HandleAbility 定位"——真调用，真拿到 handle，真去唤醒。
+        `role` 留空（或传进来的是本岗接不住的那个人）时，按名册自动换一个能借的：
+        **借不到同一个，就借下一个**，别在同一个名字上反复失败还报"借不到人"。
         """
+        exclude = set(exclude) | ({role} if role else set())
+        if not role:
+            cands = self.borrow_candidates(exclude=exclude, task=task or task_key)
+            role = cands[0] if cands else "架构·开发"
         handle = ""
         try:
             from handle import HandleAbility
@@ -737,7 +778,9 @@ class ManagerEngine:
         wake = self.wake_role(role, task_key=task_key,
                               note=f"跨岗借角色，handle={handle}")
         out = {"role": role, "handle": handle, "wake": wake,
-               "ok": wake.get("ok", False)}
+               "ok": wake.get("ok", False),
+               "candidates": self.borrow_candidates(exclude=exclude,
+                                                    task=task or task_key)}
         self._log("borrow_role", out)
         return out
 
@@ -810,25 +853,43 @@ class ManagerEngine:
                 "events": sorted(set(events)), "meter_rounds": len(meters),
                 "credential": cred["level"], "credential_ready": is_ready(cred)}
 
+        # 判活看两种东西：① 距离（进度尺推没推）② 凭据（是不是真承接方干的）。
+        # 开工了却连续不推进/反复回退是"卡住"，比"没接单"更该被揪出来。
+        stall, jump = _judge_series(meters)
+
+        # 哪些"开工"不该算承接方的功劳：演练投卡、以及**本轮经理唤醒自己带出的**
+        # `work_started`（`dispatch_trigger` 走 L3→L4，对已回执任务会补一笔开工）。
+        # 这些不是承接方干的活，剔除后再判。
+        # 这条任务上**有没有承接方真留在案上的成果**（推进/交付），这才叫"干了"；
+        # 单纯 `work_started` 不论谁写的都不算——它是动作，不是成果。
+        produced = _produced_count(task_id)
+        # 卡住（停滞/横跳）只要**有开过工 + 有刻度**就成立：推了两次还在原地，
+        # 说明对方在瞎忙，不能因为"没推进"就当没干活放过去。
+        stuck_work = has_work and bool(meters)
+        real_work = produced > 0
+
         if simulated_only and not is_ready(cred):
+            if stuck_work and stall:
+                return {**base, "verdict": "stall", "disposition": "interrupt",
+                        "reason": f"有刻度却连续 {_STALL_ROUNDS}+ 轮距离不变（停滞）"}
+            if stuck_work and jump:
+                return {**base, "verdict": "jump", "disposition": "interrupt",
+                        "reason": f"连续 {_JUMP_ROUNDS}+ 轮进度回退（横跳不收敛）"}
             return {**base, "verdict": "fake", "disposition": "hand_to_lead",
                     "reason": "只有演练回执（simulated），没有真实承接方开工 —— 不算分工"}
-
-        # 停滞 / 横跳（量化距离说话）
-        stall, jump = _judge_series(meters)
-        if has_work and stall:
+        if stuck_work and stall:
             return {**base, "verdict": "stall", "disposition": "interrupt",
                     "reason": f"连续 {_STALL_ROUNDS}+ 轮到目标距离不变"}
-        if has_work and jump:
+        if stuck_work and jump:
             return {**base, "verdict": "jump", "disposition": "interrupt",
                     "reason": f"连续 {_JUMP_ROUNDS}+ 轮进度回退（横跳不收敛）"}
-        if has_work:
+        if real_work:
             return {**base, "verdict": "real", "disposition": "keep",
-                    "reason": "有接单回执 + 开工/交付证据，真在推进"}
+                    "reason": "有接单回执 + 承接方真开工/交付证据，真在推进"}
         if has_receipt:
             # 最典型的假装：回了 [接单] 就没下文
             return {**base, "verdict": "fake", "disposition": "hand_to_lead",
-                    "reason": "回执了 [接单] 但无开工证据、无进度尺推进 —— 假装分工"}
+                    "reason": "回执了 [接单] 但无承接方开工证据、无进度尺推进 —— 假装分工"}
         return {**base, "verdict": "awaiting", "disposition": "hand_to_lead",
                 "reason": "无接单回执、无开工证据 —— 派发未落地"}
 
@@ -1067,6 +1128,52 @@ def _judge_series(meters):
     net_progress = sum(tail)
     jump = len(tail) >= _JUMP_ROUNDS and net_progress >= 0
     return stall, jump
+
+
+def _work_events(task_id):
+    """承接方"开工/交付"事件条数（原始计数，剔除工作交给调用方）。"""
+    from data import db
+    try:
+        rows = db.query("SELECT event FROM progress WHERE task_id=?", (task_id,))
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(1 for r in rows
+               if (r["event"] if not isinstance(r, tuple) else r[0]) in _WORK_EVENTS)
+
+
+def _produced_count(task_id):
+    """承接方留在案上的**成果**条数（progressed / delivered）。
+
+    只统计成果的含义：回了 [接单] 又补了一笔"开工"仍然不算干活——
+    开工是动作，推进和交付才是结果（治"接了单就没下文"）。
+    """
+    from data import db
+    try:
+        rows = db.query("SELECT event FROM progress WHERE task_id=?", (task_id,))
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(1 for r in rows
+               if (r["event"] if not isinstance(r, tuple) else r[0])
+               in ("progressed", "delivered"))
+
+
+def _self_induced_work_count(task_id):
+    """派发方自己带出来的"开工"条数：投接力卡时 `dispatch_trigger` 会给已回执
+    任务补一笔 `work_started`（经理唤醒动作的副产物），**不能算承接方开工**，
+    也不能当成"真在推进"的证据。"""
+    from data import db
+    try:
+        rows = db.query("SELECT event, detail FROM progress WHERE task_id=?",
+                        (task_id,))
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    for r in rows:
+        ev = r["event"] if not isinstance(r, tuple) else r[0]
+        detail = r["detail"] if not isinstance(r, tuple) else r[1]
+        if ev in _WORK_EVENTS and "已接单并开始执行任务" in str(detail or ""):
+            n += 1
+    return n
 
 
 def _plan_guess(activated):

@@ -35,8 +35,9 @@ print("SIM", v["credential"], v["verdict"], v["credential_ready"])
 
 reg = WorkerRegistry().register("架构·开发",
                                 RoleWorkFace(role="架构·开发", agent_id="ag-real"))
+# 两个实验必须用**不同任务名**：任务按标题寻址，同名会命中同一条记录。
 m2 = ManagerEngine(dry_run=True, workers=reg)
-v2 = m2.execute_plan("1. 开发登录模块")["supervise"]["verdicts"][0]
+v2 = m2.execute_plan("1. 实现报表模块")["supervise"]["verdicts"][0]
 print("REAL", v2["credential"], v2["verdict"], v2["credential_ready"])
 EOF
 )
