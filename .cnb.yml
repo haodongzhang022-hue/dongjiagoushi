@@ -213,6 +213,24 @@ main:
 # 此处保留 npc:go 兜底，供未来按 .cnb/settings.yml 定义自建 NPC 或平台触发时使用。
 .npc_task: &npc_task
   name: architect npc
+  # ------------------------------------------------------------
+  # 执行体槽位池（slot pool · 近因优先 + 长队列 + 领取后自愈）
+  # 用户原话（PR #247）："这个池子让他有个近因效应吧，最新的优先领取，这样即使
+  # 卡住也不会一直卡，最多卡一下；以及加长队列；然后领取一个后，尝试把其他接上，
+  # 这样自动修了。"
+  # 本块是**配置单一事实源**：本地引擎 local-agent/slot/pool.py 的
+  # load_npc_pool_config() 读的就是这里（CI 与本地不各写一套，避免漂移）。
+  # 三个数字含义：
+  #   queue_capacity      队列长度（加长，卡住的任务也放得下后面的活）
+  #   slots               可同时占用的执行体槽位（≈ 云端 NPC 并发额度）
+  #   stuck_after_seconds 占用超时判 stuck（卡住）的门槛，秒
+  #   max_repairs         同一件活最多被自动接回几次，超限标 dead 显式上报不静默
+  # ------------------------------------------------------------
+  slot_pool:
+    queue_capacity: 512
+    slots: 4
+    stuck_after_seconds: 300
+    max_repairs: 3
   stages:
     - name: npc go
       type: npc:go

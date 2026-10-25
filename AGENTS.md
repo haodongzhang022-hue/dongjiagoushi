@@ -277,6 +277,31 @@
 > 触发：显式 `[触发:架构·开发/架构·交付]` / 语义命中「承接/接单卡/运行时在本地/云端只承接/
 > 交接单/回传核对/接不住/拒接/半承接」/ rules 固定。
 
+### 执行体槽位池（slot pool · 固定规则 · Issue #271）
+
+「@ 了角色很久没反应，不止一次」这类病，先怀疑**池子的取件顺序与队列长度**，再怀疑态度/模型。
+用户原话（PR #247）：「这个池子让他有个近因效应吧，最新的优先领取，这样即使卡住也不会一直卡，
+最多卡一下，以及加长队列，然后领取一个后，尝试把其他接上，这样自动修了。」
+承载 `local-agent/slot/` + `.cnb.yml`(`npc_task.slot_pool`) + `docs/NPC_SLOT_POOL.md`，
+信号灯 `local-agent/tests/test_slot_pool.sh`（8 组）：
+
+- **① 近因优先取件（recency-first）**：取件取**最新入队**。卡住的老任务只卡**一次**，
+  被跨过后留在队里等自愈，池头永远是最新那件 —— 不允许 FIFO 让一个卡死任务长期压住并发额度。
+- **② 加长队列**：`queue_capacity` 可配（默认 512），跨过卡住的件要有位置；满则
+  `rejected_full++` **显式计数，不静默丢件**。
+- **③ 领取后自愈接回**：`reserve()` **内建** `repair_rest` —— 领走一件活后把同样 stuck 的
+  其它活重新入队接上，不靠人一个个去捞；次数上限 `max_repairs` 兜底，超限标 `dead` 并写
+  note **显式上报不静默**。
+- **④ 三类状态分开报**：`queued` / `running` / `stuck`+`dead` 不混成一个「都挺好」；
+  槽位满 → `blocked=True` 不假装领到；占用超时 `sweep_stuck()` 判 stuck 不静默挂着。
+- **⑤ 配置单一事实源**：`.cnb.yml` 的 `npc_task.slot_pool` 是唯一配置源，CI 与本地
+  `load_npc_pool_config()` 同读一份；读不到退化为默认并在 `source` 标 `defaults`，不冒充读到。
+- **⑥ 诚实边界**：本层治的是「一个卡住任务长期堵死池子」，**不改云端执行器物理并发额度**，
+  也不是「排队问题解决了」——只把「一直卡」降级为「卡一下 + 自动接回 + 超限显式报警」。
+
+> 触发：显式 `[触发:架构·监控哨兵/架构·经理]` / 语义命中「@了没反应/一直卡/卡住/池子/排队/
+> 近因效应/最新优先领取/队列加长/接不上/自动修」/ rules 固定。
+
 ### 标签管理 + 进度自动化全员化（LabelAbility · 通用复用能力 · 固定规则 · Issue #51）
 
 进度/标签是**高频复用的通用能力**，已统一开发为 `LabelAbility`
@@ -744,6 +769,10 @@ local-agent/mcp_hub/                   # MCP 汇聚注册表（module mcp-hub v0
   ├── server.py                       # 统一入口，三前端一处语义（http/sse/jsonrpc）
   ├── registry.py                     # 握手 catalog() + 拉起即探活 launch()
   └── cli.py                          # CLI（catalog/tools/call/serve/launch/status）
+local-agent/slot/                      # 执行体槽位池（近因优先+长队列+领取后自愈 · Issue #271）
+  ├── __init__.py                      # 导出 SlotPool / pool_from_config
+  ├── pool.py                          # 取下一条顺序 + stuck 判定 + repair_rest 自愈
+  └── cli.py                           # CLI（overview/config/demo/simulate）
 local-agent/review_context/           # 评审增量上下文（冻结骨架+本轮变化 · Issue #150）
   ├── spec.py                         # 稳定/变化分段规范（唯一事实源）
   ├── paths.py                        # 仓库根解析（唯一事实源 · S8，评审/调度器同口径）
