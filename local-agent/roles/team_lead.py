@@ -58,6 +58,16 @@ class TeamLeadRole(BaseRole):
 - 超限上报，不硬撑；进度尺写 goal_meters，停滞/横跳由哨兵打断；
 - 本组收敛自己盯 (`sentinel.engine.group_oversight(group_id)`)，不等经理催。
 
+## 接单不是终点（Issue #239 二轮 · 承上启下的下半段）
+
+经理把活交给你，回 `[接单]` 只是开始，你要**使命必达**：
+
+- 组内开发派不出去 → **换承接方式**（拆小 / 换人 / 自己先顶上不越界部分），
+  不是发一句「无人承接」就交回；
+- 卡点确实超出本组能力 → **带证据交回经理**（`lead_escalate`：试过什么、缺什么、
+  要谁来帮），让经理去跨岗借人。交回不是甩锅，是给经理能继续决策的输入；
+- 组内收敛自己盯到 0，不 poke 一下动一下。
+
 ## 协作纪律
 
 - 任务过大：一开始拆，或开发中发现过大申报加派（ops.apply_more_agents），
@@ -99,6 +109,35 @@ class TeamLeadRole(BaseRole):
         return self.lead_engine.drive(task, dev_outputs=dev_outputs,
                                       devs_per_team=devs_per_team, delta=delta)
 
+    def lead_escalate(self, task, tried=None, need=""):
+        """卡点超出本组能力 → **带证据**交回经理（不是只发一句"无人承接"）。"""
+        rec = {
+            "task_key": (task or {}).get("task_key", ""),
+            "tried": list(tried or []),
+            "need": need or "本组承接不到，请经理跨岗借角色或重新分派",
+            "shift": "向上移交（经理继续找通路，不把活掉地上）",
+        }
+        try:
+            from data import admin
+            admin.record_event(self.name, "lead_escalate", rec,
+                               rec["task_key"] or "")
+        except Exception:  # noqa: BLE001 留痕失败不改判定
+            pass
+        return rec
+
+    def lead_borrow(self, task_key, role="架构·开发", reason=""):
+        """组内没有能承接的人 → 直接申请**跨岗借角色**（经理协调，不自闭）。"""
+        try:
+            handle = self.resolve(role=role)
+        except Exception:  # noqa: BLE001 解析失败如实暴露
+            handle = {"handle": "", "note": "HandleAbility 未解析出，须经理协调"}
+        return {
+            "task_key": task_key,
+            "borrow_role": role,
+            "handle": handle,
+            "reason": reason or "组内无人可承接，申请跨岗借角色",
+        }
+
     def lead_overview(self):
         """本组俯瞰（二级信息：几轮、通过数、卡点）。"""
         return self.lead_engine.overview()
@@ -120,7 +159,8 @@ class TeamLeadRole(BaseRole):
                 "拆分/加派整合(team_lead_aggregate)",
             ],
             "entry": ["lead_dispatch_devs", "lead_run_round", "lead_aggregate",
-                      "lead_drive", "lead_overview", "group_convergence"],
+                      "lead_drive", "lead_overview", "group_convergence",
+                      "lead_escalate", "lead_borrow"],
             "iron_rules": [
                 "执行-验证分离：合格由客观验证器裁定，不自判",
                 "一个没过就不放行，不带病交付",

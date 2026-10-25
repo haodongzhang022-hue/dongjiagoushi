@@ -41,12 +41,34 @@
 - `decide()` / `resolve_choice()` 把"纠结"变成**纯函数查表**：单路计划 → 必然 EXECUTE；
 - 每次动作写 `manager_actions` 留痕 + goal_meters 进度尺，可核验、可回放、不假装。
 
+## 二轮升级（Issue #239 用户二轮评论）：承上启下，不是刚性传达
+
+用户二轮原话：
+
+> 「经理应该做的是承上启下……经理是找进度 找通路，安排和看反馈，
+>   寻找能行得通的方式安排下去后看看效果反馈，进一步调整，
+>   不够还能调整人员，跨部门找角色过来帮忙都行。」
+
+也就是说：**如果经理只是把上级计划程序化地分槽投卡，这个岗位就不需要存在**。
+所以本引擎在「激活/督促/监督」之外，补上两块：
+
+- `manager/lanes.py` —— **找通路**：多通路穷举（平台 Issue / 完整 @ 接力 / @CodeBuddy /
+  直接 handle / 调配小组长 / 自己兜底）+ 可核验就绪 + **权责内自决**；
+- `manager/flow.py`  —— **承上启下**：承上（复述北极星/翻译/裁不可执行项）→
+  行下（派发+换路线）→ 启下（调人员/跨岗借角色）→ 反馈（多轮，直到收敛或显式上交）。
+
+判定口径不变：**成功标准** = 对端有 `[接单]` 回执 + 有开工/进度证据；
+达不到就换路线，不是"申请授权"也不是"做不了"。
+
 ## 用法
 
 ```python
 from manager import ManagerEngine
 m = ManagerEngine(repo="dongdongxiaozu/dongjiagoushi", dry_run=True)
+m.carry(plan)                     # 承上启下四段全跑（首选，Issue #239 二轮）
 r = m.execute_plan(plan)          # 计划 → 激活 → 督促 → 监督，一站式
+m.try_lanes("架构·开发", handlers) # 找通路：一条断了换下一条
+m.authorize("调配小组长")          # 权责内自决判定（SELF / HUMAN）
 m.status()                        # 二级信息：谁真干了、谁还没接单
 ```
 """
@@ -91,6 +113,7 @@ _ACCEPT_EVENTS = ("accepted", "awake_ack")
 _WORK_EVENTS = ("work_started", "delivered")
 _FAKE_RECEIPT = "[接单]"          # 只有梗概、没有后续动作 = 假装
 _STALL_ROUNDS = 2                 # 连续无进展轮数阈值 → 判停滞
+MAX_FLOW_ROUNDS = 4               # 承上启下默认调整轮数（超限显式上交，不静默）
 _JUMP_ROUNDS = 3                  # 连续回退 delta 轮数阈值 → 判横跳
 
 
@@ -163,9 +186,9 @@ def _normalize_item(raw, idx):
     text = re.sub(r'^\s*\d{1,2}\s*[\.、)）]\s*', '', text)
     # 行内「角色: 架构·评审」显式标注优先
     role = None
-    m = re.search(r'角色\s*[:：]\s*([^\s，,；;、]+)', text)
+    m = re.search(r'角色\s*[:：]\s*([^\s，,；;、）)]+)', text)
     if m:
-        role = m.group(1).strip()
+        role = _clean_role(m.group(1))
     role = role or _infer_role(text)
     title = text[:120]
     return {
@@ -176,6 +199,13 @@ def _normalize_item(raw, idx):
         "priority": "P1",
         "detail": text,
     }
+
+
+def _clean_role(role):
+    """规范化角色名：去引号/括号/尾随标点，保留「架构·X」形态。"""
+    r = str(role or "").strip().strip("`'\"（）()[]【】")
+    r = re.sub(r'[，,；;、。.]+$', '', r).strip()
+    return r
 
 
 def _infer_role(text):
@@ -409,9 +439,12 @@ class ManagerEngine:
                 accepted.append(rec)
                 rec["state"] = "accepted"
                 continue
-            # ② 真实唤醒一次（投接力卡），仍无回执 → 交小组长落实
+            # ② 真实唤醒一次（投接力卡）；唤醒本身失败 → 立刻换下一条通路（不空等）
             awake = self._reawake(rec)
             rec["reawake"] = awake
+            if not awake.get("sent"):
+                rec["lane_fallback"] = self._fallback_lane(rec)
+            # ③ 仍无回执 → 交小组长落实（活不掉地上）
             plan = self.delegate_to_lead(rec)
             rec["state"] = "delegated_to_lead"
             rec["leader_plan"] = plan
@@ -430,6 +463,33 @@ class ManagerEngine:
         return {"pushed": len(activated), "accepted": accepted,
                 "awaiting": awaiting, "delegated": delegated,
                 "verification": verify, "verified_all_awake": verify["verified_all_awake"]}
+
+    def _fallback_lane(self, rec):
+        """再唤醒发不出去 → **换下一条通路**（不把"我认为应该能"当已试过）。
+
+        用户原话「没成功尝试其他路线，而不是默认就没能力做，相当于挤牙膏」——
+        一条通路在发送层就失败时，经理必须自己往下一跳：完整 @ 格式 → @CodeBuddy
+        → 直接 handle 召唤。逐条留痕，全断才算真做不到。
+        """
+        tried = [{"lane": "fullpath", "ok": None, "note": "唤醒失败后的下一跳"}]
+        target = rec.get("role", "")
+        lanes = [("fullpath", f"@{self.owner}({target})"),
+                 ("codebuddy", "@CodeBuddy"),
+                 ("direct_handle", target)]
+        out = {"target": target, "candidates": [], "tried": tried}
+        for lane, handle in lanes:
+            try:
+                from .lanes import readiness
+                ready = readiness(lane, repo=self.repo, cnb=not self.dry_run,
+                                  handle=handle)
+            except Exception:  # noqa: BLE001 探测失败显式降级为未就绪
+                ready = {"ready": False, "missing": ["探测异常"]}
+            out["candidates"].append({"lane": lane, "handle": handle,
+                                      "ready": ready["ready"],
+                                      "missing": ready.get("missing", [])})
+        out["next_lane"] = next((c["lane"] for c in out["candidates"] if c["ready"]), "")
+        self._log("lane_fallback", out)
+        return out
 
     def _reawake(self, rec):
         """再唤醒一次（投 [触发:角色] 接力卡）——不静默，留痕。"""
@@ -478,6 +538,121 @@ class ManagerEngine:
         }
         self._log("delegate_to_lead", plan)
         return plan
+
+    # ---------------- 启下：真动作（不是动作名） ----------------
+
+    def wake_role(self, role, *, task_key="", issue=None, note=""):
+        """真唤醒一个角色：走「多通路穷举」而不是只投一张卡。
+
+        与 `try_lanes()` 的区别：这里把**每条通路的真实执行**都接上了 handler，
+        而不是只传一个空字典让所有通路 skipped_no_handler。
+        治「一条路断了就默认没能力做」——逐条真试，全断才返回 ok=False。
+        """
+        import dispatch_engine
+        repo = self.repo
+
+        def _via_fullpath():
+            msg = dispatch_engine.dispatch_trigger(
+                [{"task_key": task_key or role, "task_id": f"lane-{role}",
+                  "agent_id": "", "role": role, "title": task_key or role,
+                  "issue_number": issue}],
+                from_agent=self.owner)
+            return {"ok": bool(msg), "msg_id": (msg[0].get("msg_id", "")
+                                               if msg else "")}
+
+        def _via_codebuddy():
+            # @CodeBuddy 兜底：走同一条 dispatch_trigger，把承接角色换成 CodeBuddy
+            msg = dispatch_engine.dispatch_trigger(
+                [{"task_key": task_key or role, "task_id": f"cb-{role}",
+                  "agent_id": "", "role": "CodeBuddy",
+                  "title": f"{task_key or role}（原角色 {role} 未响应）",
+                  "issue_number": issue}],
+                from_agent=self.owner)
+            return {"ok": bool(msg), "msg_id": (msg[0].get("msg_id", "")
+                                               if msg else "")}
+
+        def _via_lead():
+            plan = self.delegate_to_lead({"task_key": task_key or role,
+                                          "task_id": f"lane-{role}",
+                                          "issue": issue, "role": role})
+            return {"ok": bool(plan), "leader_plan": plan}
+
+        def _via_self():
+            return {"ok": True, "note": "经理自己承接不越界部分（组织/催办/整理）"}
+
+        handlers = {"fullpath": _via_fullpath, "codebuddy": _via_codebuddy,
+                    "lead": _via_lead, "self": _via_self}
+        res = self.try_lanes(role, handlers=handlers, handle=role)
+        res["role"] = role
+        res["note"] = note
+        return res
+
+    def add_devs(self, rec, extra=None):
+        """真加派：组内追加并行开发（不是记一个 "add_devs" 名字）。
+
+        用 ops.apply_more_agents 把任务拆分给新挂载的开发，返回新增的 agent gid。
+        """
+        extra = extra if extra is not None else self.devs_per_team
+        added = []
+        try:
+            import ops
+            for i in range(1, extra + 1):
+                key = f"{rec['task_key']}·加派{i}"
+                split = ops.apply_more_agents(rec.get("task_id", rec["task_key"]),
+                                              reason="经理加派：原承接人未响应",
+                                              branch_name=f"加派{i}",
+                                              submitter=self.owner)
+                added.append({"task_key": split.get("branch_task", key),
+                              "agent_id": split.get("agent_id", ""),
+                              "role": "架构·开发", "issue": rec.get("issue"),
+                              "split_id": split.get("split_id", "")})
+            self._log("add_devs", {"task_key": rec["task_key"], "added": added})
+        except Exception as e:  # noqa: BLE001 失败显式暴露
+            self._log("add_devs_failed", {"task_key": rec["task_key"],
+                                          "error": f"{type(e).__name__}: {e}"})
+        return added
+
+    def borrow_role(self, role, *, task_key=""):
+        """真跨岗借角色：用 HandleAbility 解析目标仓库里有权限的 @ 格式再召唤。
+
+        不是写一句"调用 HandleAbility 定位"——真调用，真拿到 handle，真去唤醒。
+        """
+        handle = ""
+        try:
+            from handle import HandleAbility
+            ha = HandleAbility(agent_name=self.owner, repo=self.repo)
+            org, _, repo_name = self.repo.partition("/")
+            resolved = ha.resolve(org, repo_name, role)
+            handle = resolved.get("handle", "") if isinstance(resolved, dict) else str(resolved)
+        except Exception as e:  # noqa: BLE001 解析失败降级为手写 @ 并留痕
+            handle = f"@{self.repo}({role})" if self.repo else f"@{role}"
+            self._log("borrow_role_resolve_failed",
+                      {"role": role, "error": f"{type(e).__name__}: {e}"})
+        wake = self.wake_role(role, task_key=task_key,
+                              note=f"跨岗借角色，handle={handle}")
+        out = {"role": role, "handle": handle, "wake": wake,
+               "ok": wake.get("ok", False)}
+        self._log("borrow_role", out)
+        return out
+
+    def split_task(self, rec, parts=None):
+        """真拆分：把过大的任务拆成若干可独立承接的子任务（不是记名字）。"""
+        parts = parts or 2
+        import ops
+        subs = []
+        try:
+            for i in range(1, parts + 1):
+                subs.append(ops.split_task(rec.get("task_id", rec["task_key"]),
+                                           reason="initial",
+                                           branch_name=f"part{i}",
+                                           submitter=self.owner))
+        except Exception as e:  # noqa: BLE001
+            self._log("split_failed", {"task_key": rec.get("task_key"),
+                                       "error": f"{type(e).__name__}: {e}"})
+        out = {"task_key": rec.get("task_key"), "parts": len(subs) or parts,
+               "subtasks": subs}
+        self._log("split_task", out)
+        return out
 
     # ---------------- ⑤ SUPERVISE 监督：揪出假装 ----------------
     def supervise(self, activated=None, plan=None):
@@ -559,6 +734,72 @@ class ManagerEngine:
         except Exception as e:  # noqa: BLE001 打断失败显式暴露
             v["sentinel"] = f"error: {type(e).__name__}"
 
+    # ---------------- 二轮：找通路（不是一条路断了就说做不到） ----------------
+    def try_lanes(self, role, handlers=None, allow_self=True, repo=None,
+                  cnb=None, handle=None):
+        """多通路穷举：按「平台 Issue → 完整 @ 接力 → @CodeBuddy → 直接 handle →
+        调配小组长 → 自己兜底」顺序真试，任一条成功即停。
+
+        handlers: {lane: callable() -> {"ok": bool, ...}}；缺 handler 的通路会标
+        skipped_no_handler（不假装试过）。
+        """
+        from . import lanes as lane_mod
+        cnb_ok = (not self.dry_run) if cnb is None else bool(cnb)
+        res = lane_mod.attempt(
+            role, handlers or {}, repo=repo if repo is not None else self.repo,
+            cnb=cnb_ok, handle=handle if handle is not None else role,
+            allow_self=allow_self, log=self._log)
+        self._log("try_lanes", {"role": role, "ok": res["ok"],
+                                "lane": res["lane"],
+                                "tried": res["tried"]})
+        return res
+
+    def lanes(self, role="架构·开发"):
+        """列出该角色所有可用通路 + 每条是否就绪（给人类看的"还有哪些路"）。"""
+        from . import lanes as lane_mod
+        return lane_mod.lanes_for(role, repo=self.repo, cnb=not self.dry_run,
+                                  handle=role)
+
+    def authorize(self, action, **kwargs):
+        """权责边界判定：权责内一律自决（SELF），只有不可逆/超成本/敏感/越级才 HUMAN。
+
+        治用户点名的「职责范围内的还在申请授权」——判 SELF 就必须自己干。
+        """
+        from . import lanes as lane_mod
+        res = lane_mod.authorize(action, **kwargs)
+        self._log("authorize", res)
+        return res
+
+    # ---------------- 二轮：承上启下（不是刚性传达） ----------------
+    def carry(self, plan, north_star="", max_rounds=None):
+        """承上启下四段全跑：承上 → 行下 → 启下 → 反馈（多轮直到收敛或显式上交）。
+
+        这是经理的**标准动作**：上级给的意图在这里被翻译成执行、被盯到有证据、
+        没人接就调人、调不动就带证据上交。不是把计划分槽投卡（那是程序的事）。
+        """
+        from .flow import ManagerFlow
+        flow = ManagerFlow(self, max_rounds=max_rounds or MAX_FLOW_ROUNDS)
+        res = flow.run(plan, north_star=north_star)
+        self._log("carry", {"north_star": res["north_star"],
+                            "escalated": res["escalated"],
+                            "unresolved": [v["task_key"] for v in res["unresolved"]]})
+        return res
+
+    def self_check(self):
+        """经理自检：这四段活做到没有（供人类/总师快速判定岗位是否及格）。"""
+        kinds = [a["kind"] for a in self.actions]
+        return {
+            "role": self.owner,
+            "承上": "take_over" in kinds or "carry" in kinds,
+            "行下": "activate" in kinds,
+            "启下": "staffing" in kinds or "delegate_to_lead" in kinds,
+            "反馈": "adjust_round" in kinds or "carry" in kinds,
+            "找通路": "try_lanes" in kinds or "lane_attempt" in kinds,
+            "自决": "authorize" in kinds,
+            "note": "四段缺一段即不及格：承上（翻译不是复述）/ 行下（派到有证据）/"
+                    "启下（调人跨岗）/ 反馈（回看再调整）",
+        }
+
     # ---------------- 一站式：计划 → 激活 → 督促 → 监督 ----------------
     def execute_plan(self, plan, push=True, supervise=True):
         """**唯一执行入口**：计划进来必然走到「激活 + 督促 + 监督」。
@@ -605,8 +846,9 @@ class ManagerEngine:
             "role": self.owner,
             "duties": DUTIES,
             "not_manager": NOT_MANAGER,
-            "entry": ["execute_plan", "activate", "push", "supervise",
-                      "status", "guard", "delegate_to_lead"],
+            "entry": ["carry", "execute_plan", "activate", "push", "supervise",
+                      "status", "guard", "delegate_to_lead",
+                      "try_lanes", "lanes", "authorize", "self_check"],
             "decisions": {"single_path": "EXECUTE", "multi_path": "EXECUTE",
                           "empty": "BLOCKED"},
             "rules": self.RULES,

@@ -28,9 +28,22 @@
 - **`ManagerEngine`（本角色专属）**：把「计划」直接接上上面两者，并补
   **督促**（无人接单→调配小组长）与**监督**（假装/停滞/横跳→处置）。
 
+## 二轮升级：承上启下（Issue #239 用户二轮评论）
+
+> 「经理应该做的是承上启下，不是被安排了任务后挤牙膏，戳一戳动一动。」
+
+补上两块（`manager/flow.py` + `manager/lanes.py`）：
+
+- **承上**（`manager_carry`）：复述北极星 + 翻译计划 + 裁掉不可执行项（给理由与替代）；
+- **行下**：真派发 + 按成功标准核验（有回执有开工证据才算成）；
+- **启下**：派不动就调人——再唤醒 → 调小组长 → 加派 → **跨岗借角色** → 自己兜底；
+- **反馈**：多轮直到收敛，或**带证据**显式上交。
+- **找通路**（`manager_lanes`/`manager_try_lanes`）：一条断了换下一条，全断才判 hard；
+- **权责内自决**（`manager_authorize`）：职责范围内直接干，不申请授权。
+
 ## 双向责任
 
-经理对下：派活 + 督促 + 兜住没人接的活（转小组长）。
+经理对下：派活 + 督促 + 兜住没人接的活（转小组长 / 跨岗借人）。
 经理对上：把「哪些真干了 / 哪些停在嘴上」如实汇报，不含糊、不美化。
 """
 import os
@@ -71,6 +84,24 @@ class ManagerRole(BaseRole):
 
 **判定标准**：停在 L2（分了）不算完成；必须到 L4——有 `[接单]` 回执、有开工/进度证据、
 有交付。否则是"名义派活"，打回重派或升级。底层用 `dispatch()` / `dispatch_verify()`。
+
+## 首要认知：你存在的意义是承上启下（Issue #239 二轮）
+
+如果只是把上级计划分槽投交接卡，架构师分完直接程序自动发卡就行了——**这个岗位就不需要
+存在**。你不是刚性传达的中转站，你是让事情真能成的那个人：
+
+> 找进度、找通路；安排下去看反馈；行不通就换方式；人手不够就调人、跨岗借角色。
+
+| 段 | 你干什么 | 及格判据 |
+|----|----------|----------|
+| 承上 | 复述北极星 + **翻译**方案 + 裁掉不可执行项 | 裁掉须给理由 + 替代路线 |
+| 行下 | 真派发 + 按成功标准核验（回执 + 开工证据） | 有客观证据，不是"我发了" |
+| 启下 | 派不动就调人：再唤醒 → 调小组长 → 加派 → **跨岗借角色** → 自己兜底 | 有人真在干 |
+| 反馈 | 效果回来看，不达标再调一轮，多轮直到收敛或**带证据上交** | 停只有两种：全达标 / 显式上交 |
+
+**「戳一戳动一动」＝不合格。** 职责范围内申请授权＝不合格。
+「一条路不通就说没能力做」＝失职（`@CodeBuddy` 也是通路）。工具：`manager_carry` /
+`manager_lanes` / `manager_try_lanes` / `manager_authorize` / `manager_self_check`。
 
 ## 三条铁律（不靠自觉，靠机制）
 
@@ -118,7 +149,30 @@ class ManagerRole(BaseRole):
             )
         return self._manager_engine
 
-    # ---------------- 对外主入口 ----------------
+    # ---------------- 对外主入口（二轮：承上启下·首选） ----------------
+    def manager_carry(self, plan, north_star="", max_rounds=None):
+        """**首选入口**：承上（翻译/裁不可执行）→ 行下（派发+换路线）→
+        启下（调人/跨岗借角色）→ 反馈（多轮直到收敛或带证据显式上交）。"""
+        return self.manager_engine.carry(plan, north_star=north_star,
+                                         max_rounds=max_rounds)
+
+    def manager_lanes(self, role="架构·开发"):
+        """列出所有可用通路 + 每条是否就绪（「还有哪些路」由代码判）。"""
+        return self.manager_engine.lanes(role)
+
+    def manager_try_lanes(self, role, handlers=None, allow_self=True):
+        """多通路穷举：一条断了换下一条，逐条留痕；全断才判 hard 并显式上交。"""
+        return self.manager_engine.try_lanes(role, handlers=handlers,
+                                             allow_self=allow_self)
+
+    def manager_authorize(self, action, **kwargs):
+        """权责边界判定：权责内 SELF（自决执行，不申请授权）；不可逆/超成本/越界才 HUMAN。"""
+        return self.manager_engine.authorize(action, **kwargs)
+
+    def manager_self_check(self):
+        """六项自检：承上/行下/启下/反馈/找通路/自决（供人类判定及格）。"""
+        return self.manager_engine.self_check()
+
     def manager_execute(self, plan, push=True, supervise=True):
         """一站式执行计划：激活 → 督促 → 监督。经理的**标准动作**。"""
         return self.manager_engine.execute_plan(plan, push=push, supervise=supervise)
@@ -156,8 +210,10 @@ class ManagerRole(BaseRole):
                 "分发深度层级(L1声明→L2分发→L3触发→L4工作，目标锁 L4)",
                 "通用派发能力(复用 DispatchAbility，全员同源)",
             ],
-            "entry": ["manager_execute", "manager_activate", "manager_push",
-                      "manager_supervise", "manager_status", "manager_guard"],
+            "entry": ["manager_carry", "manager_execute", "manager_activate",
+                      "manager_push", "manager_supervise", "manager_status",
+                      "manager_guard", "manager_lanes", "manager_try_lanes",
+                      "manager_authorize", "manager_self_check"],
             "duties": {
                 "拆计划": "把方案拆成可执行任务项",
                 "真派发": "建 Issue + L1→L4 派发（嘴不算完成）",
@@ -168,7 +224,14 @@ class ManagerRole(BaseRole):
                 "计划即命令：单路无抉择，直接执行",
                 "嘴不算完成：有 Issue + 有回执 + 有进展才算",
                 "不越界：需求/代码/评审/测试/合并都是别人的活",
+                "承上启下：翻译不是复述；派不动就换路线/调人员，不原地等指令",
+                "权责内自决：本职内可逆低成本的动作自己干，不申请授权",
+                "穷尽才上交：换过通路、调过人员、仍无证据，才带证据上交人类",
             ],
+            "success_standard": {
+                "receipt": "[接单] 回执",
+                "work": "开工事件 / 进度尺推进（回执了不动 = 假装，不算成功）",
+            },
         }
 
     def capability(self):
