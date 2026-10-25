@@ -106,6 +106,12 @@ class BaseRole:
             self.secretary_scale_ability = _ssa_mod.SecretaryScaleAbility(owner=self)
         except Exception:
             self.secretary_scale_ability = None
+        # 懒加载小组长脑子能力（LeadBrainAbility · Issue #232：补全方案 + 看住经理别犯傻）
+        try:
+            from lead_brain import LeadBrainAbility
+            self.lead_brain_ability = LeadBrainAbility(owner=self)
+        except Exception:
+            self.lead_brain_ability = None
 
     # ------------------------------------------------------------
     # 阶段链门控生产接线（全员通用 · Issue #150 复评 N2）
@@ -186,6 +192,23 @@ class BaseRole:
         return self.depth_ability.awake(task_key, target_agent,
                                         context=ctx, issue_ref=issue_ref,
                                         from_agent=from_agent)
+
+    # ------------------------------------------------------------
+    # 小组长脑子透传（全员可用 · Issue #232）
+    # 「经理智力不足，需要小组长当脑子给他增强，看着他别犯傻」——
+    # 所以脑子不是小组长私有：经理自己也挂得上，派活前先过一遍脑子再往下派。
+    # ------------------------------------------------------------
+    def enhance_plan(self, plan):
+        """派活前过小组长脑子：诊断缺口 → 补全 → 返回 ready 判定与修正动作。"""
+        if getattr(self, "lead_brain_ability", None) is None:
+            raise RuntimeError(f"角色 {self.name} 未加载小组长脑子能力")
+        return self.lead_brain_ability.enhance(plan)
+
+    def watch_orders(self, orders, history=None):
+        """看住一次/一串派活是否犯傻（跳深度/重复派发/超次返工/空转/抢单/无主派发）。"""
+        if getattr(self, "lead_brain_ability", None) is None:
+            raise RuntimeError(f"角色 {self.name} 未加载小组长脑子能力")
+        return self.lead_brain_ability.watch_manager_orders(orders, history=history)
 
     def ack_wake(self, task_key, role="", note="", agent_id=None):
         """L3 被唤醒方回执：确认接管，标记路由真实唤醒成立。"""
@@ -713,6 +736,8 @@ class BaseRole:
             base["review_metrics_ability"] = self.review_metrics_ability.capability()
         if getattr(self, "secretary_scale_ability", None) is not None:
             base["secretary_scale_ability"] = self.secretary_scale_ability.capability()
+        if getattr(self, "lead_brain_ability", None) is not None:
+            base["lead_brain_ability"] = self.lead_brain_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----

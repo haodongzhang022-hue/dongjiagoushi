@@ -67,6 +67,76 @@ def _run_role_engine(role, req, node):
     except Exception as e:
         return f"[引擎调用异常] {type(e).__name__}: {e}"
     return None
+def _manager_plan_from_node(node, req):
+    """从经理节点（team.yaml/拓扑声明）生成「待派活方案」，供小组长脑子补全。
+
+    真实场景里方案来自架构·经理的 LLM 输出；这里把节点声明的 action 作为任务描述、
+    负责人按「输出契约里的执行角色」推断，其余字段留空——正好让小组长脑子把窟窿
+    一个个点名补上，而不是让经理的方案带着空白往下走（Issue #232）。
+
+    兼容：方案完全无缺口时（ready=True）不影响原流程。
+    """
+    import re as _re
+    action = str(node.get("action") or "").strip()
+    steps = [x.strip() for x in _re.split(r"[/／、,，;；]", action) if x.strip()]
+    if not steps:
+        return None
+    # 负责人粗推：动作里点到哪个角色就派给谁，没点到默认开发
+    known = ["架构·产品", "架构·总师", "架构·开发", "架构·评审", "架构·测试",
+             "架构·交付", "架构·找工具", "架构·对齐", "架构·经理", "架构·小组长"]
+    tasks = []
+    for i, st in enumerate(steps, 1):
+        owner = next((r for r in known if r in st), "架构·开发")
+        tasks.append({
+            "id": f"{node.get('id', 'plan')}-{i}",
+            "owner": owner,
+            "task": st,
+            "input": "",            # 待补：上游产物
+            "output": "",           # 待补：可交付物
+            "done_when": "",        # 待补：验收标准（以测试为准）
+            "depends_on": list(node.get("depends_on") or []),
+            "depth": 2,             # 当前只到 L2 分发，小组长要补到 L4
+        })
+    return {"goal": req, "tasks": tasks, "split": len(tasks) >= 5}
+
+
+def _lead_brain_enhance(node, req, card):
+    """经理派活前过一遍小组长脑子（Issue #232）。
+
+    返回 (plan, info)：plan 为补全后的方案（可能为 None，表示无方案可补）；
+    info 留痕写进接力卡/report，供人类俯瞰「经理方案被打回哪些窟窿」。
+    """
+    plan = _manager_plan_from_node(node, req)
+    if plan is None:
+        return None, None
+    try:
+        from lead_brain import LeadBrainAbility
+        brain = LeadBrainAbility(owner="架构·小组长")
+        adv = brain.advise(plan)
+        orders = [{"type": "dispatch", "entity": t["id"],
+                   "depth": t.get("depth"), "count": 0} for t in plan["tasks"]]
+        watched = brain.watch_manager_orders(orders)
+        info = {
+            "role": "架构·小组长（脑子）",
+            "gaps": adv["diagnose"]["gap_count"],
+            "fixes": adv["fixes"],
+            "escalate": adv["escalate"],
+            "ready_after_fix": adv["ready"],
+            "watch": {"blocked": watched["blocked_count"],
+                      "escalate": watched["escalate_count"],
+                      "summary": watched["summary"]},
+            "summary": (f"经理方案 {adv['diagnose']['gap_count']} 处窟窿 → "
+                        f"补 {len(adv['fixes'])} 处；{watched['summary']}"),
+        }
+        relay.log(card, f"[小组长脑子] {info['summary']}")
+        print(f"   [小组长脑子] {info['summary']}")
+        for f in adv["fixes"][:5]:
+            print(f"      · {f['task']}/{f['field']} → {f['action']}：{f['detail'][:60]}")
+        return adv["enhanced_plan"], info
+    except Exception as _e:  # 脑子坏了不能把主流程拖死，但必须留痕暴露
+        relay.log(card, f"[小组长脑子] 执行失败：{_e}")
+        print(f"   [小组长脑子] 执行失败：{_e}")
+        return None, {"role": "架构·小组长（脑子）", "error": str(_e)}
 
 
 def _run_one(role, req, llm, card, node):
@@ -409,6 +479,21 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                         print(f"   {out}")
                         _devteam_driven = True
 
+                # ---- 小组长脑子：经理派活前先过脑子补全方案（Issue #232）----
+                #   小组长当经理的脑子用：诊断缺口 → 补全 → 看住别犯傻；
+                #   补全结果写回接力卡交下游消费，经理不自带窟窿往下走。
+                if nd.get("role") == "架构·经理" and not _devteam_driven:
+                    _enhanced, _brain_info = _lead_brain_enhance(nd, req, card)
+                    if _brain_info is not None:
+                        report["lead_brain"] = _brain_info
+                        if _enhanced is not None:
+                            card["enhanced_plan"] = _enhanced
+                            card["output"] = out + "\n[小组长脑子·补全方案]\n" + "\n".join(
+                                f"- {t['id']} @{t['owner']}：{t['task']}"
+                                f"｜验收={t['done_when'] or '待补'}"
+                                for t in _enhanced["tasks"]
+                            )
+
                 # 分形开发节点（未由开发小组驱动时才执行）
                 if (not _devteam_driven
                         and nd.get("fractal") and nd["fractal"].get("enabled") and nd["role"] == "架构·开发"):
@@ -521,6 +606,13 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                     _stage_wire(nd["role"], req, "active")
                     out = _run_one(role, card.get("input", req), llm, card, nd)
                     _stage_wire(nd["role"], req, "done")
+                    # 小组长脑子：经理派活前先补全方案（Issue #232）
+                    if nd.get("role") == "架构·经理":
+                        _enhanced, _brain_info = _lead_brain_enhance(nd, req, card)
+                        if _brain_info is not None:
+                            report["lead_brain"] = _brain_info
+                            if _enhanced is not None:
+                                card["enhanced_plan"] = _enhanced
 
             card["output"] = out
             card["input"] = out

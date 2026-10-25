@@ -22,6 +22,7 @@
 | **聚合控制页** | 跨端聚合控制页（entries.dashboard）| 聚合控制/fastapi聚合页/状态显示/每端面板/跨端交互/控制台/健康灯/一键控制/overview/panel | `local-agent/entries/dashboard.py` | docs/PLATFORM_ADAPTERS.md 三.7 | Issue #105 · module platform-adapter v0.5.0 |
 | **真实通道** | 真实 cnb.cool 传输（entries.cnb_live）| 模拟数据不可信/本地实测/真实传输/发信号配合/通道探测/默认真实/mock仅单测兜底/真实闭环 | `local-agent/entries/cnb_live.py` | docs/PLATFORM_ADAPTERS.md 三.8 | Issue #105 · module platform-adapter v0.5.0 |
 | **宿主传输** | 三宿主真实传输注册表（entries.host_transport）| 三宿主/真实宿主传输/本地deepseek harness/网页gemini工具桥/local-harness真实relay/web-bridge真实HTTP/别名归一/bridge via/三宿主可达矩阵 | `local-agent/entries/host_transport.py` | docs/PLATFORM_ADAPTERS.md 三.9 | Issue #105 · module platform-adapter v0.6.0 |
+| **小组长脑子** | 补全经理方案 + 看住经理别犯傻（LeadBrainAbility）| 小组长脑子/经理方案/看住经理/别犯傻/缺口/跳深度/重复派发/超次返工/空转 | `local-agent/lead_brain/` + `BaseRole.enhance_plan` | docs/LEAD_BRAIN.md | Issue #232 · module lead-brain v1.0.0 |
 | **需求** | 架构·产品（需求澄清）| 需求/澄清/用户故事/边界 | `.cnb/settings.yml` + roles/product.py | docs/ISSUE_MANAGEMENT.md | agent_version |
 | **架构** | 架构·总师（架构八步）| 架构/设计/技术方案/架构八步 | `.codebuddy/skills/architect/SKILL.md` | docs/ARCHITECTURE.md | framework 版本线 |
 | **架构** | 架构·总师助理（改错改框架专项）| 改错/改框架/框架修正 | `roles/chief_assistant.py` | docs/CHIEF_ASSISTANT.md | agent_version |
@@ -82,7 +83,7 @@
 | 架构·总师 | 架构/设计/方案/八步 | settings.yml+skill | 设计核心 |
 | 架构·总师助理 | 改错/改框架 | settings.yml | 框架修正专项 |
 | 架构·经理 | 分配/调度/派活 | settings.yml | 分配调度核心 |
-| 架构·小组长 | 子任务/整合/加派 | settings.yml | 子任务细化与整合 |
+| 架构·小组长 | 子任务/整合/加派/看住经理/别犯傻 | settings.yml+LEAD_BRAIN | **经理的脑子+监察**：补全方案缺口、盯住犯傻 |
 | 架构·开发 | 写码/实现/自测/PR | settings.yml | 实现 |
 | 架构·评审 | 评审/走查/质量 | settings.yml | 质量守门 |
 | 架构·小组长 | 带队/派开发/客观验证/整合交付 | settings.yml+`manager.LeadEngine` | 承接口（带组干活） |
