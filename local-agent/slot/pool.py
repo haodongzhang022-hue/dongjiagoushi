@@ -196,11 +196,17 @@ class SlotPool(object):
             return {"task": task, "slot": slot, "repairs": repairs, "blocked": False}
 
     def release(self, task_id, ok=True, note=""):
-        """释放槽位。ok=True → done；ok=False → stuck（等下一次自愈接回）。"""
+        """释放槽位。ok=True → done; ok=False → stuck(等下一次自愈接回)。
+
+        已显式 dead（自愈超限）的任务不在此复活：dead 需人工上报/换方案，
+        调 release/mark_stuck 不得把它悄悄改回 stuck（否则自愈判定被绕过）
+        """
         with self._lock:
             t = self._tasks.get(task_id)
             if t is None:
                 return None
+            if t.state == "dead":
+                return t
             t.state = "done" if ok else "stuck"
             t.slot = None
             t.updated_at = self._clock()

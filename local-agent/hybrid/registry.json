@@ -736,6 +736,19 @@
       "cpu_cost_est": 1.2,
       "time_est": 4.0,
       "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_slot_pool.sh": {
+      "name": "test_slot_pool",
+      "covers": [
+        "local-agent/slot/__init__.py",
+        "local-agent/slot/pool.py",
+        "local-agent/slot/cli.py",
+        ".cnb.yml"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 1.0,
+      "time_est": 4.0,
+      "kind": "cpu-dense"
     }
   }
 }

@@ -54,3 +54,6 @@ selector: scripts/feature-verify.sh: scripts/feature-verify\.sh|scripts/feature-
 # （否则"证据目录被误删/改名"会被静默放过，重开 #162 要消灭的假绿形状）。
 # 脚本随 #161 落地后，请去掉 `pending:` 前缀转正式登记（否则 --check-map 会提示 stale）。
 pending: collab: local-agent/collab/engine.py: local-agent/collab/(engine|store)\.py
+
+# 执行体槽位池（近因优先 + 加长队列 + 领取后自愈 · Issue #271 / PR #247）
+slot: local-agent/slot/pool.py: local-agent/slot/(pool|cli)\.py|local-agent/slot/__init__\.py

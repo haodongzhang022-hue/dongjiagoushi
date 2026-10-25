@@ -154,6 +154,8 @@ declare -a MODULE_MAP=(
 
   # ---- 池/并发 ----
   "local-agent/pool/|local-agent/tests/test_scale.sh"
+  # ---- 执行体槽位池（近因优先 + 加长队列 + 领取后自愈 · Issue #271） ----
+  "local-agent/slot/|local-agent/tests/test_slot_pool.sh"
 
   # ---- 任务转交闭环 ----
   "local-agent/roles/|local-agent/tests/test_review_tester_handoff.sh,local-agent/tests/test_dual_axis_review.sh"
