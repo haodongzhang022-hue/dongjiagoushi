@@ -289,18 +289,29 @@
   - **不许假试**：不可用通路显式标 `skipped_unready` + `missing` 原因，
     "我觉得应该能"不算试过。
 
-> 判定口径一句话：**功能写在旁边不接线 = 罢工。** 新增能力必须同时交「主链路调用点」
-> 与「接线信号灯」，只交能力文件视为未完成。
+- **⑨ 证据闸门（绿的不能是模拟器 · 四轮）**：`simulate` 等演练注入产出的
+  `[接单]` 是 `simulated` 级证据，**不算干活**。派发方的"安排成功"只认
+  `credential_of()` 分级的 `role`（承接方真回执 + 真写进度尺）或 `external`
+  （Issue/PR/CI 可核验）。`supervise()` 见 `simulated` 一律判 `fake` 并给出理由。
+  承接方标准工作面 `RoleWorkFace`（`accept/start/progress/deliver`）挂全员
+  （`BaseRole.work_face()`），经理用 `WorkerRegistry` / `manager_workers()` 取到
+  **会真干活**的对端，而不是投一张卡等一个未必会来的回执。
+- **⑩ 交人不是换主体（四轮）**：`delegate_to_lead()` 必须**真驱动** `LeadEngine`
+  （派开发 → 确定性闭环 → 整合/超限上报），返回 `drive.status/approved/rounds`。
+  只生成 `leader_plan` 字典 = 把活改个名字挂到小组长名下，等于没干。
+- **⑪ 就绪不冒充（四轮）**：通路"能不能跑"由代码判——`codebuddy` 需 `repo`
+  （没有会话载体投不出去），`direct_handle` 只认**完整** `@org/repo(角色)`
+  （角色名不是 handle）。整条链不通时通路表必须红，不许全绿。
+
+> 判定口径一句话：**功能写在旁边不接线 = 罢工；接线了但证据来自模拟器 = 白干。**
+> 新增能力必须同时交「主链路调用点」+「接线信号灯」，且凭据必须可分级核验。
 
 > 触发：显式 `[触发:架构·经理]` / `[触发:架构·小组长]` / 语义命中「承上启下/找通路/
 > 找进度/换路线/换方式/唤醒失败/调人/跨岗借人/申请授权/挤牙膏/刚性传达/
-> 戳一戳动一动/只分下去」/ rules 固定。信号灯 `local-agent/tests/test_manager.sh`
-> （22 组，其中 12-18 组锁承上启下、19-22 组锁权责口径/通路兜底/接线闸门），红灯即能力缺失。
-
-> 触发：显式 `[触发:架构·经理]` / `[触发:架构·小组长]` / 语义命中「分配/调度/派活/
-> 推进度/假装分工/纠结/带队/整合交付」/ rules 固定。信号灯
-> `local-agent/tests/test_manager.sh`（22 组，含第 11 组 YAML 解析回归；12-18 组锁承上启下，
-> 19-22 组锁权责口径/通路兜底/接线闸门），红灯即能力缺失。
+> 戳一戳动一动/只分下去/模拟器/演练证据/换主体」/ rules 固定。信号灯
+> `local-agent/tests/test_manager.sh`（27 组：12-18 锁承上启下、19-20 锁权责口径与
+> 通路兜底、21-22 锁接线、23-27 锁证据分级/小组长真开组/就绪不冒充/工作面/自检口径），
+> 红灯即能力缺失。
 
 ### 真实唤醒校验闸门（dispatch_verify · 固定规则 · Issue #100 防假装分配）
 
@@ -427,31 +438,6 @@
 
 > 触发：显式 `[触发:架构·开发/架构·交付]` / 语义命中「承接/接单卡/运行时在本地/云端只承接/
 > 交接单/回传核对/接不住/拒接/半承接」/ rules 固定。
-
-### 执行体槽位池（slot pool · 固定规则 · Issue #271）
-
-「@ 了角色很久没反应，不止一次」这类病，先怀疑**池子的取件顺序与队列长度**，再怀疑态度/模型。
-用户原话（PR #247）：「这个池子让他有个近因效应吧，最新的优先领取，这样即使卡住也不会一直卡，
-最多卡一下，以及加长队列，然后领取一个后，尝试把其他接上，这样自动修了。」
-承载 `local-agent/slot/` + `.cnb.yml`(`npc_task.slot_pool`) + `docs/NPC_SLOT_POOL.md`，
-信号灯 `local-agent/tests/test_slot_pool.sh`（8 组）：
-
-- **① 近因优先取件（recency-first）**：取件取**最新入队**。卡住的老任务只卡**一次**，
-  被跨过后留在队里等自愈，池头永远是最新那件 —— 不允许 FIFO 让一个卡死任务长期压住并发额度。
-- **② 加长队列**：`queue_capacity` 可配（默认 512），跨过卡住的件要有位置；满则
-  `rejected_full++` **显式计数，不静默丢件**。
-- **③ 领取后自愈接回**：`reserve()` **内建** `repair_rest` —— 领走一件活后把同样 stuck 的
-  其它活重新入队接上，不靠人一个个去捞；次数上限 `max_repairs` 兜底，超限标 `dead` 并写
-  note **显式上报不静默**。
-- **④ 三类状态分开报**：`queued` / `running` / `stuck`+`dead` 不混成一个「都挺好」；
-  槽位满 → `blocked=True` 不假装领到；占用超时 `sweep_stuck()` 判 stuck 不静默挂着。
-- **⑤ 配置单一事实源**：`.cnb.yml` 的 `npc_task.slot_pool` 是唯一配置源，CI 与本地
-  `load_npc_pool_config()` 同读一份；读不到退化为默认并在 `source` 标 `defaults`，不冒充读到。
-- **⑥ 诚实边界**：本层治的是「一个卡住任务长期堵死池子」，**不改云端执行器物理并发额度**，
-  也不是「排队问题解决了」——只把「一直卡」降级为「卡一下 + 自动接回 + 超限显式报警」。
-
-> 触发：显式 `[触发:架构·监控哨兵/架构·经理]` / 语义命中「@了没反应/一直卡/卡住/池子/排队/
-> 近因效应/最新优先领取/队列加长/接不上/自动修」/ rules 固定。
 
 ### 标签管理 + 进度自动化全员化（LabelAbility · 通用复用能力 · 固定规则 · Issue #51）
 
@@ -903,7 +889,7 @@ local-agent/manager/                  # ⭐ 经理/小组长「真干活」引�
   ├── lead_engine.py                   # LeadEngine：小组长派开发→客观验证→整合交付（复用 dev_team）
   └── __init__.py                      # 导出 ManagerEngine / LeadEngine / parse_plan / resolve_choice
 docs/MANAGER.md                       # 经理与小组长能力完善说明（Issue #239）
-local-agent/tests/test_manager.sh     # 经理/小组长 11 组信号灯（含 YAML 解析回归）
+local-agent/tests/test_manager.sh     # 经理/小组长 10 组信号灯
 local-agent/depth/                    # 七层协作深度能力包（DepthAbility 全员能力 · Issue #47）
   ├── engine.py                        # 七层深度引擎（L1表述→L7全自动到结果，可执行）
   ├── ability.py                       # DepthAbility 能力封装（express/awake/persist/auto_run）
@@ -929,10 +915,6 @@ local-agent/mcp_hub/                   # MCP 汇聚注册表（module mcp-hub v0
   ├── server.py                       # 统一入口，三前端一处语义（http/sse/jsonrpc）
   ├── registry.py                     # 握手 catalog() + 拉起即探活 launch()
   └── cli.py                          # CLI（catalog/tools/call/serve/launch/status）
-local-agent/slot/                      # 执行体槽位池（近因优先+长队列+领取后自愈 · Issue #271）
-  ├── __init__.py                      # 导出 SlotPool / pool_from_config
-  ├── pool.py                          # 取下一条顺序 + stuck 判定 + repair_rest 自愈
-  └── cli.py                           # CLI（overview/config/demo/simulate）
 local-agent/review_context/           # 评审增量上下文（冻结骨架+本轮变化 · Issue #150）
   ├── spec.py                         # 稳定/变化分段规范（唯一事实源）
   ├── paths.py                        # 仓库根解析（唯一事实源 · S8，评审/调度器同口径）

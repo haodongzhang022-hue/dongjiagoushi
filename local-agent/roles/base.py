@@ -372,6 +372,21 @@ class BaseRole:
             "warning": handle_warning,
         }
 
+    # ------------------------------------------------------------
+    # 承接方标准工作面（work_face · Issue #239 四轮）
+    # ------------------------------------------------------------
+    def work_face(self):
+        """返回本角色的**标准工作面**：accept/start/progress/deliver 四步。
+
+        派发方（经理等）拿它就能真驱动本角色上工——产出 progress 事件 +
+        goal_meters + 回执消息（真实凭据），而不是只投一张卡等一个未必会来的回执。
+        云端 harness / 本地引擎都把这里当统一入口。
+        """
+        if getattr(self, "_work_face", None) is None:
+            from manager.work import RoleWorkFace
+            self._work_face = RoleWorkFace(role=self.name, agent_id=self.name)
+        return self._work_face
+
     def self_handle(self):
         """返回本 agent 自身的完整 @ 格式（身份声明/汇报落款用，不写死）。"""
         if self.handle_ability is None:

@@ -29,9 +29,9 @@
 | **调度** | 架构·经理（分配调度核心 · **真激活/督促/监督**）| 分配/调度/派活/派任务/经理/激活/督促/推进度/假装分工/纠结/不建Issue | `roles/manager.py` + `local-agent/manager/engine.py` | docs/MANAGER.md | Issue #239 · module manager v0.1.0 |
 | **调度** | 架构·小组长（**真带队落地**）| 小组长/带队/带组/派开发/客观验证/整合交付/不放行/熔断 | `roles/team_lead.py` + `local-agent/manager/lead_engine.py` | docs/MANAGER.md | Issue #239 · module manager v0.1.0 |
 | **调度** | 经理激活断链修复（Issue 编号解析）| cnb输出/YAML/编号带引号/解析失败/active不出Issue/platform_active | `dispatch_engine._parse_issue_number` | docs/MANAGER.md §二.🔴 | Issue #239 |
-| **调度** | 执行体槽位池（slot pool：近因优先 + 长队列 + 领取后自愈）| 近因效应/最新优先领取/卡住/一直卡/池子/队列加长/排队/领一个把其他接上/自动修/执行体槽位/npc 排队/没反应 | `local-agent/slot/pool.py` + `.cnb.yml`(`npc_task.slot_pool` 配置唯一事实源) | docs/NPC_SLOT_POOL.md | Issue #271 · module slot-pool v0.1.0 |
 | **调度** | 经理**承上启下**（承上/行下/启下/反馈 四段）| 承上启下/翻译计划/裁掉不可执行/找进度/看反馈/换手段/调人/跨岗借人/挤牙膏/戳一戳动一动/刚性传达 | `roles/manager.py` + `local-agent/manager/flow.py` | docs/MANAGER.md §八 | Issue #239 二轮 · module manager-flow v0.1.0 |
 | **调度** | 经理**找通路**（多通路穷举 + 权责内自决）| 找通路/一条路断了/换下一条/CodeBuddy兜底/申请授权/权责内自决/SELF/HUMAN/末端员工 | `local-agent/manager/lanes.py` | docs/MANAGER.md §8.3-8.4 | Issue #239 二轮 · module manager-lane v0.1.0 |
+| **调度** | 经理**证据闸门 + 承接方工作面**（演练不算干活）| 证据分级/simulated/演练不算/真上工/工作面/work_face/承接方/注册表/换主体 | `local-agent/manager/work.py` + `roles/base.py`(work_face) | docs/MANAGER.md §九 | Issue #239 四轮 · module manager-work v0.1.0 |
 | **调度** | 小组长**带证据上交 / 跨岗借角色** | 带证据上交/无人承接/跨岗借角色/lead_escalate/lead_borrow/接单不是终点 | `roles/team_lead.py` | docs/MANAGER.md §8.6 | Issue #239 二轮 |
 | **调度** | 分发深度模型 L1-L4 | 派发/派活深度/接单 | AGENTS.md·分发递进深度 | docs/DISPATCH_DEPTH.md | Issue #33 |
 | **全员** | 对结果负责·真实唤醒闸门 | 假装分配/断链/待回执/不报L4 | `dispatch_engine.py`·真实唤醒闸门 | docs/DISPATCH_DEPTH.md | Issue #100 |
@@ -107,6 +107,7 @@
 | 我不清楚需求要做什么 | 架构·产品 / 架构·秘书（澄清+用户故事） |
 | 我要设计一个系统/模块 | 架构·总师（架构八步）→ 架构·经理（调度） |
 | 我要把一个需求拆给多个 agent 干活 | 架构·经理 `manager_execute(plan)`（计划→真激活→督促→监督）|
+| 我怎么确认"真有人干了"而不是模拟器绿了 | `manager.work.credential_of()` → 只认 `role`/`external`，`simulated` 判 fake |
 | 经理只出表格、不真建 Issue / 假装分工 | ACTIVATE 闸门 `ManagerEngine.activate()`（建不出 Issue = blocked_no_issue）|
 | 经理给了计划还纠结要不要做 | `resolve_choice()`：单路必然 EXECUTE，没有"纠结"这个出口 |
 | 没人接单、活掉地上了 | 经理 `manager_push()` → 调配小组长 `LeadEngine.drive()` 带队落地 |
@@ -125,7 +126,6 @@
 | 我在评审，该如何处置 | disposition（merge/proceed/fix_bug/...）+ 双轴 |
 | 我感觉一个 agent 在无效空转/停滞 | 监控哨兵（停滞/横跳/重复错误）|
 | 我面对"二选一都不够好" | 架构·审核前置助手（决策补全）|
-| 我 @ 了角色但很久没反应 / 一个卡住的活把池子堵死了 | 执行体槽位池（slot：近因优先取件 + 加长队列 + 领取后 `repair_rest` 自动接回卡住的活；配置读 `.cnb.yml` 的 `npc_task.slot_pool`）|
 | 我不知道某个机制的最新规则 | 回本表找「唯一事实源」，改正文再刷本表 |
 | 我想知道"某次评审/交付到底有没有效解决" | 有效性度量模型（review-metrics：维度化+分档+留痕；评审走 do_review 自动留处置观测）|
 | 我想判断"某个场景要不要设个秘书/加个秘书层" | 秘书层动态扩展机制（识别/注册/路由+权限护栏）|

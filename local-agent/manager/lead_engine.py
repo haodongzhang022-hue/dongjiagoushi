@@ -83,7 +83,10 @@ class LeadEngine:
         devs = []
         for i in range(n):
             sub_key = f"{task_key}::dev{i}"
-            dev_id, agent_id = sub_key, sub_key
+            # dev_id 必须是组引擎的键（dev0/dev1…）：DevTeamEngine.devs 就按这个索引，
+            # 拿子任务键当 dev_id 会在 run_round 里报「未知开发」——那等于小组根本没跑起来。
+            dev_id = f"dev{i}"
+            agent_id = sub_key
             try:
                 import ops
                 dev = ops.register_agent_for(sub_key, role="架构·开发")

@@ -294,7 +294,8 @@ class ManagerEngine:
     }
 
     def __init__(self, repo="", owner="架构·经理", dry_run=None,
-                 devs_per_team=2, simulate=None, transport=None):
+                 devs_per_team=2, simulate=None, transport=None, workers=None,
+                 max_rounds=None):
         """
         repo:      仓库（org/repo），空则取 CNB_REPO 环境变量
         dry_run:   True=只走本地登记不碰平台（默认：无 repo 或非云端时自动 True）
@@ -306,6 +307,10 @@ class ManagerEngine:
         self.devs_per_team = max(1, int(devs_per_team))
         self.simulate = simulate or {}
         self.transport = transport
+        # 承接方注册表：给了 workers 就**真驱动对方上工**（不再只投卡等回执）；
+        # simulate 只是演练，二者互斥使用（有 workers 时忽略 simulate）。
+        self.workers = workers
+        self.max_rounds = max_rounds
         if dry_run is None:
             dry_run = not (self.repo and _cnb_available())
         self.dry_run = bool(dry_run)
@@ -434,10 +439,19 @@ class ManagerEngine:
                 rec["state"] = "accepted"
                 accepted.append(rec)
                 continue
-            # 演练/测试：模拟对端真实回执，让链路可离线验证
+            # ①b 有承接方 → **真驱动它上工**（回执 + 开工 + 推进），拿到真凭据再判
+            drift = self.drive_worker(rec)
+            if drift.get("driven"):
+                rec["drive"] = drift
+                from .work import is_ready
+                if is_ready(drift.get("credential")):
+                    accepted.append(rec)
+                    rec["state"] = "accepted"
+                    continue
+            # 演练/测试：模拟对端回执（**simulated 级，不算干活**，仅让链路可离线跑）
             if self._simulated_accept(rec):
-                accepted.append(rec)
-                rec["state"] = "accepted"
+                rec["state"] = "simulated_ack"
+                awaiting.append(rec)
                 continue
             # ② 真实唤醒一次（投接力卡）；唤醒本身失败 → 立刻换下一条通路（不空等）
             awake = self._reawake(rec)
@@ -506,7 +520,11 @@ class ManagerEngine:
             return {"sent": False, "error": f"{type(e).__name__}: {e}"}
 
     def _simulated_accept(self, rec):
-        """演练：按 simulate 配置让对端"真实回执"，用于离线验证整条链路。"""
+        """演练：按 simulate 配置让对端"回执"，**但不算干活**。
+
+        四轮修正：`simulate` 的产出是 `simulated` 级证据，`supervise()` 不认它。
+        它只是让「无人接单 → 调人 → 上工」的升级链路能离线跑通，**不是分工完成**。
+        """
         mode = self.simulate.get(rec["role"], self.simulate.get("*"))
         if mode != "accept":
             return False
@@ -514,16 +532,70 @@ class ManagerEngine:
             import dispatch_engine
             dispatch_engine.accept_assignment(
                 rec["task_key"], rec["agent_id"], role=rec["role"],
-                note="[接单] （演练回执）已接手")
+                note="[接单] （演练回执，不算干活）")
             return True
         except Exception:  # noqa: BLE001
             return False
 
-    def delegate_to_lead(self, rec, lead_role="架构·小组长"):
-        """无人接单 → 调配小组长：把这条任务交给小组长带去落实开发。
+    # ---------------- 承接方：真驱动对方上工（不是只投卡） ----------------
+    def _worker(self, role):
+        """取该角色可真正干活的承接方（注册表里没有 → None，如实暴露）。"""
+        if callable(getattr(self.workers, "get", None)):
+            return self.workers.get(role)
+        return (self.workers or {}).get(role) if isinstance(self.workers, dict) else None
 
-        返回可执行的小组安排（小组长据此开工，不是又一张"分工表"）：
-          - 组内多少开发、目标量、首轮要做什么、验收口径谁定。
+    def drive_worker(self, rec, rounds=1):
+        """真驱动承接方干活：accept → [start → progress → deliver] × rounds。
+
+        返回 {"driven", "did", "credential", "note"}。**没有承接方**时诚实返回
+        driven=False（经理据此去调人/换通路，而不是假装推进了）。
+        """
+        worker = self._worker(rec.get("role"))
+        if worker is None:
+            out = {"driven": False, "did": [],
+                   "note": f"未注册可干活的承接方（{rec.get('role')}）→ 须换通路或调人"}
+            self._log("drive_worker", {**out, "task_key": rec.get("task_key")})
+            return out
+        task_key, task_id = rec.get("task_key", ""), rec.get("task_id", "")
+        kwargs = {"task_id": task_id}
+        did = []
+        try:
+            if callable(getattr(worker, "accept", None)):
+                worker.accept(task_key, **kwargs)
+                did.append("accepted")
+            for i in range(max(1, int(rounds))):
+                run_round = getattr(worker, "run_round", None)
+                if callable(run_round):
+                    r = run_round(task_key, task_id=task_id, round_no=i + 1) or {}
+                    did.extend(r.get("did") or [])
+                else:
+                    if callable(getattr(worker, "start", None)):
+                        worker.start(task_key, **kwargs)
+                        did.append("started")
+                    if callable(getattr(worker, "progress", None)):
+                        worker.progress(task_key, **kwargs)
+                        did.append("progressed")
+            driven = True
+        except Exception as e:  # noqa: BLE001 驱动失败显式暴露，不静默当做过
+            driven = False
+            did.append(f"error:{type(e).__name__}")
+        from .work import credential_of
+        cred = credential_of(task_id)
+        out = {"driven": driven, "did": did, "credential": cred,
+               "note": "真驱动承接方上工" if driven else "驱动失败"}
+        self._log("drive_worker", {**out, "task_key": task_key,
+                                   "role": rec.get("role")})
+        return out
+
+    def delegate_to_lead(self, rec, lead_role="架构·小组长", drive=True):
+        """无人接单 → 调配小组长：**真开组干活**，不是生成一张安排表。
+
+        四轮修正的关键一处：上一版此处只返回一个 `leader_plan` 字典，小组长引擎
+        （LeadEngine）从未被调用——于是"交给小组长"实际等于"换了个承接主体，
+        活照样停在原地"。现在 `drive=True` 时直接驱动 `LeadEngine`：
+        派开发 → 跑确定性闭环（客观验证）→ 整合交付 / 超限上报。
+
+        返回可执行的组安排 + `drive` 结果（`status` = delivered/continue/escalated）。
         """
         plan = {
             "lead_role": lead_role,
@@ -536,8 +608,42 @@ class ManagerEngine:
             "acceptance": "客观验证器（测试/lint）判定，非自判完成",
             "why": "该任务派发后未获 [接单] 回执 —— 由小组长承接落实，不把活掉在地上",
         }
+        if drive:
+            plan["drive"] = self._drive_lead(rec)
         self._log("delegate_to_lead", plan)
         return plan
+
+    def _drive_lead(self, rec):
+        """真驱动小组长：派开发 → 跑闭环 → 收口。无承接方则只编排（诚实标注）。"""
+        try:
+            from .lead_engine import LeadEngine
+            lead = LeadEngine(devs_per_team=self.devs_per_team, owner="架构·小组长")
+            p = lead.dispatch_devs({
+                "task_key": rec["task_key"], "goal_total": 1.0,
+                "issue": rec.get("issue"),
+                "title": rec.get("task_key"),
+            })
+            outputs = None
+            # 组内每个开发都要有**客观验证结果**才放行；经理不替验证器下结论，
+            # 有承接方就让它真跑，没有就如实把这一步标为待验证（不默认通过）。
+            if self._worker("架构·开发") is not None:
+                outputs = []
+                for d in p["devs"]:
+                    sub = {**rec, "task_key": d["task_key"],
+                           "task_id": d.get("agent_id") or d["task_key"]}
+                    r = self.drive_worker(sub)
+                    # dev_id 必须用组引擎的键（dev0/dev1…），不能拿任务键代填
+                    outputs.append((d["dev_id"], bool(r.get("driven")),
+                                    f"承接方执行 evidence={r.get('did')}"))
+            rd = lead.run_round(p, dev_outputs=outputs)
+            agg = lead.aggregate(p, rd)
+            return {"status": agg.get("status"), "verdict": rd.get("verdict"),
+                    "rounds": len(lead.rounds),
+                    "approved": rd.get("approved_devs"),
+                    "total": rd.get("total_devs"),
+                    "next": agg.get("next")}
+        except Exception as e:  # noqa: BLE001 小组驱动失败显式暴露
+            return {"status": "error", "error": f"{type(e).__name__}: {e}"}
 
     # ---------------- 启下：真动作（不是动作名） ----------------
 
@@ -693,9 +799,20 @@ class ManagerEngine:
         has_receipt = any(e in _ACCEPT_EVENTS for e in events)
         has_work = any(e in _WORK_EVENTS for e in events)
 
+        # 四轮闸门：证据必须过「凭据分级」。演练注入的 simulated 一律不算干活——
+        # 否则 `simulate={"*": "accept"}` 就能让整条链变绿，绿的其实是模拟器。
+        from .work import credential_of, is_ready
+        cred = credential_of(task_id)
+        simulated_only = (cred["level"] == "simulated")
+
         base = {"task_key": rec["task_key"], "task_id": task_id,
                 "role": rec["role"], "issue": rec.get("issue"),
-                "events": sorted(set(events)), "meter_rounds": len(meters)}
+                "events": sorted(set(events)), "meter_rounds": len(meters),
+                "credential": cred["level"], "credential_ready": is_ready(cred)}
+
+        if simulated_only and not is_ready(cred):
+            return {**base, "verdict": "fake", "disposition": "hand_to_lead",
+                    "reason": "只有演练回执（simulated），没有真实承接方开工 —— 不算分工"}
 
         # 停滞 / 横跳（量化距离说话）
         stall, jump = _judge_series(meters)
@@ -727,7 +844,7 @@ class ManagerEngine:
         # interrupt：交哨兵按协议打断/重规划（1 级），二度命中由哨兵升级（2 级）
         try:
             import sentinel.engine as sentinel
-            meter_id = f"g-{v['task_id']}"
+            meter_id = f"gm-{v['task_id']}"
             sentinel.interrupt(meter_id, v["task_id"], v["role"],
                                v["verdict"], {"reason": v["reason"]})
             v["sentinel"] = "interrupted"
@@ -786,18 +903,44 @@ class ManagerEngine:
         return res
 
     def self_check(self):
-        """经理自检：这四段活做到没有（供人类/总师快速判定岗位是否及格）。"""
+        """经理自检：这五件事做到没有（供人类/总师快速判定岗位是否及格）。
+
+        口径（四轮修正）：一次任务本来就不需要把六个手段全用一遍——
+        **"启下/找通路/自决"证明的是能力，不是"每单必用"**。所以：
+          - 承上 / 行下 / 反馈：本单必须做过（缺一即不及格）；
+          - 启下 / 找通路 / 自决：本单做过 **或** 已具备（有承接方/已注册通路/
+            授权判定函数可用）即算具备，`capability_ready` 里说明来源。
+        """
         kinds = [a["kind"] for a in self.actions]
-        return {
-            "role": self.owner,
+        has_workers = any(self._worker(r) is not None
+                           for r in ("架构·开发", "架构·评审", "架构·测试",
+                                     "架构·小组长", "架构·交付"))
+        from . import lanes as lane_mod
+        lanes_available = bool(lane_mod.LANE_ORDER)
+        engaged = {
             "承上": "take_over" in kinds or "carry" in kinds,
             "行下": "activate" in kinds,
-            "启下": "staffing" in kinds or "delegate_to_lead" in kinds,
+            "启下": ("staffing" in kinds or "delegate_to_lead" in kinds
+                     or "drive_worker" in kinds),
             "反馈": "adjust_round" in kinds or "carry" in kinds,
             "找通路": "try_lanes" in kinds or "lane_attempt" in kinds,
             "自决": "authorize" in kinds,
+        }
+        ready = {
+            "启下": "本单已调人" if engaged["启下"] else (
+                "已具备（有承接方可调）" if has_workers else "缺承接方"),
+            "找通路": "本单已换过通路" if engaged["找通路"] else (
+                "已具备（多通路已注册）" if lanes_available else "缺通路表"),
+            "自决": "本单已自决" if engaged["自决"] else "已具备（权责判定可用）",
+        }
+        return {
+            "role": self.owner,
+            **{k: engaged[k] or (k in ready and not ready[k].startswith("缺"))
+               for k in engaged},
+            "engaged": engaged,
+            "capability_ready": ready,
             "note": "四段缺一段即不及格：承上（翻译不是复述）/ 行下（派到有证据）/"
-                    "启下（调人跨岗）/ 反馈（回看再调整）",
+                    "启下（调人跨岗）/ 反馈（回看再调整）；找通路/自决看是否具备。",
         }
 
     # ---------------- 一站式：计划 → 激活 → 督促 → 监督 ----------------

@@ -55,12 +55,16 @@ LANES = {
         "cost": "low", "needs": ("repo",),
     },
     "codebuddy": {
+        # 四轮修正：`@CodeBuddy` 是通路，但**必须能投递**才算就绪——
+        # 没有 repo 就没有可投的会话载体，判 ready 等于假装"试过了"。
         "desc": "@CodeBuddy 兜底召唤 —— 角色权限不足/未注册时的通用入口",
-        "cost": "low", "needs": (),
+        "cost": "low", "needs": ("repo",),
     },
     "direct_handle": {
+        # 四轮修正：过去 `handle=role` 兜底让这条**永远 ready**，实际上一个 @ 都没解析出来。
+        # 现在必须真的解析到完整 `@org/repo(角色)` 才算就绪。
         "desc": "HandleAbility 解析的角色 @ 直呼 —— 不写死角色名/仓库",
-        "cost": "low", "needs": ("handle",),
+        "cost": "low", "needs": ("resolved_handle",),
     },
     "lead": {
         "desc": "调配小组长（带编制承接，组内 N 开发）—— 活交给人带",
@@ -150,11 +154,32 @@ def authorize(action, *, reversible=True, cost="low", sensitive=False,
                        "权责内、可逆、低成本、能留痕，经理自决执行，不申请授权")}
 
 
+def _resolve_handle(role, repo=""):
+    """真解析一个完整 `@org/repo(角色)`：解不出来就返回空串（不拿角色名冒充）。"""
+    try:
+        from handle import resolver as _hr
+        org, _, name = (repo or "").partition("/")
+        res = _hr.best_handle(at_str=None, target_org=org or None,
+                              target_repo=name or None, role=role)
+        return (res or {}).get("handle") or ""
+    except Exception:  # noqa: BLE001 解析能力缺失 → 未就绪，不降级冒充
+        return ""
+
+
+def is_full_handle(text):
+    """是不是一个**完整**的 `@org/repo(角色)` 召唤格式（角色名本身不算）。"""
+    t = str(text or "")
+    return t.startswith("@") and "/" in t and "(" in t and t.endswith(")")
+
+
 def readiness(lane, *, repo="", cnb=False, handle="", role=""):
     """通路就绪判定（代码判，不靠感觉）：这条通路现在**能不能真跑**。
 
     返回 {"ready": bool, "missing": [...]}。needs 全满足即 ready——
     「能不能跑」由这里判，不由"我觉得应该能"判。
+
+    四轮修正：过去 `handle` 缺省用角色名兜底，于是 `direct_handle`
+    **永远 ready**，可实际什么都没解析出来。现在只认完整 `@org/repo(角色)`。
     """
     needs = LANES.get(lane, {}).get("needs", ())
     missing = []
@@ -163,8 +188,10 @@ def readiness(lane, *, repo="", cnb=False, handle="", role=""):
             missing.append("repo（目标仓库未探测到）")
         elif n == "cnb" and not cnb:
             missing.append("cnb（平台 CLI 不可用）")
-        elif n == "handle" and not (handle or role):
-            missing.append("handle（角色 @ 格式未解析出）")
+        elif n == "resolved_handle":
+            cand = handle if is_full_handle(handle) else _resolve_handle(role or handle, repo)
+            if not cand:
+                missing.append("handle（完整 @org/repo(角色) 未解析出）")
     return {"lane": lane, "ready": not missing, "missing": missing}
 
 
@@ -174,7 +201,7 @@ def lanes_for(role, *, repo="", cnb=False, handle="", allow_self=True):
     for lane in LANE_ORDER:
         if lane == "self" and not allow_self:
             continue
-        r = readiness(lane, repo=repo, cnb=cnb, handle=handle or role)
+        r = readiness(lane, repo=repo, cnb=cnb, handle=handle, role=role)
         out.append({
             "lane": lane,
             "desc": LANES[lane]["desc"],
@@ -206,7 +233,7 @@ def attempt(role, handlers, *, repo="", cnb=False, handle="", allow_self=True,
     for lane in LANE_ORDER:
         if lane == "self" and not allow_self:
             continue
-        rd = readiness(lane, repo=repo, cnb=cnb, handle=handle or role)
+        rd = readiness(lane, repo=repo, cnb=cnb, handle=handle, role=role)
         if not rd["ready"]:
             attempts.append({"lane": lane, "state": "skipped_unready",
                              "missing": rd["missing"]})

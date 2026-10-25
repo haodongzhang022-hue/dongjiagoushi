@@ -73,15 +73,17 @@ sup = r["supervise"]
 assert sup["summary"]["fake"] == 1, f"应识别 1 条假装，实际 {sup['summary']}"
 v = sup["verdicts"][0]
 assert v["verdict"] == "fake" and v["disposition"] == "hand_to_lead"
-assert "假装" in v["reason"]
+assert "假装" in v["reason"] or "演练" in v["reason"]
 assert v.get("leader_plan"), "假装的任务必须给出小组长落实安排（活不掉地上）"
 print("  ✅ 只回执不干活 → 判 fake → 转小组长落实（不再当已分工）")
 print(f"      verdict={v['verdict']} disposition={v['disposition']}")
 
-# 对端真开工 → 判 real，不误伤
-import dispatch_engine
+# 对端真开工（走标准工作面）→ 判 real，不误伤
+from manager.work import RoleWorkFace
 a = r["activated"][0]
-admin.record_event(a["agent_id"], "work_started", {"note": "真开工"}, a["task_id"])
+face = RoleWorkFace(role=a["role"], agent_id=a["agent_id"])
+face.accept(a["task_key"], task_id=a["task_id"])
+face.start(a["task_key"], task_id=a["task_id"])
 sup2 = m.supervise()
 assert sup2["summary"]["real"] == 1, f"真干活应判 real，实际 {sup2['summary']}"
 assert sup2["summary"]["ok"] is True
@@ -110,9 +112,13 @@ print("  ✅ 无人接单 → 再唤醒 → 仍无 → 调配小组长（含首�
 print(f"      待接单={len(p['awaiting'])} 转小组长={len(p['delegated'])}")
 
 # 混合：一半真接一半不理 → 诚实统计，不谎报全部完成
-m2 = ManagerEngine(dry_run=True, simulate={"架构·开发": "accept"})
+from manager.work import RoleWorkFace, WorkerRegistry
+reg = WorkerRegistry().register("架构·开发",
+                                RoleWorkFace(role="架构·开发", agent_id="ag-dev"))
+m2 = ManagerEngine(dry_run=True, workers=reg, simulate={"架构·评审": "ignore"})
 r2 = m2.execute_plan("1. 开发登录模块\n2. 评审登录模块")
-assert len(r2["push"]["accepted"]) == 1 and len(r2["push"]["delegated"]) == 1
+assert len(r2["push"]["accepted"]) == 1, f"开发应真上工，实际 {r2['push']}"
+assert len(r2["push"]["delegated"]) == 1, "评审无人接单必须转小组长"
 assert r2["supervise"]["summary"]["ok"] is False
 print("  ✅ 混合场景诚实统计（不谎报全部完成）")
 EOF
@@ -674,6 +680,127 @@ assert w["attempts"], "必须逐条留痕尝试过的通路"
 assert any(a["state"] == "skipped_unready" for a in w["attempts"]), \
     "不可用通路必须显式标 skipped_unready，不许假装试过"
 print("  ✅ 借角色真解析 handle 真召唤 / 加派真拿 gid / 拆分真出子任务 / 不可用通路诚实留痕")
+EOF
+
+echo "===== [manager] 23. 证据闸门：演练回执不能当分工（绿的不能是模拟器） ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr23.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine
+
+# 只开演练（simulate=accept）：链路上确实有 [接单]，但**没有承接方真开工**
+m = ManagerEngine(dry_run=True, simulate={"*": "accept"})
+r = m.execute_plan("1. 开发登录模块")
+v = r["supervise"]["verdicts"][0]
+assert v["credential"] == "simulated", f"演练证据必须标 simulated，实际 {v['credential']}"
+assert v["verdict"] != "real", "演练回执被判成 real = 绿的其实是模拟器"
+assert v["credential_ready"] is False
+
+# 只有真承接方上工，才算"安排成功"
+from manager.work import RoleWorkFace, WorkerRegistry
+reg = WorkerRegistry().register("架构·开发",
+                                RoleWorkFace(role="架构·开发", agent_id="ag-real"))
+m2 = ManagerEngine(dry_run=True, workers=reg)
+r2 = m2.execute_plan("1. 开发登录模块")
+v2 = r2["supervise"]["verdicts"][0]
+assert v2["credential"] in ("role", "external"), v2
+assert v2["verdict"] == "real", f"真上工应判 real，实际 {v2}"
+print("  ✅ 演练=simulated 不算干活 / 真承接方上工=role 才算；判据由代码分级")
+print(f"      演练→{v['verdict']}({v['credential']}) / 真上工→{v2['verdict']}({v2['credential']})")
+EOF
+
+echo "===== [manager] 24. 交小组长不是换主体：必须真驱动 LeadEngine 开组干活 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr24.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine, LeadEngine
+
+# 过去 delegate_to_lead 只返回一个 leader_plan 字典，小组长引擎从没被调用过
+m = ManagerEngine(dry_run=True, simulate={"*": "ignore"})
+r = m.execute_plan("1. 开发登录模块")
+lp = r["push"]["delegated"][0]["leader_plan"]
+drive = lp.get("drive") or {}
+assert drive, "调配小组长必须真开组（返回 drive 结果），不能只给安排表"
+assert drive.get("status") in ("delivered", "continue", "escalated"), drive
+assert drive.get("approved") is not None and drive.get("total"), \
+    f"必须产出客观验证结果（approved/total），实际 {drive}"
+assert drive.get("rounds", 0) >= 1, "小组必须真跑至少一轮闭环"
+
+# 小组长派开发时 dev_id 必须是组引擎的键（dev0/dev1…），否则 run_round 直接报未知开发
+lead = LeadEngine(devs_per_team=2)
+plan = lead.dispatch_devs({"task_key": "登录模块", "goal_total": 1.0})
+assert [d["dev_id"] for d in plan["devs"]] == ["dev0", "dev1"], plan["devs"]
+rd = lead.run_round(plan, dev_outputs=[("dev0", True, "ok"), ("dev1", True, "ok")])
+assert rd["approved_devs"] == 2 and rd["total_devs"] == 2, rd
+assert lead.aggregate(plan, rd)["status"] == "delivered"
+print("  ✅ 交小组长 → 真开组：派开发 → 跑闭环 → 整合/继续/上报（不再是换个人停原地）")
+print(f"      drive.status={drive.get('status')} approved={drive.get('approved')}/{drive.get('total')}")
+EOF
+
+echo "===== [manager] 25. 通路就绪不冒充：整条链不通时不许全绿 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr25.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import lanes as lane_mod
+
+# 没有 repo / 没有 cnb：平台与接力卡通路必须判未就绪（不许"我觉得应该能"）
+rows = {r["lane"]: r for r in lane_mod.lanes_for("架构·开发")}
+assert rows["platform"]["ready"] is False
+assert rows["fullpath"]["ready"] is False
+assert rows["codebuddy"]["ready"] is False, "没有会话载体还判 @CodeBuddy 就绪 = 假装试过"
+
+# direct_handle 必须真解析出完整 @org/repo(角色)，角色名本身不算 handle
+assert lane_mod.is_full_handle("架构·开发") is False
+assert lane_mod.is_full_handle("@dongdongxiaozu/dongjiagoushi(架构·开发)") is True
+print("  ✅ 无 repo/无 cnb 时平台·接力·@CodeBuddy 一律未就绪；handle 只认完整 @org/repo(角色)")
+print(f"      {[(r['lane'], r['ready']) for r in rows.values()]}")
+EOF
+
+echo "===== [manager] 26. 角色工作面：任何角色都能真上工，产出可核验证据 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr26.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager.work import RoleWorkFace, credential_of, is_ready
+
+face = RoleWorkFace(role="架构·开发", agent_id="ag-x")
+a = face.accept("任务A", task_id="tk-a")
+assert a["accepted"] and a["level"] == "role", a
+face.start("任务A", task_id="tk-a")
+face.progress("任务A", task_id="tk-a", goal_total=2.0, current=1.0, delta=1.0)
+c = credential_of("tk-a")
+assert c["level"] == "role" and is_ready(c), c
+assert c["meters"] >= 1, f"真推进必须写进度尺，实际 {c['meters']}"
+
+face.deliver("任务A", output="已交付", task_id="tk-a", evidence="pull#999")
+assert credential_of("tk-a")["level"] == "external"
+print("  ✅ 承接方标准工作面（accept/start/progress/deliver）产出 role→external 凭据")
+print(f"      level={credential_of('tk-a')['level']} meters={c['meters']}")
+EOF
+
+echo "===== [manager] 27. 整条能力链：四段做过或已具备即及格，不因一单没调人就判红 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr27.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from roles.manager import ManagerRole
+
+m = ManagerRole(current_org="dongdongxiaozu", current_repo="dongjiagoushi")
+m._workers = m.manager_workers()
+assert m._workers.roles(), "经理必须能装出承接方注册表（否则派下去没人干）"
+assert m._workers.has("架构·开发")
+
+r = m.manager_carry("1. 开发登录模块\n2. 评审登录模块\n3. 测试登录模块")
+assert r["escalated"] is False, r["note"]
+assert all(v["verdict"] == "real" for v in r["verdicts"]), r["verdicts"]
+sc = m.manager_self_check()
+for k in ("承上", "行下", "启下", "反馈", "找通路", "自决"):
+    assert sc[k] is True, f"{k} 应具备/做到，实际 {sc}"
+print("  ✅ 经理带真承接方：三条开工全判 real；六项能力全具备（不是每单都要调人）")
+print(f"      {r['note']} / 承接方={m._workers.roles()}")
 EOF
 
 echo "===== [manager] ALL PASS ====="
