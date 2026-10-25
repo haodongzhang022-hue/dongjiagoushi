@@ -36,6 +36,13 @@ export PYTHONPATH="local-agent${PYTHONPATH:+:$PYTHONPATH}"
 python3 - <<'PYEOF'
 import os, tempfile, sys
 sys.path.insert(0, "local-agent")
+# ⚠️ 顺序敏感：DB_PATH 必须在**首次 import data.db 之前**设置。
+#    db.py 的 DB_PATH 是**模块级常量**（导入时读一次环境变量即固化），导入后再改
+#    os.environ 不会生效，会静默落到仓库里的 local-agent/data/runtime.db。
+#    后果不是报错，而是「假绿/假红」二连：上一轮测试写在同一条任务 gid 上的历史事件
+#    被本轮继承（progress 表里已有 work_started），于是本应判 fake 的判成 real。
+if not os.environ.get("DB_PATH"):
+    os.environ["DB_PATH"] = tempfile.mktemp(suffix="_fv_mgr.db")
 from data import admin, schema
 from manager import ManagerEngine, LeadEngine
 from manager.engine import resolve_choice, parse_plan
@@ -67,7 +74,11 @@ for d in (r1["decision"], r2["decision"]):
 ok("计划即命令：单路=EXECUTE / 空=BLOCKED / 无纠结出口")
 
 # ② ACTIVATE 闸门：逐条激活 + 空计划显式拒绝
-os.environ["DB_PATH"] = tempfile.mktemp(suffix="_fv_mgr.db")
+# 断言用库路径已隔离（不是仓库里的共享 runtime.db），否则本样例的判据会被历史数据污染
+_db_path = os.path.realpath(schema.db.DB_PATH)
+_shared = os.path.realpath(os.path.join("local-agent", "data", "runtime.db"))
+assert _db_path != _shared, (
+    "证据库未隔离：实际用 %s —— DB_PATH 必须在 import data.db 之前设置" % _db_path)
 admin.init(); schema.init_schema()
 m = ManagerEngine(dry_run=True)
 empty = m.activate("")
@@ -108,8 +119,11 @@ assert ss["verdicts"][0].get("sentinel") == "interrupted"
 ok("监督停滞：进度尺判停滞→哨兵打断(interrupted)")
 
 # ④ 督促：无人接单→转小组长
+# ⚠️ 用**全新任务 key**：「接单回执」是 progress 表里按任务 gid 的事实，
+#    ③ 那一轮已经给「开发登录模块」写过 accepted，同名沿用会让本轮直接判已接单
+#    （这正是本文件开头修过的「历史数据污染判据」的另一面）。
 mm3 = ManagerEngine(dry_run=True, simulate={"架构·开发": "ignore"})
-rr3 = mm3.execute_plan("1. 开发登录模块\n2. 评审登录模块")
+rr3 = mm3.execute_plan("1. 开发结算模块\n2. 评审结算模块")
 p = rr3["push"]
 assert len(p["awaiting"]) == 2 and len(p["delegated"]) == 2, p
 assert p["delegated"][0]["leader_plan"]["lead_role"] == "架构·小组长"
