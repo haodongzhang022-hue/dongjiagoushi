@@ -25,6 +25,7 @@
 | **架构** | 架构·总师（架构八步）| 架构/设计/技术方案/架构八步 | `.codebuddy/skills/architect/SKILL.md` | docs/ARCHITECTURE.md | framework 版本线 |
 | **架构** | 架构·总师助理（改错改框架专项）| 改错/改框架/框架修正 | `roles/chief_assistant.py` | docs/CHIEF_ASSISTANT.md | agent_version |
 | **调度** | 架构·经理（分配调度核心）| 分配/调度/派活/派任务/经理 | `roles/manager.py` | docs/DISPATCHER.md | agent_version |
+| **调度** | 执行体槽位池（slot pool：近因优先 + 长队列 + 领取后自愈）| 近因效应/最新优先领取/卡住/一直卡/池子/队列加长/排队/领一个把其他接上/自动修/执行体槽位/npc 排队/没反应 | `local-agent/slot/pool.py` + `.cnb.yml`(`npc_task.slot_pool` 配置唯一事实源) | docs/NPC_SLOT_POOL.md | Issue #271 · module slot-pool v0.1.0 |
 | **调度** | 分发深度模型 L1-L4 | 派发/派活深度/接单 | AGENTS.md·分发递进深度 | docs/DISPATCH_DEPTH.md | Issue #33 |
 | **全员** | 对结果负责·真实唤醒闸门 | 假装分配/断链/待回执/不报L4 | `dispatch_engine.py`·真实唤醒闸门 | docs/DISPATCH_DEPTH.md | Issue #100 |
 | **全员** | 派发能力（DispatchAbility）| 派发/接单/分发 | `local-agent/dispatch/` | docs/DISPATCH_ABILITY.md | Issue #33 |
@@ -112,6 +113,7 @@
 | 我在评审，该如何处置 | disposition（merge/proceed/fix_bug/...）+ 双轴 |
 | 我感觉一个 agent 在无效空转/停滞 | 监控哨兵（停滞/横跳/重复错误）|
 | 我面对"二选一都不够好" | 架构·审核前置助手（决策补全）|
+| 我 @ 了角色但很久没反应 / 一个卡住的活把池子堵死了 | 执行体槽位池（slot：近因优先取件 + 加长队列 + 领取后 `repair_rest` 自动接回卡住的活；配置读 `.cnb.yml` 的 `npc_task.slot_pool`）|
 | 我不知道某个机制的最新规则 | 回本表找「唯一事实源」，改正文再刷本表 |
 | 我想知道"某次评审/交付到底有没有效解决" | 有效性度量模型（review-metrics：维度化+分档+留痕；评审走 do_review 自动留处置观测）|
 | 我想判断"某个场景要不要设个秘书/加个秘书层" | 秘书层动态扩展机制（识别/注册/路由+权限护栏）|
