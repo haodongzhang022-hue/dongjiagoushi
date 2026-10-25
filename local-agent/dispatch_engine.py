@@ -88,32 +88,58 @@ def _create_issue(repo, title, body):
             cmd, capture_output=True, text=True, timeout=30,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
-        if result.returncode == 0:
-            import json
-            try:
-                data = json.loads(result.stdout)
-                if isinstance(data, dict) and "data" in data:
-                    return data["data"].get("number")
-                if isinstance(data, dict):
-                    return data.get("number")
-            except json.JSONDecodeError:
-                pass
-            for line in result.stdout.splitlines():
-                if "number" in line and ":" in line:
-                    val = line.split(":", 1)[1].strip()
-                    try:
-                        return int(val)
-                    except ValueError:
-                        continue
-        for line in result.stderr.splitlines():
-            if "number" in line and ":" in line:
-                val = line.split(":", 1)[1].strip()
-                try:
-                    return int(val)
-                except ValueError:
-                    continue
-        return None
+        return _parse_issue_number(result.stdout if result.returncode == 0
+                                   else (result.stdout + "\n" + result.stderr))
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def _parse_issue_number(output):
+    """从 cnb CLI 输出解析新建 Issue 编号（Issue #239 · 修复激活断链）。
+
+    `cnb issues create-issue` 实际输出的是 **YAML 风格的 `key: value` 文本**
+    （`data:\n  number: "242"`），不是纯 JSON；且编号**带引号**。
+    旧实现 `int(val)` 遇到 `"242"` 直接 ValueError → 返回 None →
+    每条任务都被判 blocked_no_issue → **经理在真实环境下永远激活不出 Issue**。
+    这是"假装分工"在代码里的真实根因之一，此处按两种格式都解析。
+    """
+    if not output:
+        return None
+    import json
+    text = output.strip()
+    # ① JSON 形态
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            if isinstance(data.get("data"), dict):
+                data = data["data"]
+            for key in ("number", "issue_number", "id"):
+                if data.get(key) is not None:
+                    got = _to_int(data[key])
+                    if got is not None:
+                        return got
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # ② YAML 风格文本形态（cnb CLI 默认输出）
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("number"):
+            continue
+        if ":" not in stripped:
+            continue
+        got = _to_int(stripped.split(":", 1)[1])
+        if got is not None:
+            return got
+    return None
+
+
+def _to_int(val):
+    """把 `"242"` / `'242'` / `242` 统一转成 int；转不了返回 None。"""
+    if val is None:
+        return None
+    try:
+        return int(str(val).strip().strip('"\''))
+    except (TypeError, ValueError):
         return None
 
 

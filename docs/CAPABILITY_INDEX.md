@@ -24,7 +24,9 @@
 | **需求** | 架构·产品（需求澄清）| 需求/澄清/用户故事/边界 | `.cnb/settings.yml` + roles/product.py | docs/ISSUE_MANAGEMENT.md | agent_version |
 | **架构** | 架构·总师（架构八步）| 架构/设计/技术方案/架构八步 | `.codebuddy/skills/architect/SKILL.md` | docs/ARCHITECTURE.md | framework 版本线 |
 | **架构** | 架构·总师助理（改错改框架专项）| 改错/改框架/框架修正 | `roles/chief_assistant.py` | docs/CHIEF_ASSISTANT.md | agent_version |
-| **调度** | 架构·经理（分配调度核心）| 分配/调度/派活/派任务/经理 | `roles/manager.py` | docs/DISPATCHER.md | agent_version |
+| **调度** | 架构·经理（分配调度核心 · **真激活/督促/监督**）| 分配/调度/派活/派任务/经理/激活/督促/推进度/假装分工/纠结/不建Issue | `roles/manager.py` + `local-agent/manager/engine.py` | docs/MANAGER.md | Issue #239 · module manager v0.1.0 |
+| **调度** | 架构·小组长（**真带队落地**）| 小组长/带队/带组/派开发/客观验证/整合交付/不放行/熔断 | `roles/team_lead.py` + `local-agent/manager/lead_engine.py` | docs/MANAGER.md | Issue #239 · module manager v0.1.0 |
+| **调度** | 经理激活断链修复（Issue 编号解析）| cnb输出/YAML/编号带引号/解析失败/active不出Issue/platform_active | `dispatch_engine._parse_issue_number` | docs/MANAGER.md §二.🔴 | Issue #239 |
 | **调度** | 执行体槽位池（slot pool：近因优先 + 长队列 + 领取后自愈）| 近因效应/最新优先领取/卡住/一直卡/池子/队列加长/排队/领一个把其他接上/自动修/执行体槽位/npc 排队/没反应 | `local-agent/slot/pool.py` + `.cnb.yml`(`npc_task.slot_pool` 配置唯一事实源) | docs/NPC_SLOT_POOL.md | Issue #271 · module slot-pool v0.1.0 |
 | **调度** | 分发深度模型 L1-L4 | 派发/派活深度/接单 | AGENTS.md·分发递进深度 | docs/DISPATCH_DEPTH.md | Issue #33 |
 | **全员** | 对结果负责·真实唤醒闸门 | 假装分配/断链/待回执/不报L4 | `dispatch_engine.py`·真实唤醒闸门 | docs/DISPATCH_DEPTH.md | Issue #100 |
@@ -79,6 +81,7 @@
 | 架构·小组长 | 子任务/整合/加派 | settings.yml | 子任务细化与整合 |
 | 架构·开发 | 写码/实现/自测/PR | settings.yml | 实现 |
 | 架构·评审 | 评审/走查/质量 | settings.yml | 质量守门 |
+| 架构·小组长 | 带队/派开发/客观验证/整合交付 | settings.yml+`manager.LeadEngine` | 承接口（带组干活） |
 | 架构·测试 | 联调/测试/验收/信号灯 | settings.yml | 质量验收 |
 | 架构·交付 | 交付/收尾/汇总/呈现 | settings.yml+DELIVERER | 呈现+收尾 |
 | 架构·数据管理员 | 数据/存档/进度 | settings.yml | 数据底座唯一负责人 |
@@ -98,7 +101,11 @@
 |---|---|
 | 我不清楚需求要做什么 | 架构·产品 / 架构·秘书（澄清+用户故事） |
 | 我要设计一个系统/模块 | 架构·总师（架构八步）→ 架构·经理（调度） |
-| 我要把一个需求拆给多个 agent 干活 | 架构·经理 dispatch + DispatchAbility（L1-L4）|
+| 我要把一个需求拆给多个 agent 干活 | 架构·经理 `manager_execute(plan)`（计划→真激活→督促→监督）|
+| 经理只出表格、不真建 Issue / 假装分工 | ACTIVATE 闸门 `ManagerEngine.activate()`（建不出 Issue = blocked_no_issue）|
+| 经理给了计划还纠结要不要做 | `resolve_choice()`：单路必然 EXECUTE，没有"纠结"这个出口 |
+| 没人接单、活掉地上了 | 经理 `manager_push()` → 调配小组长 `LeadEngine.drive()` 带队落地 |
+| 小组长只会拆表不会带队 | `LeadEngine` 派开发→客观验证→整合交付，一个没过不放行 |
 | 我要让外部对端（管理台/中控/网关）按角色派单进来开发 | roster（`catalog` 拉清单 → `verify` 对一次 → `intake` 派单入场，或 `POST /webhook/<src>/roster` 不 import 直达）|
 | 我不知道本仓一共有哪些 MCP 工具 / 要一个统一 MCP 入口 | mcp_hub（`catalog` 看端点+工具清单 → `launch` 拉起三前端 → `call` 转发；未接线如实 not_wired）|
 | 我要跨仓库召唤角色 | HandleAbility（不写死角色名）|
