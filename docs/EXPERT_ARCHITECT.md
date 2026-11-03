@@ -175,6 +175,7 @@ arch.ai_frontier_at("多智能体协作编排")          # → 能力前沿状�
 |---|---|
 | E1 | 七维规范自洽（权重和 / 全部必过 / 分档有序） |
 | E2 | 专家层真实命中 + 无关需求不硬凑 |
+| **E2b** | **专家层缺失时显式降级 `unverified`**（模拟云 CI 容器无外部仓副本；不崩溃、不伪造命中） |
 | E3 | 帕累托支配/分层/min 方向/候选不足判不可信 |
 | E4 | **真实跑子进程**：静态冒充/失败/超时/伪造/自述全被拦 |
 | E5 | 时效性四档 + 空集不通过 |
@@ -182,5 +183,10 @@ arch.ai_frontier_at("多智能体协作编排")          # → 能力前沿状�
 | E7 | 陈旧能力声明降级 unverified，未收录判 unknown |
 | E8 | Issue 唯一标题契约（幂等/收并/低信号拦截/正文契约） |
 
-运行：`bash local-agent/tests/test_expertise.sh`
+运行：`bash local-agent/tests/test_expertise.sh`（9 组）
 （Windows 下若 bash 指向 WSL 解释器，用 `PYTHON=/mnt/d/.../python.exe` 指定本机解释器。）
+
+> **CI 环境差异说明**：云 CI 容器（`python:3.11`）里**没有** `hanghangchuzhuangyuan` 副本，
+> 因此 E2 在 CI 中走的是 E2b 的降级分支（判 `unverified`），而非真实命中 —— 这是**预期行为**，
+> 不是"CI 没测到"。真实命中在本地/验收环境（有该仓副本）验证。
+> 若要在 CI 里也做真实命中，需先把该仓副本检出到 `EXPERT_LAYER_ROOT` 指定路径。
