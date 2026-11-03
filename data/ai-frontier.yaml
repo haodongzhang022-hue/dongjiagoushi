@@ -1,0 +1,114 @@
+# ============================================================================
+# AI 能力前沿注册表 · ai-frontier
+# ============================================================================
+# 作用：回答「当前 AI 能做什么 / 下一步能解决什么」，为架构选型提供**带时效的**
+#       能力边界，而不是笼统假设「架构师全能」。
+#
+# 纪律（与 local-agent/expertise/ai_frontier.py 的判定逻辑配套）：
+#   1. 每条能力**必须**带 dated_at + source；无日期 = 不可信，过期 = stale；
+#   2. state 只能取：
+#        frontier    前沿可达（能做，但成本/风险偏高，需强验证）
+#        mainstream  主流可靠（生产可用，是默认选型区）
+#        commodity   商品化便宜（应直接采用，别自研）
+#        emerging    萌芽（可行但不确定性大，必须留回退）
+#        blocked     当前不可行（必须写明原因与触发复审条件）
+#   3. kind 决定时效上限（见 spec.FRESHNESS_SPECS）：ai_model=30d / ai_framework=60d
+#      / ai_research=180d。**过期条目自动降级为 unverified**，不得支撑「能做」结论。
+#   4. 本文件是**运行时数据**，不是代码；AI 进展快，请按季度整体复核并更新
+#      updated_at，逐条更新 dated_at 与 source。
+# ============================================================================
+version: "1.0"
+updated_at: "2026-11-03"
+review_cadence: "季度整体复核；ai_model/ai_framework 类条目 30~60 天逐条复核"
+baseline_note: "初始基线，条目以‘可被架构直接利用的能力面’为粒度；source 指向官方文档/发布说明/实测报告"
+
+capabilities:
+  - name: 长上下文代码理解
+    aliases: [long-context, 大上下文, 整仓理解]
+    kind: ai_model
+    state: mainstream
+    dated_at: "2026-11-03"
+    source: "本机 DSH 实测：deepseek-flash 有效窗口 ≈128k（ops/bili 调优记录 2026-09-19）"
+    next_problem: "跨仓依赖图的自动裁剪与按需加载，避免整仓灌注"
+    evidence: ["本机实测", "上下文溢出自愈验证"]
+    note: "默认可用；超过有效窗口必须裁剪，不得假设无限上下文"
+
+  - name: 代码生成与重构
+    aliases: [codegen, 写代码, 改代码]
+    kind: ai_model
+    state: mainstream
+    dated_at: "2026-11-03"
+    source: "组织内 28 仓日常开发实测（dongjiagoushi/youxikaifaxilieagent 等）"
+    next_problem: "生成结果的功能性验证自动化（生成即可验证，而非人工抽查）"
+    evidence: ["生产使用", "多仓 CI 红灯闭环"]
+    note: "主流可用，但**必须**配功能性验证门禁，否则不可信"
+
+  - name: 结构化工具调用
+    aliases: [tool-calling, function-calling, MCP]
+    kind: ai_framework
+    state: mainstream
+    dated_at: "2026-11-03"
+    source: "DSH Cordis 插件体系 + MCP 协议（本机 dsh-super-injector 运行验证）"
+    next_problem: "工具目录膨胀导致的上下文污染，需按需加载与后侧 staging"
+    evidence: ["本机运行验证"]
+    note: "工具目录变更会破坏 prompt 缓存，必须克制（见 AGENTS.md 缓存友好纪律）"
+
+  - name: 多智能体协作编排
+    aliases: [multi-agent, 多 agent, 协作编排]
+    kind: ai_research
+    state: frontier
+    dated_at: "2026-11-03"
+    source: "本仓 local-agent/（DAG/分形/会诊/派发深度 L1-L4）实践 + 公开多智能体研究"
+    next_problem: "跨 agent 的**真实唤醒**与产物一致性（派发不断链、不同写冲突）"
+    evidence: ["本仓实践", "公开研究"]
+    note: "前沿区：能做但极易退化为「假装协作」，必须用回执与产物核验"
+
+  - name: 代码自动评审（双轴 + 处置标签）
+    aliases: [auto-review, 自动评审]
+    kind: ai_model
+    state: mainstream
+    dated_at: "2026-11-03"
+    source: "本仓 docs/REVIEW_DUAL_AXIS.md + REVIEW_DISPOSITION.md 落地实现"
+    next_problem: "评审结论的可量化有效性度量（已有 review_metrics 雏形）"
+    evidence: ["本仓实现", "测试信号灯"]
+    note: "可用；但评审不能替代测试，结论以测试为准"
+
+  - name: 长时自主任务执行
+    aliases: [autonomous, agent-loop, 守护循环]
+    kind: ai_research
+    state: emerging
+    dated_at: "2026-11-03"
+    source: "本机 guardian / daemon-loop 插件形态实践"
+    next_problem: "长时任务的成本可控与中途失忆（状态外置 + 断点续跑）"
+    evidence: ["本机实践"]
+    note: "风险高：必须外置状态、设预算与熔断，不得裸跑"
+
+  - name: 全自动跨仓交付
+    aliases: [auto-delivery, 自动合并]
+    kind: ai_research
+    state: emerging
+    dated_at: "2026-11-03"
+    source: "本仓 .cnb.yml 自动合并闭环 + 组织内多仓 PR 历史"
+    next_problem: "合并前冲突前置校验与回滚能力"
+    evidence: ["组织内 PR 历史", "本仓流水线"]
+    note: "高风险：不可逆动作须人力闸门（CP3）"
+
+  - name: 行业岗位专家能力自动获取
+    aliases: [industry-expert, 岗位专家]
+    kind: ai_research
+    state: frontier
+    dated_at: "2026-11-03"
+    source: "hanghangchuzhuangyuan 行业注册表（14 单元 + 岗位关键词）+ 多渠道搜集"
+    next_problem: "岗位能力的**深度**（流程/做法/验收）而非仅关键词，需结构化岗位档案"
+    evidence: ["注册表", "覆盖率进度"]
+    note: "本仓 expertise.experts 消费该层；未覆盖行业必须显式判 unverified"
+
+  - name: 信息时效自动核验
+    aliases: [freshness, 时效性]
+    kind: ai_framework
+    state: emerging
+    dated_at: "2026-11-03"
+    source: "本仓 local-agent/expertise/freshness.py（本注册表自身配套）"
+    next_problem: "外部来源的自动抓取日期与内容指纹，减少人工维护 dated_at"
+    evidence: ["本仓实现"]
+    note: "当前依赖人工维护日期，属萌芽区；维护成本是主要风险"
