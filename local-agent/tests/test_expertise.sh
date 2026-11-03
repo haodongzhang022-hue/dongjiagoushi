@@ -78,6 +78,24 @@ EOF
 then ok "E2 专家层真实命中（法律咨询→contract_advisor）+ 无关需求不硬凑"; else bad "E2 专家层判定失败"; fi
 
 echo ""
+echo "===== [expertise] E2b. 专家层不可用时的降级（模拟 CI 容器无外部仓副本） ====="
+if "$PY" - <<'EOF'
+import os, sys; sys.path.insert(0, '.')
+# 进程内模拟「本机没有 hanghangchuzhuangyuan 副本」：把探测候选全部指向不存在路径。
+# 云 CI 容器里确实没有该仓副本，此分支必须**显式降级**而不是崩溃/伪造命中。
+import expertise.experts as E
+E._candidate_roots = lambda root=None: ["/nonexistent/no-such-expert-layer"]
+from expertise import IndustryExpertLayer
+layer = IndustryExpertLayer()
+assert layer.available is False, "候选路径不存在时不得判可用"
+res = layer.resolve("给律所做一个合同审查系统")
+assert res["status"] == "unverified", res
+assert "no-such" in (layer.error or "") or layer.error, layer.error
+print("  degraded ->", res["status"], "| error:", (layer.error or "")[:40])
+EOF
+then ok "E2b 专家层缺失时显式降级 unverified（不崩溃、不伪造命中）"; else bad "E2b 降级分支失败"; fi
+
+echo ""
 echo "===== [expertise] E3. 帕累托前沿 ====="
 if "$PY" - <<'EOF'
 import sys; sys.path.insert(0, '.')
