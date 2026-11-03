@@ -28,15 +28,17 @@ from .spec import EXPERT_SOURCES
 # ---------------------------------------------------------------------------
 # 一、定位专家层（多路径探测，不写死单一路径）
 # ---------------------------------------------------------------------------
-def _candidate_roots():
+def _candidate_roots(root=None):
     """按优先级探测 hanghangchuzhuangyuan 的本地副本根目录。
 
-    允许通过环境变量显式指定（CI / 云端 / 异构机器通用），否则走常见布局。
+    **显式优先**：环境变量 `EXPERT_LAYER_ROOT` 或构造参数 `root` 一旦给出，就只认它
+    ——找不到即判不可用（显式意图不得被启发式兜底掩盖）。
+    没给显式值时，才走常见布局探测（CI / 异构机器可用环境变量精确指定）。
     """
+    explicit = root or os.environ.get("EXPERT_LAYER_ROOT")
+    if explicit:
+        return [explicit]
     roots = []
-    env = os.environ.get("EXPERT_LAYER_ROOT")
-    if env:
-        roots.append(env)
     here = os.path.dirname(os.path.abspath(__file__))          # local-agent/expertise
     local_agent = os.path.dirname(here)                         # local-agent
     repo_root = os.path.dirname(local_agent)                    # dongjiagoushi
@@ -117,7 +119,7 @@ class IndustryExpertLayer:
 
     # -- 加载 ---------------------------------------------------------------
     def _load(self, root=None, search_paths=None):
-        roots = [root] if root else _candidate_roots()
+        roots = [root] if root else _candidate_roots(root=root)
         for candidate in roots:
             if not candidate:
                 continue
