@@ -33,6 +33,11 @@ else
   exit 2
 fi
 echo "  （解释器：$PY · $(command -v "$PY")）"
+# 统一导出：**所有**需要"再起一个子进程跑 Python"的用例都必须复用此解析结果，
+# 禁止在用例内写死 `python`/`python3` —— 云 CI（python:3.11）只有 `python3`，
+# 写死 `python` 会 exit 127，导致「外部验证」判不通过 → 用例误红。
+# 教训（2026-11-03，CI cnb-cn4-1k6fsorel）：同一份测试在本地(有 python)绿、在容器红。
+export PYBIN="$PY"
 
 PASS=0
 FAIL=0
@@ -132,15 +137,17 @@ import sys, os, shutil; sys.path.insert(0, '.')
 from expertise import external_validation as ev
 
 def _interp():
-    env = os.environ.get("PYBIN", "")
-    for cand in (env, "python3", "python"):
+    for cand in (os.environ.get("PYBIN", ""), "python3", "python"):
         if cand and shutil.which(cand):
             return cand
     return sys.executable
 
-# 统一加引号：绝对路径可能带空格（Windows 本机）
+
 def qipy(interp):
-    return '"%s"' % interp if " " in interp or os.sep in interp or "/" in interp else interp
+    """含空格/路径分隔符的解释器路径必须加引号，否则 shell 会按空格切词。"""
+    quoted = " " in interp or os.sep in interp or "/" in interp
+    return '"%s"' % interp if quoted else interp
+
 
 PY = qipy(_interp())
 
@@ -220,11 +227,23 @@ then ok "E5 时效性闸门（无日期/过期/无来源/空集 全部不通过�
 echo ""
 echo "===== [expertise] E6. 七维评估（自述不被采信） ====="
 if "$PY" - <<'EOF'
-import sys; sys.path.insert(0, '.')
+import sys, os, shutil; sys.path.insert(0, '.')
 from expertise import evaluate, run_check
 from expertise.spec import DIMENSION_KEYS
 
-real = run_check("python -c \"print('gate-ok')\"")
+# 解释器解析必须与 E4 一致：云 CI（python:3.11）里往往**没有** `python`，只有 `python3`。
+# 此处若写死 `python`，run_check 会 exit 127 → 外部验证判不通过 → E6 误红（2026-11-03 实测过）。
+# 曾因本行写死 `python` 导致 CI cnb-cn4-1k6fsorel 失败：本地 Windows 解析到 `python` 能过，
+# 容器里没有该命令即红 —— 同一个测试在两种环境给出相反的绿/红，属基础设施级误判。
+def _interp():
+    for cand in (os.environ.get("PYBIN", ""), "python3", "python"):
+        if cand and shutil.which(cand):
+            return cand
+    return sys.executable
+
+PYBIN = _interp()
+real = run_check(PYBIN + " -c \"print('gate-ok')\"")
+assert real["status"] == "pass", ("E6 前置：真实执行验证未通过", real["status"], real.get("output_summary"))
 facts = [{"kind": "ai_framework", "source": "repo:local", "dated_at": "2026-11-03"}]
 
 def full_dims(strength=0.95):
