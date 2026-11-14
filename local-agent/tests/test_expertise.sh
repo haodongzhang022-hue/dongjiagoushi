@@ -708,15 +708,23 @@ assert len(created) == 2, "同批重复 flush 又新建了 Issue"
 assert r3.get("duplicate") is True and r3.get("submitted") == 0, r3
 # 命中标题与本批不一致时（脏存量同名/键塌缩）→ 保留队列 + 显式报错，绝不静默吞活
 class _FakeBatch(B.CloudBatch):
+    matched = ""
     def _create_issue(self, title, body):
+        gate = {"matched_title": self.matched} if self.matched is not None else {}
         return {"number": "1234", "reused": True, "title": title,
-                "gate": {"matched_title": "CHORE:local-agent · 别的东西"},
-                "url": "x"}
+                "gate": gate, "url": "x"}
 fb = _FakeBatch(repo="acme/b", min_tasks=1, queue_file=q)
+# ① 命中标题与本批不一致（脏存量同名/键塌缩）→ 保留队列 + 显式报错
+fb.matched = "CHORE:local-agent · 别的东西"
 fb.enqueue("测试流任务", "内容")
 kept = fb.flush()
 assert kept.get("error") and kept.get("queue_cleared") == 0, kept
 assert len(fb._load()["tasks"]) == 1, "内容不一致却清了队列 → 活被吞了"
+# ② 拿不到命中标题（gate 没给 matched_title）同样不许当核对通过
+fb.matched = None
+kept2 = fb.flush()
+assert kept2.get("error") and kept2.get("queue_cleared") == 0, kept2
+assert len(fb._load()["tasks"]) == 1, "未知命中标题被当核对通过 → 活被吞了"
 
 # --- ③ issue_source 文档不许再自相矛盾（「全量=不带 --state」是错的）---
 _flat = " ".join((src.__doc__ or "").split()).replace("`", "")

@@ -191,16 +191,20 @@ class CloudBatch(object):
                 # 绝不静默清空把新任务吞掉。
                 matched = (result.get("gate") or {}).get("matched_title") or ""
                 gated_title = result.get("title") or title   # 闸门可能已契约化标题
-                if matched and normalize_text(matched) != normalize_text(gated_title):
+                # 「拿不到命中标题」也不能当"核对通过"：那等于用未知当证据。
+                verified = bool(matched) and (normalize_text(matched)
+                                              == normalize_text(gated_title))
+                if not verified:
                     result.update({
-                        "error": "幂等命中的 Issue 与本批内容不一致，已保留队列未提交："
-                                 "既有 #%s 标题 %r ≠ 本批 %r"
-                                 % (result.get("number"), matched, gated_title),
-                        "queued": n, "queue_cleared": 0,
+                        "error": ("幂等命中的 Issue 与本批内容无法核对一致，已保留队列未提交："
+                                  "既有 #%s 标题 %r ≠ 本批 %r"
+                                  % (result.get("number"), matched or "（空）", gated_title)),
+                        "queued": n, "queue_cleared": 0, "duplicate_verified": False,
                     })
                     return result
                 self._save({"tasks": [], "created_at": time.time()})
                 result.update({"submitted": 0, "duplicate": True,
+                               "duplicate_verified": True,
                                "queue_cleared": n, "issue_number": result["number"]})
                 return result
             # 提交成功清空队列（失败保留，等待下次 flush）
