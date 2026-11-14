@@ -740,11 +740,15 @@
     "local-agent/tests/test_expertise.sh": {
       "name": "test_expertise",
       "covers": [
+        "data/ai-frontier.yaml",
+        "local-agent/dispatch_engine.py",
+        "local-agent/entries/cnb_live.py",
         "local-agent/expertise/",
+        "local-agent/expertise/issue_source.py",
+        "local-agent/hybrid/batch.py",
         "local-agent/roles/architect.py",
         "local-agent/roles/base.py",
-        "scripts/issue-contract.py",
-        "data/ai-frontier.yaml"
+        "scripts/issue-contract.py"
       ],
       "depends_on": [],
       "cpu_cost_est": 2.0,

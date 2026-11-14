@@ -77,10 +77,61 @@ def declare_assignments(assignments):
 # ============================================================
 # L2 分发：拆分任务 + 分配角色 + 投池 + 创建 Issue
 # ============================================================
+# ------------------------------------------------------------
+# 建 Issue 前的唯一闸门（Issue 唯一标题契约 · 接线层）
+# ------------------------------------------------------------
+# 契约模块 `expertise.issue_contract` 早就落地了，但派发器没调它 = 不生效：
+# 2026-11-14 实测同一天又长出「开发/评审/测试登录模块」三条测试流 Issue。
+# 这里把 `guard_create()` 挂到**唯一建 Issue 出口**上：标题契约化 + 同 key 复用，
+# 保证「名字唯一、不重复、可检索」是结构性的，而不是靠调用方自觉。
+#
+# 存量怎么读走 `expertise.issue_source` 唯一实现（本文件不再自写一份）：
+# 第一版用 `--state all`（非法值，实测 400）且不查 rc → 存量恒为 `[]` →
+# reuse 分支一次都进不去，闸门看着接上了、真实环境一条都没堵住。
+
+
+def guard_issue_title(repo, title, module="local-agent", issue_type="CHORE", seed=""):
+    """派发前闸门：返回 {action: create|reuse|reject, title, ...}（契约唯一入口）。"""
+    try:
+        from expertise import issue_contract as _ic
+        from expertise import issue_source as _src
+    except Exception:  # noqa: BLE001  专家层不可用不阻断派发，但显式降级
+        return {"action": "create", "title": title, "original": title,
+                "derived": False, "reuse_number": None, "existing_ok": False,
+                "existing_count": 0,
+                "reason": "契约模块不可用，降级为原样创建（显式暴露）"}
+    snap = _src.existing(repo) if repo else {"ok": False, "items": [],
+                                             "error": "未给 repo"}
+    gated = _ic.guard_create(title, snap.get("items") or [], module=module,
+                            issue_type=issue_type, seed=seed)
+    gated["existing_ok"] = bool(snap.get("ok"))
+    gated["existing_count"] = len(snap.get("items") or [])
+    if not snap.get("ok"):
+        # 读不到存量时幂等必然退化 —— 写在 reason 里，不假装守住了契约
+        gated["reason"] = (str(gated.get("reason") or "")
+                           + "；存量读取失败，幂等降级：" + str(snap.get("error") or ""))
+    return gated
+
+
 def _create_issue(repo, title, body):
-    """调用 cnb CLI 创建独立 Issue（平台留痕）。返回 issue_number 或 None。"""
+    """调用 cnb CLI 创建独立 Issue（平台留痕）。返回 issue_number 或 None。
+
+    所有派发都经 `guard_issue_title()`：低信号标题契约化、同 key 复用不重复建；
+    建成功后回填存量（`issue_source.remember`），同批内第 2 条起也能去重。
+    """
     if not repo:
         return None
+    gated = guard_issue_title(repo, title, seed=title)
+    action = gated.get("action")
+    if action == "reject":
+        return None
+    if action == "reuse":
+        return _to_int(gated.get("reuse_number"))
+    title = gated.get("title") or title
+    if gated.get("derived"):
+        body = (body or "") + (
+            f"\n\n---\n> 原标题 `{gated['original']}` 不符合唯一标题契约，"
+            f"已契约化为 `{title}`（见 `docs/ISSUE_CONTRACT.md`）。原文见上文。\n")
     try:
         cmd = ["cnb", "issues", "create-issue",
                "--repo", repo, "--title", title, "--body", body]
@@ -88,8 +139,15 @@ def _create_issue(repo, title, body):
             cmd, capture_output=True, text=True, timeout=30,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
-        return _parse_issue_number(result.stdout if result.returncode == 0
-                                   else (result.stdout + "\n" + result.stderr))
+        number = _parse_issue_number(result.stdout if result.returncode == 0
+                                     else (result.stdout + "\n" + result.stderr))
+        if number:
+            try:
+                from expertise import issue_source as _src
+                _src.remember(repo, number, title)
+            except Exception:  # noqa: BLE001  回填失败不影响已建事实
+                pass
+        return number
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
 

@@ -76,6 +76,7 @@ python3 -m hybrid.cli quota audit          # 完整账本
 | 数据层不可用 | sync 降级本地日志，不硬依赖 |
 | WSL/Windows 环境差异 | worker `_pick_bash` + `_wsl_popen_cmd` 路径转换 + `_host_env` 读宿主变量 |
 | 云端 API 不可达 | batch flush 失败保留队列，下次重试（不丢任务） |
+| 幂等命中同一批 | 标题带整批内容指纹；`reuse` 须核对命中标题与本批一致才标 `duplicate` 清队列，不一致/未知一律保留队列 + 显式报错（不静默吞活） |
 | 跨月账本 | quota 自动滚动（保留上月摘要） |
 
 ---

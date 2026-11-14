@@ -37,6 +37,7 @@ if _LOCAL_AGENT not in sys.path:
     sys.path.insert(0, _LOCAL_AGENT)
 
 from expertise import issue_contract as ic  # noqa: E402
+from expertise import issue_source  # noqa: E402
 
 
 def _cnb_argv(args):
@@ -78,28 +79,18 @@ def _run(argv, timeout=180):
 
 
 def fetch_issues(repo, state="all", page_size=100, max_pages=10):
-    """拉取 Issue 清单（含已关闭，用于收并判定）。返回 [{number,title,state,comment_count}]。"""
-    out = []
-    for page in range(1, max_pages + 1):
-        argv = _cnb_argv(["issues", "list-issues", "--repo", repo, "--page", str(page),
-                          "--page-size", str(page_size)])
-        if state != "all":
-            argv += ["--state", state]
-        rc, stdout, stderr = _run(argv)
-        if rc != 0:
-            raise RuntimeError(f"拉取 Issue 失败（page {page}）：{stderr.strip()[:300]}")
-        # cnb CLI 输出是 yaml 风格文本；用宽松解析提取 number/title/state/comment_count
-        out.extend(_parse_issue_list(stdout))
-        if "totalPages" in stdout:
-            try:
-                total_pages = int(stdout.split("totalPages:", 1)[1].splitlines()[0].strip())
-                if page >= total_pages:
-                    break
-            except (ValueError, IndexError):
-                break
-        elif len(out) < page * page_size:
-            break
-    return out
+    """拉取 Issue 清单（含已关闭，用于收并判定）。返回 [{number,title,state,comment_count}]。
+
+    读法只保留一份：委托 `expertise.issue_source`（全量语义 = **不带 `--state`**，
+    因为 `issues list-issues` 只认 `open`/`closed`，`all` 是非法值实测 400）。
+    治理脚本 / 派发器 / bridge / 批量提交共用同一实现，谁都别各写一份。
+    """
+    want = None if state == "all" else state
+    snap = issue_source.fetch_issues(repo, page_size=page_size, max_pages=max_pages,
+                                     state=want)
+    if not snap["ok"]:
+        raise RuntimeError(f"拉取 Issue 失败：{snap['error']}")
+    return snap["items"]
 
 
 def _parse_issue_list(text):

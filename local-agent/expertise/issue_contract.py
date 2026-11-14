@@ -89,6 +89,10 @@ _LOW_SIGNAL_PATTERNS = (
 _LOW_SIGNAL_KEYS = {
     "p0", "p1", "p2", "p3", "t0", "t1", "tmp", "temp", "todo", "tbd", "dummy",
     "test", "test1", "demo", "sample", "foo", "bar", "baz", "x", "xx", "xxx",
+    # 关键字型残片：中文标题被剔掉后只剩这些英文词时，它代表不了原意，不能当唯一键
+    # （`fix 登录` / `fix 支付` 都塌成 `fix` → 两件事被静默并成一件事）
+    "pr", "mr", "fix", "bug", "feat", "docs", "chore", "patch", "issue",
+    "api", "cli", "ui", "web", "app", "dev", "run", "new", "old", "work", "code",
 }
 
 TITLE_TEMPLATE = "{type}:{module} · {key}"
@@ -387,3 +391,162 @@ def build_body(*, objective, in_scope, out_of_scope, acceptance, verification,
         f"## 信息来源与时效\n" + "\n".join(src_lines) + "\n\n"
         f"## 版本声明\n" + ("\n".join(ver_lines) if ver_lines else "- （待补双版本声明）") + "\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# 四、派发前闸门（接线层：把契约真正挂到「建 Issue」这一步上）
+# ---------------------------------------------------------------------------
+# 为什么需要这一层：`plan()/dedupe_plan()` 只是**纯计算**，谁不调它谁就绕过契约。
+# 2026-11-14 实测就是这样——专家层与契约都合进 main 了，可 `dispatch_engine` /
+# `entries.cnb_live` 建 Issue 时仍然直接用自由文本当标题，于是同一天又长出
+# `开发登录模块 / 评审登录模块 / 测试登录模块` 三条。**契约不接线 = 不生效。**
+# 本层 `guard_create()` 是派发器唯一入口：给「想用的标题」，它返回
+# create（含契约化后的标题）/ reuse（已有同 key，别再建）/ reject（无法契约化）。
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+# 有效字符：字母数字 + 中日韩文字（算"被 ascii 丢弃的实质内容"）
+_ALNUM_RE = re.compile(r"[0-9a-z]|[\u4e00-\u9fff]|\u3040-\u30ff|\uac00-\ud7af")
+
+
+def _ascii_coverage(text):
+    """ascii 字符占原文有效字符的比例（0~1）。中文被整段剔掉时这个值会明显 <1。"""
+    effective = _ALNUM_RE.findall(normalize(text).lower())
+    if not effective:
+        return 0.0
+    return sum(1 for ch in effective if ch.isascii()) / float(len(effective))
+
+
+def slugify_key(text, seed=""):
+    """把任意文本压成合法唯一键；**绝不因为"好看"牺牲唯一性**。
+
+    规则（每条都对应一个真实事故）：
+      1. 纯 ascii 且不是关键字 → 直接用，可读优先（`refactor-login-module`）；
+      2. 有内容被丢掉（中文/日文被整段剔掉）→ 可读残片 **+ 内容摘要后缀**，
+         例如 `update-readme-3f2a1b9c`：既保留人可读线索，又保证两件不同的事
+         不会共用一个键（第一版只留残片，`API 接口改造` / `登录模块 API` /
+         `开发登录模块 API` 全塌成 `api`，第二条诉求过闸门直接被并进第一条）；
+      3. 残片本身是关键字（`fix`/`pr`/`api`/`todo`…）或压根没有 ascii → 纯摘要。
+    同一段文本永远压出同一个键（幂等的根），不同文本永远压出不同键（不吞任务）。
+    """
+    normalized = normalize(text).lower()
+    raw_ascii = _SLUG_RE.sub("-", normalized).strip("-")
+    raw_ascii = re.sub(r"-{2,}", "-", raw_ascii)
+    ascii_part = raw_ascii[:48].strip("-")
+    usable = (ascii_part and ascii_part[0].isalnum() and len(ascii_part) >= 2
+              and ascii_part not in _LOW_SIGNAL_KEYS)
+    if usable:
+        # 「残片就是全部内容」有两个条件，缺一就会吞任务：
+        #   ① 覆盖率 1.0（没被剔掉中文）；② **没被截断**（≤48 字符）。
+        # 第一版只判①，纯英文长标题截到 48 字符后直接返回残片，第 48 字符之后的
+        # 内容不参与唯一性 —— 实测 `...pipeline stage one/two` 压出同一个键，
+        # 第二条诉求被 reuse 进第一条的 Issue（比原来的重复更糟：两件事并成一件）。
+        if _ascii_coverage(normalized) >= 0.999 and len(raw_ascii) <= 48:
+            return ascii_part
+        # 有实质内容被丢弃：残片只当"读得懂的线索"，唯一性由摘要后缀保证
+        return "%s-%s" % (ascii_part[:38].strip("-"), _stable_digest(seed or text)[:8])
+    return "task-" + _stable_digest(seed or text)
+
+
+def derive_title(text, *, module="local-agent", issue_type="CHORE", seed=""):
+    """把不合格的标题**契约化**（保住唯一与幂等，不丢信息——原文进正文）。"""
+    return build_title(issue_type, module, slugify_key(text, seed=seed or text))
+
+
+def guard_create(title, existing=None, *, module="local-agent",
+                 issue_type="CHORE", seed="", derive=True):
+    """建 Issue 前唯一闸门：返回 create / reuse / reject，**永不返回原始垃圾标题**。
+
+    title    : 调用方想用的标题（可以是自由文本）
+    existing : [{number, title, state?}] 现有 Issue（含已关闭）
+    derive   : True=不合格标题自动契约化（保住幂等）；False=直接 reject
+
+    返回 {action, title, original, reason, derived, reuse_number, key}
+    """
+    original = normalize(title)
+    existing = existing or []
+    by_key = {}
+    by_literal = {}
+    for issue in existing:
+        t = issue.get("title", "")
+        k = issue_key(t)
+        if k:
+            by_key.setdefault(k, []).append(issue)
+        # 存量里不合契约的脏标题（`开发登录模块`）也要能挡同名重复：
+        # 那正是「同一天长出三条一模一样 Issue」的真实成因，只按契约 key 匹配挡不住。
+        if normalize(t):
+            by_literal.setdefault(normalize(t).lower(), []).append(issue)
+
+    def _reuse_of(hits, candidate, derived, extra_reason):
+        open_hits = [h for h in hits if (h.get("state") or "open") == "open"]
+        target = (open_hits or hits)[0]
+        return {
+            "action": "reuse", "title": candidate, "original": original,
+            "key": issue_key(candidate), "derived": derived,
+            "reuse_number": str(target.get("number")),
+            "matched_title": target.get("title") or "",
+            "reason": (extra_reason + "；" if extra_reason else "")
+                      + f"已存在同 key Issue #{target.get('number')}，复用不再新建",
+        }
+
+    def _decide(candidate, derived, extra_reason=""):
+        key = issue_key(candidate)
+        hits = by_key.get(key) or []
+        open_hits = [h for h in hits if (h.get("state") or "open") == "open"]
+        target = (open_hits or hits or [None])[0]
+        if target is not None:
+            return {
+                "action": "reuse", "title": candidate, "original": original,
+                "key": key, "derived": derived, "reuse_number": str(target.get("number")),
+                "matched_title": target.get("title") or "",
+                "reason": (extra_reason + "；" if extra_reason else "")
+                          + f"已存在同 key Issue #{target.get('number')}，复用不再新建",
+            }
+        return {
+            "action": "create", "title": candidate, "original": original,
+            "key": key, "derived": derived, "reuse_number": None,
+            "reason": extra_reason or "符合唯一标题契约",
+        }
+
+    if not original:               # 空标题没有原文可摘要，契约化也救不回来 → 明确拒绝
+        return {"action": "reject", "title": "", "original": original, "key": None,
+                "derived": False, "reuse_number": None, "reason": "标题为空"}
+
+    # ① 原文同名已存在（含合不上契约的存量脏标题）→ 直接复用，不再新建
+    same = by_literal.get(original.lower()) or []
+    if same:
+        return _reuse_of(same, same[0].get("title") or original, derived=False,
+                         extra_reason=f"原文同名 Issue 已存在（标题 {original!r}）")
+
+    low, why = is_low_signal(original)
+    if not low:
+        return _decide(original, derived=False)
+
+    if not derive:
+        return {"action": "reject", "title": "", "original": original, "key": None,
+                "derived": False, "reuse_number": None, "reason": why}
+
+    seed = seed or original
+    try:
+        derived_title = derive_title(original, module=module, issue_type=issue_type,
+                                     seed=seed)
+    except ValueError as exc:      # 类型/模块/键非法 → 无法契约化，明确拒绝
+        return {"action": "reject", "title": "", "original": original, "key": None,
+                "derived": False, "reuse_number": None,
+                "reason": f"原标题不合格（{why}）且无法契约化：{exc}"}
+
+    # derive 之后必须**再复核一次**：第一版漏了这步，`p0`/`tmp` 这类占位词当唯一键
+    # 被 `is_low_signal` 明确判为低信号，却能原样放行（`_LOW_SIGNAL_KEYS` 在这条分支失效）。
+    low2, why2 = is_low_signal(derived_title)
+    if low2:
+        digest_title = build_title(issue_type, module,
+                                   "task-" + _stable_digest(seed + "#retry"))
+        low3, why3 = is_low_signal(digest_title)
+        if low3:
+            return {"action": "reject", "title": "", "original": original, "key": None,
+                    "derived": False, "reuse_number": None,
+                    "reason": f"原标题不合格（{why}），契约化后仍不合格：{why3}"}
+        return _decide(digest_title, derived=True,
+                       extra_reason=(f"原标题不合格（{why}）→ 契约化结果仍不合格"
+                                     f"（{why2}）→ 改用摘要键 {digest_title!r}"))
+    return _decide(derived_title, derived=True,
+                   extra_reason=f"原标题不合格（{why}）→ 契约化为 {derived_title!r}")

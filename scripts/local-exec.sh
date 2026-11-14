@@ -65,9 +65,20 @@ try:
         print("  攒批队列为空（无待提交云端任务）")
     elif st["ready"] or st["time_window_ready"]:
         r = b.flush(dry_run=False)
-        if r.get("number"):
-            print("  ✅ 攒批就绪 → 已一键提交云端 Issue #%s（一次唤醒）" % r["number"])
+        # reuse/duplicate ≠ 提交成功：本批可能一条新任务都没提交（或保留队列待重试），
+        # 一律按真实字段说话，不把"拿到一个编号"当成"提交成功"。
+        if r.get("error"):
+            print("  ⚠️ flush 未提交（队列保留 %s 条）：%s"
+                  % (r.get("queued", "?"), r.get("error")))
+        elif r.get("duplicate"):
+            print("  ↺ 本批与云端既有 Issue #%s 内容一致（幂等命中，未重复提交）"
+                  % r.get("number"))
+        elif r.get("number") and r.get("submitted") is not None:
+            print("  ✅ 攒批就绪 → 已提交 %s 条任务到云端 Issue #%s（一次唤醒）"
+                  % (r.get("submitted"), r["number"]))
             print("     %s" % r.get("url", ""))
+        elif r.get("number"):
+            print("  ⚠️ flush 返回 Issue #%s 但未确认提交条数，请人工核对" % r["number"])
         else:
             print("  ⚠️ flush 失败: %s" % r.get("error", "未知"))
     else:

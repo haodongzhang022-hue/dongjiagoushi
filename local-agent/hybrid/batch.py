@@ -17,6 +17,7 @@ CloudBatch · 云端批量打包提交器（防频繁唤醒）
     内嵌 yaml 结构化任务元数据，云端 CodeBuddy 自动解析。
   - 秘钥：环境变量 cnbcooldong（CNB 访问令牌）；可用 CNB_REPO 覆盖目标仓库。
 """
+import hashlib
 import json
 import os
 import time
@@ -31,6 +32,22 @@ QUEUE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".batch_qu
 # 攒批阈值可调
 DEFAULT_MIN_TASKS = 3        # 攒够 3 个任务才值得唤醒一次云端
 DEFAULT_MAX_WAIT_SECONDS = 3600  # 最多等 1 小时（时间窗兜底）
+
+
+def _batch_fingerprint(tasks, size=8):
+    """整批内容指纹（标题+描述+验收），供 Issue 标题唯一定位这一批。
+
+    只取指纹前 size 位：够区分不同批次，又不至于把标题撑爆。
+    """
+    payload = json.dumps(
+        [[t.get("title", ""), t.get("description", ""), t.get("acceptance") or []]
+         for t in tasks], ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:size]
+
+
+def normalize_text(text):
+    """标题比对用归一化（去多余空白 + 大小写不敏感），不与契约模块耦合。"""
+    return " ".join(str(text or "").split()).lower()
 
 
 class CloudBatch(object):
@@ -149,7 +166,12 @@ class CloudBatch(object):
         if not tasks:
             return {"submitted": 0, "reason": "empty queue"}
         n = len(tasks)
-        title = "[批量] %s 等 %d 个任务（CloudBatch）" % (tasks[0]["title"][:30], n)
+        # 标题必须带**整批内容指纹**：原实现是「首任务标题前 30 字 + 条数」，
+        # 两个不同批次只要首标题前缀相同、条数相同，标题就一模一样 —— 过契约闸门时
+        # 第二批被判 `reuse` 复用第一批的 Issue，flush 见 number 非空就清队列，
+        # **整批新任务随队列一起消失、body 从未发出**（比原来的重复更糟）。
+        title = "[批量] %s 等 %d 个任务（CloudBatch · %s）" % (
+            tasks[0]["title"][:20], n, _batch_fingerprint(tasks))
         body = self._build_issue_body(tasks)
 
         if dry_run:
@@ -162,11 +184,35 @@ class CloudBatch(object):
 
         result = self._create_issue(title, body)
         if result.get("number"):
+            if result.get("reused"):
+                # 幂等命中 ≠ 提交成功：必须核对复用到的确实是**同一批内容**。
+                # 标题带内容指纹后，同指纹才可能 collide；若命中的标题与本批标题
+                # 不一致，说明是脏存量同名/键塌缩，**保留队列 + 显式报错**，
+                # 绝不静默清空把新任务吞掉。
+                matched = (result.get("gate") or {}).get("matched_title") or ""
+                gated_title = result.get("title") or title   # 闸门可能已契约化标题
+                # 「拿不到命中标题」也不能当"核对通过"：那等于用未知当证据。
+                verified = bool(matched) and (normalize_text(matched)
+                                              == normalize_text(gated_title))
+                if not verified:
+                    result.update({
+                        "error": ("幂等命中的 Issue 与本批内容无法核对一致，已保留队列未提交："
+                                  "既有 #%s 标题 %r ≠ 本批 %r"
+                                  % (result.get("number"), matched or "（空）", gated_title)),
+                        "queued": n, "queue_cleared": 0, "duplicate_verified": False,
+                    })
+                    return result
+                self._save({"tasks": [], "created_at": time.time()})
+                result.update({"submitted": 0, "duplicate": True,
+                               "duplicate_verified": True,
+                               "queue_cleared": n, "issue_number": result["number"]})
+                return result
             # 提交成功清空队列（失败保留，等待下次 flush）
             self._save({"tasks": [], "created_at": time.time()})
             if post_comment:
                 self._post_comment(result["number"], "@CodeBuddy 请按本批量任务单承接处理。")
                 result["comment_posted"] = True
+            result.update({"submitted": n, "queue_cleared": n})
         return result
 
     # ---------- CNB API ----------
@@ -193,6 +239,32 @@ class CloudBatch(object):
         }
 
     def _create_issue(self, title, body):
+        # 唯一标题契约闸门（Issue #343）：批量提交也不许自由文本当标题。
+        # 走 `expertise.issue_source` 读**真实存量**（不是传空清单）——传空等于告诉
+        # 闸门「仓库里没有任何 Issue」，reuse 分支永远进不去，去重形同虚设。
+        gated = None
+        try:
+            import sys as _sys
+            _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from expertise import issue_contract as _ic
+            from expertise import issue_source as _src
+            snap = _src.existing(self.repo)
+            gated = _ic.guard_create(title, snap.get("items") or [],
+                                     module="local-agent", issue_type="CHORE", seed=title)
+        except Exception:  # noqa: BLE001  契约不可用不阻断，显式降级（不假装守约）
+            gated = None
+        if gated is not None:
+            action = gated.get("action")
+            if action == "reject":
+                # 无法契约化 → 中止提交，绝不静默回落垃圾原标题
+                return {"error": "标题无法契约化，已中止提交：" + str(gated.get("reason") or ""),
+                        "gate": gated}
+            if action == "reuse":
+                return {"number": gated.get("reuse_number"), "reused": True,
+                        "title": gated.get("title"), "gate": gated,
+                        "url": "%s/%s/-/issues/%s" % (API_BASE, self.repo,
+                                                      gated.get("reuse_number"))}
+            title = gated.get("title") or title
         url = "%s/%s/-/issues" % (API_BASE, self.repo)
         payload = json.dumps({"title": title, "body": body}, ensure_ascii=False)
         import urllib.request
@@ -201,6 +273,11 @@ class CloudBatch(object):
         try:
             with urllib.request.urlopen(req, timeout=20) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+                try:      # 回填存量：同批后续提交也能去重
+                    from expertise import issue_source as _src
+                    _src.remember(self.repo, data.get("number"), data.get("title"))
+                except Exception:  # noqa: BLE001
+                    pass
                 return {"number": data.get("number"), "state": data.get("state"),
                         "title": data.get("title"), "url": "%s/%s/-/issues/%s" % (API_BASE, self.repo, data.get("number"))}
         except Exception as e:  # noqa
