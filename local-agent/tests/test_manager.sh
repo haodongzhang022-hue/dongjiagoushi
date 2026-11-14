@@ -1228,4 +1228,96 @@ assert m.status()["live_requested"] is False
 print("  ✅ 默认不写平台；CNB_MANAGER_LIVE=1 / live=True 才真建 Issue（不可逆副作用显式开）")
 EOF
 
+echo "===== [manager] 42. 云端回执双轨：comment_stream 的 [接单] 必须真被 dispatch_verify 用上 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr42.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+import dispatch_engine as D
+import comment_stream as cs
+
+# 病根：`_cloud_receipt()` 早就写好，但 dispatch_verify 从未调用它 →
+# 云端只认本地 progress 事件，而对端的 [接单] 在**平台评论**里，
+# 那笔永远进不了 progress 表 → 明明回了接单仍被判「未回执」。
+assert "cloud_checked" in D.dispatch_verify([]), "dispatch_verify 必须暴露云轨是否查过"
+
+# 夹具：对端在 Issue 里回了 [接单]
+class FakeTransport:
+    def __init__(self, comments): self.comments = comments
+    def fetch(self, page, page_size):  # pragma: no cover - 仅接口占位
+        return {"items": self.comments, "has_more": False}
+
+orig_read = cs.read_comments
+try:
+    cs.read_comments = lambda **kw: {
+        "comments": [{"body": "@dongdongxiaozu/dongjiagoushi(架构·开发) [接单] 开工",
+                      "created_at": "2026-11-15T00:00:00Z"}],
+        "count": 1, "pages": 1, "page_size": 100,
+        "has_more": False, "complete": True, "truncated": False,
+        "source": "fixture", "kind": "issue", "number": 347,
+    }
+    # ① 本地 progress 表零事件，但云端评论有 [接单] → 必须判「已真实唤醒」
+    v = D.dispatch_verify([{"task_id": "tk40", "agent_id": "ag40", "role": "架构·开发",
+                            "issue_number": "347"}], cloud=True)
+    assert v["cloud_checked"] is True, v
+    assert v["detail"][0]["receipt"] is True, v["detail"]
+    assert v["detail"][0]["receipt_source"] == "cloud", v["detail"]
+    assert v["verified_all_awake"] is True, v
+
+    # ② 评论流没读全 → 不许判「未回执」当结论，须显式 degraded
+    cs.read_comments = lambda **kw: {
+        "comments": [], "count": 0, "pages": 5, "page_size": 100,
+        "has_more": True, "complete": False, "truncated": True,
+        "source": "fixture", "kind": "issue", "number": 347,
+    }
+    v2 = D.dispatch_verify([{"task_id": "tk40b", "agent_id": "ag40b", "role": "架构·开发",
+                             "issue_number": "347"}], cloud=True)
+    assert v2["cloud_degraded"], "读不全必须显式暴露，不能静默判未回执"
+    assert v2["verified_all_awake"] is False
+finally:
+    cs.read_comments = orig_read
+print("  ✅ 云端 [接单] 真进了判据（receipt_source=cloud）；读不全显式 degraded，不静默判未回执")
+EOF
+
+echo "===== [manager] 43. 云端回执不许依赖 cnb CLI（读评论走 HTTP+token，与 CLI 无关） ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr43.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+import dispatch_engine as D
+import comment_stream as cs
+
+# 病根（CI 真踩到）：查云端 [接单] 前多卡了一道 `_cnb_available()`。
+# 读回执走 comment_stream 的 HTTP+token，跟 cnb CLI 毫无关系 →
+# CI 镜像没装 cnb CLI，云轨被整条关掉，明明该查云端却判「未回执」。
+# 症状：证据脚本本地绿、云端红，差的只是一个 CLI。
+assert not hasattr(D, "_cnb_available"), \
+    "查云端回执不该依赖 cnb CLI（读评走 HTTP+token）；该函数已移除，勿加回"
+
+orig = cs.read_comments
+try:
+    cs.read_comments = lambda **kw: {
+        "comments": [{"body": "@org/repo(架构·开发) [接单]", "created_at": "2026-11-15T00:00:00Z"}],
+        "count": 1, "pages": 1, "page_size": 100, "has_more": False,
+        "complete": True, "truncated": False, "source": "fixture",
+        "kind": "issue", "number": 1,
+    }
+    # 把 cnb CLI 藏起来也要能查到云端回执
+    import shutil
+    orig_which = shutil.which
+    shutil.which = lambda name, *a, **k: None if name == "cnb" else orig_which(name, *a, **k)
+    try:
+        v = D.dispatch_verify([{"task_id": "tk42", "agent_id": "ag42",
+                                "role": "架构·开发", "issue_number": "1"}], cloud=True)
+    finally:
+        shutil.which = orig_which
+    assert v["cloud_checked"] is True, "无 cnb CLI 也必须查云端（读评走 HTTP）"
+    assert v["detail"][0]["receipt_source"] == "cloud", v["detail"]
+    assert v["verified_all_awake"] is True, v
+finally:
+    cs.read_comments = orig
+print("  ✅ 无 cnb CLI 也能查云端 [接单]：云轨不依赖 CLI，读评走 comment_stream HTTP")
+EOF
+
+
 echo "===== [manager] ALL PASS ====="

@@ -203,6 +203,18 @@
   带引号（`number: "242"`），旧 `_create_issue()` 用 `int(val)` 解析必失败 → 恒返回 `None`
   → 真实环境**永远激活不出 Issue**。已抽 `_parse_issue_number()` 双格式解析，
   `test_manager.sh` 第 11 组锁死。**"他不干活"先怀疑链路，再怀疑态度。**
+- **①b 判据必须真接线（写好了没人调 = 没有）**：`_cloud_receipt()`（读 Issue/PR 评论流
+  `[接单]`）早在 Issue #166 就落地，注释写着"与 `_has_receipt()` 双轨互补"，
+  **但 `dispatch_verify()` 一次都没调用过**——云端只认本地 `progress` 事件，而对端真实
+  回执在**平台评论**里，那笔永远不进 progress 表 → 对端明明回了 `[接单]`，却判「未回执」
+  → 转小组长 → 上报"有活停在嘴上"。现在 `dispatch_verify(..., cloud=False)` 两轨任一命中
+  即算真实唤醒，`receipt_source` 标明来源（`local`/`cloud`/`local+cloud`），读不全进
+  `cloud_degraded`。`cloud` **由调用方显式声明**（不做"有 issue 号就自动查"——假 issue 号
+  夹具会打真网络，被外部数据污染断言）。`test_manager.sh` 42 组锁死。
+- **①c 云轨不许依赖无关工具**：给云轨加 `_cnb_available()` 门槛 → CI 红、本地绿，差别只在
+  CI 镜像没装 `cnb` CLI。**读回执走 `comment_stream` 的 HTTP+token，跟 CLI 毫无关系**，
+  多卡的这一道把云轨整条关掉。规则：**证据脚本必须在"有/无该工具"两种环境都跑**
+  ——"本地绿"只证明本地绿。`test_manager.sh` 43 组用"藏掉 CLI"锁死。
 - **② EXECUTE 闸门（计划即命令，单路无抉择）**：`resolve_choice()` 是纯函数查表——
   单选项必然 `EXECUTE`（**不存在"要不要按计划走"这个分支**）、多选项取首个、
   空才 `BLOCKED`（且要显式说要什么）。「原地纠结」不是合法输出。

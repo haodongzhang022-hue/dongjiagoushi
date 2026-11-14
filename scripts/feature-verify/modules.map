@@ -80,3 +80,8 @@ manager: scripts/feature-verify/manager/平台激活不冒充.sh: local-agent/ma
 # 经理「节点真接线」（流水线里的经理节点用同一个引擎 + 走承上启下 · Issue #239 五轮）
 # 与上层 manager 区分：那条锁引擎本体，这条锁"流水线调用链上的那个经理是不是同一个"。
 manager: scripts/feature-verify/manager/经理节点真接线.sh: local-agent/orchestrator\.py|local-agent/roles/manager\.py|scripts/feature-verify/manager
+
+# 与「平台激活不冒充」区分：那条锁"没写平台不许说平台激活"，
+# 这条锁"云端 [接单] 有没有真进判据"——_cloud_receipt 写好了从没被 dispatch_verify 调用过，
+# 且云轨不许依赖 cnb CLI（读评走 HTTP+token，CI 无 CLI 时卡住会把云轨整条关掉）。
+manager: scripts/feature-verify/manager/平台真碰过没.sh: local-agent/dispatch_engine\.py|local-agent/comment_stream/
