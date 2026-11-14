@@ -121,6 +121,26 @@ echo "$OUT" | grep -q "^PARTIAL True False$" \
   && ok "评论流读不全 → 显式 degraded，不静默判「未回执」" \
   || bad "读不全没暴露：$(echo "$OUT" | grep '^PARTIAL')"
 
+# ------ ⑥ 演练不许碰平台：run_pipeline 派经理时必须显式 dry_run ------
+GUARD=$(python3 - <<'EOF' 2>&1
+import inspect, sys
+sys.path.insert(0, "local-agent")
+import orchestrator
+sig = inspect.signature(orchestrator._run_role_engine)
+src = inspect.getsource(orchestrator._run_role_engine)
+sig2 = inspect.signature(orchestrator.run_pipeline)
+ok = ("real" in sig.parameters
+      and sig.parameters["real"].default is False
+      and "dry_run=not real" in src
+      and "real" in sig2.parameters
+      and sig2.parameters["real"].default is False)
+print("GUARD", ok)
+EOF
+)
+echo "$GUARD" | grep -q "^GUARD True$" \
+  && ok "演练不许碰平台：run_pipeline/经理节点默认 real=False 且显式钉 dry_run" \
+  || bad "演练仍可能真派发：$(echo "$GUARD" | grep '^GUARD')"
+
 echo
 echo "==== [feature-verify] manager/平台真碰过没：PASS=$PASS FAIL=$FAIL ===="
 [ "$FAIL" -eq 0 ]

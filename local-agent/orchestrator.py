@@ -34,12 +34,23 @@ def _step_label(node):
     return f"[{node['id']}] {node['role']}：{node['action']}"
 
 
-def _run_role_engine(role, req, node):
+def _run_role_engine(role, req, node, real=False):
     """经理/小组长节点对接确定性引擎（缺则回退裸 run，返回 None）。
 
     只接能确定转化为派发/带队意图的输入，避免过度猜测 LLM 文本。
     经理：把需求/计划文本直接当计划派发（execute_plan 内部 parse_plan 兜底）。
     小组长：把任务文本当一条任务，组内 devs_per_team 默认 2 做确定性闭环。
+
+    ## 必须显式钉 dry_run（真实踩坑 · Issue #347 收尾）
+
+    这里输入的是**角色人设 prompt / 需求文本**，不是一份真计划——派出去的
+    「任务」是演练产物。原先不传 `dry_run`，靠"探测不到 repo 就自动 dry_run"
+    兜着；而 `ManagerEngine` 一旦补上正确探测（`_detect_repo`），就会**真去平台上
+    建 Issue**：跑一次全量测试，仓库里就多出 30+ 条 `CHORE:local-agent · role: 架构·总师`
+    这种垃圾单（本轮实测发生，已清理）。
+
+    演演练还是真派发，由**调用方**决定（`real=True` 才碰平台），
+    绝不靠"环境探测碰巧失败"来区分——那是最脆的一种正确。
     """
     name = getattr(role, "name", "") or ""
     try:
@@ -47,6 +58,7 @@ def _run_role_engine(role, req, node):
             from manager import ManagerEngine
             eng = ManagerEngine(
                 devs_per_team=getattr(role, "devs_per_team", 2),
+                dry_run=not real,
             )
             res = eng.execute_plan(req)
             return (f"[经理引擎] 激活 {res['count']} 条 / 平台激活 "
@@ -139,7 +151,7 @@ def _lead_brain_enhance(node, req, card):
         return None, {"role": "架构·小组长（脑子）", "error": str(_e)}
 
 
-def _run_one(role, req, llm, card, node):
+def _run_one(role, req, llm, card, node, real=False):
     """执行单个角色节点，返回输出。
 
     编排层缓存（M3）：跨节点复用共享需求前缀（req 稳定部分），
@@ -148,7 +160,7 @@ def _run_one(role, req, llm, card, node):
     """
     user_input = req
     try:
-        _eng_out = _run_role_engine(role, req, node)
+        _eng_out = _run_role_engine(role, req, node, real=real)
         if _eng_out is not None:
             output = _eng_out
         else:
@@ -266,8 +278,14 @@ def _stage_wire(role_name, req, phase, gate=None):
 
 
 def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
-             force_topology=None, complexity=None, subtasks=None, concurrency=None):
+             force_topology=None, complexity=None, subtasks=None, concurrency=None,
+             real=False):
     """执行团队流水线到交付。默认走 DAG 调度；use_dag=False 回退线性。
+
+    real: 经理节点是否**真在平台上建 Issue**（默认 False = 演练）。
+          默认演练是对齐 `run.py --rc-real 真实执行（默认演练 dry-run）` 的既有约定：
+          流水线喂给经理的是需求文本/角色 prompt，不是一份核对过的真计划，
+          未经人工确认就往仓库里刷 Issue 属于污染（Issue #347 收尾轮实测发生过）。
 
     返回交付报告 dict。
     """
@@ -520,7 +538,7 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                     else:
                         # N2 阶段链接线：开工登记 → 执行 → 收口登记（链条按序推进）
                         _stage_wire(nd["role"], req, "active")
-                        out = _run_one(role, card.get("input", req), llm, card, nd)
+                        out = _run_one(role, card.get("input", req), llm, card, nd, real=real)
                         _stage_wire(nd["role"], req, "done")
 
                 card["output"] = out
@@ -604,7 +622,7 @@ def run_pipeline(req, backend=None, llm=None, use_dag=True, use_fusion=False,
                 else:
                     # N2 阶段链接线（线性回退同样接上，避免"只有 DAG 才按序"）
                     _stage_wire(nd["role"], req, "active")
-                    out = _run_one(role, card.get("input", req), llm, card, nd)
+                    out = _run_one(role, card.get("input", req), llm, card, nd, real=real)
                     _stage_wire(nd["role"], req, "done")
                     # 小组长脑子：经理派活前先补全方案（Issue #232）
                     if nd.get("role") == "架构·经理":

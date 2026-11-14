@@ -215,6 +215,14 @@
   唤醒，`receipt_source` 标明来源，读不全进 `cloud_degraded`。`cloud` **由调用方显式声明**
   （不做"有 issue 号就自动查"——假 issue 号夹具会打真网络，被外部数据污染断言）。
   **判据写好了却没接线，等于没有。** `test_manager.sh` 40 组锁死。
+- **①d 演练不许碰平台（显式声明 > 环境施舍）**：`orchestrator._run_role_engine()` 把需求文本/
+  角色 prompt 当计划交给经理引擎却不传 `dry_run`，靠"探测不到 repo 就自动 dry_run"兜底。
+  ①b 一修探测就成功，于是**跑一次全量测试就往仓库刷 30 条垃圾 Issue**
+  （`CHORE:local-agent · role: 架构·总师`，`parse_plan` 把 prompt 每行切成任务）。
+  根因不是"忘传参数"，是**用环境探测碰巧失败来代替显式声明** —— 环境一变就翻。
+  现在 `run_pipeline(req, ..., real=False)` + `_run_role_engine(..., real=False)`
+  显式钉 `dry_run=not real`，对齐 `run.py --rc-real 真实执行（默认演练 dry-run）` 约定。
+  **演练还是真派发由调用方决定，不由环境决定。** `test_manager.sh` 41 组锁死。
 - **② EXECUTE 闸门（计划即命令，单路无抉择）**：`resolve_choice()` 是纯函数查表——
   单选项必然 `EXECUTE`（**不存在"要不要按计划走"这个分支**）、多选项取首个、
   空才 `BLOCKED`（且要显式说要什么）。「原地纠结」不是合法输出。

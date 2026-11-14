@@ -76,4 +76,4 @@ manager: scripts/feature-verify/manager/借人台账记成败.sh: local-agent/ma
 # 与上层 manager 区分：那条锁引擎整体，这条锁"平台真碰过没"——
 # repo 探测 / platform_activated 是否拿本地假设冒充平台事实 / 云端 [接单] 是否真进判据。
 # 单测全用 dry_run=True 跑，天然碰不到平台变量与平台回执，这两处断链只有真环境现形。
-manager: scripts/feature-verify/manager/平台真碰过没.sh: local-agent/manager/engine\.py|local-agent/dispatch_engine\.py|local-agent/roles/manager\.py|local-agent/comment_stream/
+manager: scripts/feature-verify/manager/平台真碰过没.sh: local-agent/manager/engine\.py|local-agent/dispatch_engine\.py|local-agent/roles/manager\.py|local-agent/comment_stream/|local-agent/orchestrator\.py

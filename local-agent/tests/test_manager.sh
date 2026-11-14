@@ -1202,4 +1202,34 @@ finally:
 print("  ✅ 云端 [接单] 真进了判据（receipt_source=cloud）；读不全显式 degraded，不静默判未回执")
 EOF
 
+echo "===== [manager] 41. 演练不许碰平台：run_pipeline 派经理时必须显式 dry_run ====="
+$PY - <<'EOF'
+import os, tempfile, inspect
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr41.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+import orchestrator
+
+# 病根（本轮真实污染）：`_run_role_engine` 把需求文本/角色 prompt 当计划派发，
+# 却不传 dry_run，靠「探测不到 repo 就自动 dry_run」兜着。补上正确 repo 探测后，
+# 跑一次全量测试就往仓库里刷 30+ 条 `CHORE:local-agent · role: 架构·总师` 垃圾单。
+sig = inspect.signature(orchestrator._run_role_engine)
+assert "real" in sig.parameters, "经理节点必须能显式声明演练/真派发"
+assert sig.parameters["real"].default is False, "默认必须是演练（不许默默真派发）"
+
+src = inspect.getsource(orchestrator._run_role_engine)
+assert "dry_run=not real" in src, "必须显式钉 dry_run，不能靠环境探测碰巧失败来区分演练"
+
+sig2 = inspect.signature(orchestrator.run_pipeline)
+assert "real" in sig2.parameters and sig2.parameters["real"].default is False,     "run_pipeline 默认演练（对齐 run.py --rc-real 约定）"
+print("  ✅ run_pipeline/经理节点默认演练；只有一个显式 real=True 的口子能碰平台")
+
+# 正例：演练下真的不碰平台（拿真探测的 repo 也不建 Issue）
+from manager import ManagerEngine
+m = ManagerEngine(dry_run=True)
+r = m.activate([{"task_key": "演练任务", "title": "演练任务",
+                 "role": "架构·开发", "domain": "自检", "detail": "x"}])
+assert r["platform_activated"] == 0 and r["local_only"] == 1, r
+print(f"  ✅ 演练即使探测到真仓库（{m.repo or '无'}）也不建 Issue：platform_activated=0")
+EOF
+
 echo "===== [manager] ALL PASS ====="

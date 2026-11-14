@@ -214,7 +214,7 @@ data:
 
 ---
 
-## 七、验收标准（`local-agent/tests/test_manager.sh` 40 组信号灯）
+## 七、验收标准（`local-agent/tests/test_manager.sh` 41 组信号灯）
 
 1. 计划即命令：单路 EXECUTE / 多路取首个 / 空 BLOCKED，无「纠结」出口；
 2. ACTIVATE 闸门：计划 → 逐条激活（任务 gid + 承接角色），空计划显式拒绝；
@@ -243,7 +243,8 @@ data:
 21-37. 接线闸门 / 证据分级 / 借人台账（见 §九-§十一）；
 38. repo 探测认对变量：云端只有 `CNB_REPO_SLUG` 也探测得到，`dry_run` 不被静默置 True（§12.1）；
 39. `dry_run` 不许冒充「平台已激活」：`local_only` 与 `activated` 两态分离（§12.2）；
-40. 云端 `[接单]` 真进判据（`receipt_source=cloud`），读不全显式 `cloud_degraded`（§12.3）。
+40. 云端 `[接单]` 真进判据（`receipt_source=cloud`），读不全显式 `cloud_degraded`（§12.3）；
+41. 演练不许碰平台：经理节点默认 `dry_run`，绝不靠环境探测成功与否来区分演练/真派发（§12.4）。
 
 ```bash
 cd local-agent && bash tests/test_manager.sh
@@ -737,13 +738,42 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 > "无回执任务"被外部真实数据判成已回执，三条断言全红。
 > 假数据打真网络，测的就不再是代码，是别人仓库里恰好写了什么。
 
-### 12.4 验收（`test_manager.sh` 37 → 40 组）
+### 12.4 修这三处时，顺手把仓库刷了 30 条垃圾单
+
+这是本轮最该记的一件事，因为它不是设计缺陷，是**改动本身的副作用**。
+
+`orchestrator._run_role_engine()` 把需求文本/角色 prompt 当计划交给经理引擎，却**不传
+`dry_run`**——它靠的是"探测不到 repo 就自动 `dry_run`"这个隐式兜底。而 12.1 一修，
+探测就能成功了，于是：
+
+```
+跑一次全量测试 → 经理把「你是「架构·总师」，本团队的主架构角色。走「架构八步」：」
+                 当成一条任务，真去平台上建 Issue
+→ 仓库里多出 #408–#437 共 30 条 CHORE:local-agent · role: 架构·总师 / task-xxx / "ok"
+```
+
+`parse_plan()` 把 prompt 的每一行都切成了"任务"。垃圾单的标题就是证据：
+`as-a-i-want-so-that`（用户故事模板那一行）、`given-when-then`（验收标准那一行）。
+
+**根因不是"忘了传参数"，是"用环境探测碰巧失败来代替显式声明"。**
+这种正确最脆：它不是被保证的，是被环境顺手施舍的，环境一变就翻。
+
+修法：`run_pipeline(req, ..., real=False)` + `_run_role_engine(..., real=False)`，
+经理引擎 `dry_run=not real` 显式钉死；对齐 `run.py --rc-real 真实执行（默认演练 dry-run）`
+的既有约定。**演练还是真派发，由调用方决定，不由环境决定。** `test_manager.sh` 第 41 组锁死。
+
+> 30 条已全部留回指评论后关闭（不删除、不改标题），可回溯。
+> 教训是：**验证"修好了"之前，先验证"没有弄坏别的"。**
+> 我上一轮写完就跑了单测——单测全绿，因为它只测我改的那个函数。
+
+### 12.5 验收（`test_manager.sh` 37 → 41 组）
 
 | 组 | 锁什么 |
 |----|--------|
 | 38 | 云端只注入 `CNB_REPO_SLUG` 系列也能探测到仓库；不传 repo 时 `dry_run` 不被静默置 True |
 | 39 | `dry_run` 下 `platform_activated=0` + `state=local_only`；真建出 Issue 才 `activated`/`platform_activated=1` |
 | 40 | 云端 `[接单]` 真进判据（`receipt_source=cloud`）；评论流读不全 → `cloud_degraded`，不静默判未回执 |
+| 41 | 演练不许碰平台：`run_pipeline`/经理节点默认 `real=False` 钉死 `dry_run`，不靠环境探测碰巧失败兜底 |
 
 新增功能级证据脚本 `scripts/feature-verify/manager/平台真碰过没.sh`（5 条）。
 单测全用 `dry_run=True` 跑，**天然碰不到平台变量与平台回执**——这两处断链只有真环境会现形，
