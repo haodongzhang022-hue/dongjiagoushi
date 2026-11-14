@@ -37,6 +37,11 @@ main:
             test -f local-agent/hybrid/sync.py   && echo "  ✅ hybrid/sync.py 存在"
             test -f local-agent/hybrid/cost.py   && echo "  ✅ hybrid/cost.py 存在"
             test -f scripts/local-exec.sh        && echo "  ✅ scripts/local-exec.sh 存在"
+            test -f .cnb/npc-models.yml          && echo "  ✅ .cnb/npc-models.yml 存在"
+            test -f scripts/npc-model.sh         && echo "  ✅ scripts/npc-model.sh 存在"
+            echo ""
+            echo "==== NPC 模型策略信号灯（大参数优先 + 平台默认兜底） ===="
+            bash local-agent/tests/test_npc_model.sh
             echo ""
             echo "==== hybrid 路由自检（纯逻辑，低 CPU，云端可跑） ===="
             pip install -q -r local-agent/requirements.txt 2>/dev/null || true
