@@ -112,6 +112,14 @@ class BaseRole:
             self.lead_brain_ability = LeadBrainAbility(owner=self)
         except Exception:
             self.lead_brain_ability = None
+        # 懒加载专家级架构能力（ExpertiseAbility · 2026-11-03：七维/帕累托/前沿/时效/外部验证门禁）
+        # 与 Dispatch/Depth/Label 同构：全员挂载、单一规范来源（local-agent/expertise/spec.py），
+        # 各角色不各自实现。任一角色的结论都应能被同一把尺子量。
+        try:
+            from expertise.ability import ExpertiseAbility
+            self.expertise_ability = ExpertiseAbility(owner=self)
+        except Exception:
+            self.expertise_ability = None
 
     # ------------------------------------------------------------
     # 阶段链门控生产接线（全员通用 · Issue #150 复评 N2）
@@ -728,6 +736,61 @@ class BaseRole:
         """权限护栏：判定某职责是否秘书可合法承担（越权接终端任务即拦）。"""
         return self._ssa().secretary_guard(duty)
 
+    # ------------------------------------------------------------
+    # 专家级架构能力透传（ExpertiseAbility · 2026-11-03）
+    # 七维评判 / 帕累托前沿 / AI 能力前沿 / 行业岗位专家 / 外部验证门禁 / 时效闸门
+    # 规范唯一事实源：local-agent/expertise/spec.py（文档 docs/EXPERT_ARCHITECT.md）
+    # ------------------------------------------------------------
+    def _exa(self):
+        if getattr(self, "expertise_ability", None) is None:
+            raise RuntimeError(f"角色 {self.name} 未加载专家级架构能力")
+        return self.expertise_ability
+
+    def assess_expertise(self, assessment):
+        """七维专家级评估（缺任一维即 inadmissible，不接受自述验证）。"""
+        return self._exa().assess_expertise(assessment)
+
+    def explain_expertise(self, verdict):
+        """把七维 verdict 渲染成人可读报告。"""
+        return self._exa().explain_expertise(verdict)
+
+    def resolve_industry(self, text):
+        """需求 → 行业/岗位专家判定（消费 hanghangchuzhuangyuan，不可用即 unverified）。"""
+        return self._exa().resolve_industry(text)
+
+    def ai_frontier_at(self, name):
+        """某 AI 能力在当前时点的状态（陈旧即 unverified，未收录即 unknown）。"""
+        return self._exa().ai_frontier_at(name)
+
+    def ai_solve_candidates(self):
+        """下一步可利用的前沿 AI 能力清单。"""
+        return self._exa().ai_solve_candidates()
+
+    def run_verification(self, command, cwd=None, timeout=120, expectation="exit0"):
+        """真实执行一条验证命令，返回可留痕证据（不接受自述）。"""
+        return self._exa().run_verification(command, cwd=cwd, timeout=timeout,
+                                            expectation=expectation)
+
+    def verify_validation(self, claim):
+        """反造假核验：静态冒充/失败/超时/未来时间戳/自述 一律不可信。"""
+        return self._exa().verify_validation(claim)
+
+    def validation_gate(self, claims):
+        """功能性代码验证门禁（一组证据全过才算过）。"""
+        return self._exa().validation_gate(claims)
+
+    def check_freshness(self, items):
+        """信息时效性闸门（陈旧/无日期/无来源一律不可用）。"""
+        return self._exa().check_freshness(items)
+
+    def pareto_evaluate(self, candidates, preferred=None):
+        """多目标备选的前沿判定与可解释取舍。
+
+        candidates 形状：[{"name", "objectives": {目标: 数值}, "direction": {目标: "max"|"min"}}]，
+        形状传错会 ValueError；返回的 scores 是 {方案名: 标准化总分}。
+        """
+        return self._exa().pareto_evaluate(candidates, preferred=preferred)
+
     def secretary_scale_logs(self, limit=50):
         """秘书层动作留痕（可回溯）。"""
         return self._ssa().secretary_scale_logs(limit=limit)
@@ -753,6 +816,10 @@ class BaseRole:
             base["secretary_scale_ability"] = self.secretary_scale_ability.capability()
         if getattr(self, "lead_brain_ability", None) is not None:
             base["lead_brain_ability"] = self.lead_brain_ability.capability()
+        # 专家级架构能力也进汇总：否则它在 capability() 自述里是隐身的，
+        # 别的角色/CAPABILITY_INDEX 侧看不到「这把尺子存在」。
+        if getattr(self, "expertise_ability", None) is not None:
+            base["expertise_ability"] = self.expertise_ability.capability()
         return base
 
     # ---- 既有接口保持兼容 ----

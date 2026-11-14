@@ -783,6 +783,57 @@ Q01 自测结果上报。详见 `local-agent/dev-standard/rules.md`。
 > 触发：显式 `[触发:架构·评审/测试/交付]` / 语义命中「暂停点分级/AI优先放行/修复沿原意图/
 > 以测试为准/不追业界一致/不加第五轮评审」/ rules 固定。文档层已落地 `docs/MAINLINE_RULES.md`。
 
+### 专家级架构判定（ExpertiseAbility · 通用复用能力 · 固定规则 · Issue #343）
+
+> 本条为**仓库级固定 rules**：架构判断不能靠"我懂所有行业/我知道 AI 能做"，必须建立在
+> **可验证来源**上。规范唯一事实源 `local-agent/expertise/spec.py`（**禁止另写第二套判定**），
+> 正文 `docs/EXPERT_ARCHITECT.md`，能力挂载 `BaseRole`（与 Dispatch/Depth/Label 同构）。
+
+- **① 四支柱取证（缺一不成立）**：任何架构设计/技术选型前，必须先取证——
+  **行业岗位专家层**（`resolve_industry`，消费 `hanghangchuzhuangyuan`，未覆盖判 `no_match` 且必须
+  显式说明"缺专家数据"，**不许硬凑**）+ **AI 能力前沿层**（`ai_frontier_at`，未收录/陈旧 → `unknown`/
+  `unverified`，**不许默认能做**）+ **帕累托前沿**（备选 **≥2** 并 `pareto_evaluate`，只有一个方案 ≠ 选型）
+  + **外部验证**（见④）。
+- **② 七维必过**：最终判断必须过 `assess_expertise` 七维——高度/深度/广度/资源/实现路径/帕累托最优/
+  外部验证。**任一维缺失或事实陈旧即 `inadmissible`**，不论其它维度多高，不得放行。
+- **③ 信息时效（陈旧 ≠ 可信）**：引用任何外部事实必须带 `source` + `dated_at`，先过 `check_freshness`；
+  无日期（`undated`）/过期（`stale`）/无来源 一律**不得作为决策依据**。AI 模型类 30 天、框架类 60 天、
+  行业做法类 365 天为上限（`FRESHNESS_SPECS` 唯一事实源）。
+- **④ 外部验证只认「真实执行」**：声称"已完成/已测试/可用"必须 `run_verification` 拿**真实执行证据**
+  （退出码 + 输出指纹 + 执行时间），自填 `verified: true` **一律忽略**；**静态检查（grep / test -f）不算
+  功能验证**；未执行/失败/超时/未来时间戳/无输出 全部判不可信（`external_validation.gate` 不过即
+  `inadmissible`）。
+- **⑤ 判不出来 = unknown**：专家层不可用、能力未收录、证据缺失 → 一律 `unknown`/`unverified` 显式暴露，
+  **绝不静默转成通过**（与「唯一事实纪律」一致）。
+- **⑥ 全员可用·统一尺子**：能力已挂 `BaseRole`，任意角色（秘书/产品/总师/经理/开发/评审/测试/交付）
+  直接调用透传方法；**不许各角色自建判定口径** —— 评审用同一把尺子量对方的"验证过了"。
+
+> 触发：显式 `[触发:架构·总师/评审/测试/交付]` / 语义命中「专家级/七维/帕累托/前沿/外部验证/
+> 时效性/能不能做/拿不准方案/选型」/ rules 固定。信号灯 `local-agent/tests/test_expertise.sh`（8 组，
+> 含真实执行子进程的反造假用例），红灯可查到底有没有真取证、真验证。
+
+### Issue 唯一标题契约（issue-contract · 固定规则 · Issue #343）
+
+> 治理「协作 Issue 名字不唯一、有重复、没真正启用」。正文 `docs/ISSUE_CONTRACT.md`，
+> 实现 `local-agent/expertise/issue_contract.py`，执行器 `scripts/issue-contract.py`。
+
+- **① 标题即契约**：`<类型>:<模块> · <唯一键>`，类型限 `FEAT/BUG/FIX/DOCS/CHORE/TEST/REL/RFC`，
+  模块须在白名单（新模块先登记），唯一键 `[a-z0-9._-]` 2–61 位、**不许占位词**（p0/tmp/todo 等）。
+  反例一律拒绝：`CLI控制台发起`、`测试登录模块`、`优化一下`。
+- **② 幂等派发（防重复的根本手段）**：任何建 Issue 必须经 `plan()` —— 同 key 已存在即 **reuse**，
+  **绝不重复建**；同批内重复也只建一次。直连 API 建 Issue 视为违规。
+- **③ 重复即收并（不许挂多份）**：同一标题只保留一个主号，其余**关闭并回指主号**（带收并注释，
+  不静默消失）；**不删除** Issue（保留审计），**不改写历史标题**（破坏外部引用）。
+- **④ 测试流不入库**：联调/测试脚本**不得**用自由文本当标题建 Issue；需要锚点时走契约标题 +
+  幂等（如 `TEST:platform-adapter · cnb-live-anchor-<stable-key>`）。
+- **⑤ 正文 agent-ready**：正文须含 `目标 / 做·不做边界 / 验收标准 / 外部验证 / 信息来源与时效` 五段
+  + 版本声明（`module_version`/`agent_version`/`depends_on`），缺段判不合规。
+- **⑥ 治理先演练**：批量收并/关闭前必须 `--dry-run` 出计划 → 人确认 → 再 `--apply`（不可逆动作不自动执行）。
+
+> 触发：语义命中「issue 重复/命名不唯一/去重/收并/建 issue/派发任务/联调锚点」/ rules 固定。
+> 信号灯 `test_expertise.sh` E8（幂等/收并/低信号拦截/正文契约）。
+> 实测（2026-11-03）：云端 open Issue **50 → 2**，同名重复组 **6 → 0**。
+
 ## 安全护栏
 
 | 暂停点 | 时机 | 放行条件（高风险/需担责场景卡人，低中风险 AI 自动+错了再改）|
