@@ -167,13 +167,18 @@ os.remove(path); os.environ.pop("MODEL_ROUTING_CONFIG", None)
 print("  ✅ 后端按 role 解析渠道链正确")
 PY
 
-echo "---- ⑫ .cnb.yml 的 npc:go model 与 models.yml default.chain[0] 一致（防配置错） ----"
+echo "---- ⑫ .cnb.yml 首档 model == models.yml npc_go.model_preference[0]；兜底档不许写 model ----"
 python3 - <<'PY'
 import os, sys, re; sys.path.insert(0, '.')
 from model_routing import spec
 cnb = os.path.abspath(os.path.join(".", "..", ".cnb.yml"))
 text = open(cnb, encoding="utf-8").read()
 block_txt = text.split(".npc_task")[-1]
+
+# Issue #346：首档取**偏好链首个**（大参数优先），不再等于 default.chain[0]（快档首档）。
+# 两者取向不同：default.chain 求回合快，model_preference 求参数大——故分两条链。
+pref = spec.npc_model_preference()
+assert pref, "models.yml 缺 npc_go.model_preference（Issue #346「大参数优先」无人声明）"
 m = None
 for line in block_txt.splitlines():
     st = line.strip()
@@ -183,8 +188,18 @@ for line in block_txt.splitlines():
         m = st.split(":", 1)[1].strip().split()[0]
         break
 assert m, "未在 .npc_task 段找到 model: 字段"
-assert m == spec.default_chain()[0], ".cnb.yml(%s) != models.yml default.chain[0](%s)" % (m, spec.default_chain()[0])
-print("  ✅ .cnb.yml model == models.yml default.chain[0] ==", m)
+assert m == pref[0], ".cnb.yml(%s) != models.yml model_preference[0](%s)" % (m, pref[0])
+print("  ✅ .cnb.yml 首档 model ==", m, "== model_preference[0]（大参数优先）")
+
+# 兜底档纪律（Issue #346 的「一直可以通」那一半）：
+#   ① failStages 必须存在；② 兜底档**不许写 model**（写死就又回到 #177/#346 的老坑）。
+assert "failStages:" in block_txt, ".npc_task 缺 failStages（首档挂了没有兜底 = 整链秒挂）"
+tail = block_txt.split("failStages:", 1)[1]
+fb_models = [st.split(":", 1)[1].strip().split()[0]
+             for st in (l.strip() for l in tail.splitlines())
+             if not st.startswith("#") and re.match(r"^model:\s*\S", st)]
+assert fb_models == [], f"兜底档写死了模型 {fb_models}（必须留空走平台默认，否则组织列表一变又秒挂）"
+print("  ✅ failStages 存在，且兜底档不写 model（走平台默认 → 组织列表怎么变都通）")
 PY
 
 echo "---- ⑬ 真后端降级链逐档绑定（Issue #192：闭包捕获循环变量 → 全指向链尾） ----"

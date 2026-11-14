@@ -157,9 +157,39 @@ def npc_go_params():
     default.chain，配置里不重复字面量）；而这几项**不派生于渠道链**——显式指定自定义
     model 时平台会回落到内置默认（medium / 1m / 48k / 500），把期望值写死才防「以为设了
     其实没设」。配置缺失返回 {}（不臆造平台默认值）。
+
+    只返回**标量**参数：`model_preference` 是列表（偏好链），由
+    `npc_model_preference()` 单独读取，混进来会破坏「逐项与 .cnb.yml 相等」的核验口径。
     """
     blk = _raw().get("npc_go")
-    return dict(blk) if isinstance(blk, dict) else {}
+    if not isinstance(blk, dict):
+        return {}
+    return {k: v for k, v in blk.items() if not isinstance(v, (list, dict))}
+
+
+def npc_model_preference():
+    """`npc:go` 的**模型偏好链**（Issue #346 · 「默认选大参数模型，兜底默认」）。
+
+    与 `default.chain` 的区别：后者是「快档」（回合快），前者是「参数大、判断深」——
+    取向不同，不共用一个首档，也不强行合并成一个概念（合并会让两者互相绑架）。
+
+    返回顺序即优先级，`[0]` 是期望的大参数模型；`.cnb.yml` 的 `.npc_task` 首 stage
+    用它，失败后由 `failStages`（不写 model → 平台默认）兜底，故**永远有一条通路**，
+    不会因组织可选列表漂移而整链秒挂（#177/#346 两次事故的共同根因）。
+
+    配置缺失返回 []（不臆造模型名，由调用方决定兜底）。
+    """
+    blk = _raw().get("npc_go")
+    if not isinstance(blk, dict):
+        return []
+    pref = blk.get("model_preference")
+    if not isinstance(pref, list):
+        return []
+    out = []
+    for m in pref:
+        if isinstance(m, str) and m.strip():
+            out.append(resolve_alias(m.strip()))
+    return out
 
 
 def last_resort_model():

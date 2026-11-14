@@ -228,6 +228,12 @@ main:
 # 此处保留 npc:go 兜底，供未来按 .cnb/settings.yml 定义自建 NPC 或平台触发时使用。
 .npc_task: &npc_task
   name: architect npc
+  # ★ allowFailure 必须放**流水线层**（与 stages 同级），不能放 job 层——实测过：
+  #   job 级 allowFailure: true 会让首档的失败被判成 success → **failStages 直接被跳过**
+  #   （stage 日志：`npc go big` success 72ms / `npc go fallback` skipped），
+  #   结果是「首档没跑成、兜底也没跑」，比不设还糟（假绿）。
+  #   放流水线层则是：首档 error → 兜底 stage 真跑 → 整体上报 success。
+  allowFailure: true
   # ------------------------------------------------------------
   # 执行体槽位池（slot pool · 近因优先 + 长队列 + 领取后自愈）
   # 用户原话（PR #247）："这个池子让他有个近因效应吧，最新的优先领取，这样即使
@@ -247,23 +253,25 @@ main:
     stuck_after_seconds: 300
     max_repairs: 3
   stages:
+    # ---- 首档：大参数模型（偏好链首个）----
+    # 模型策略（Issue #147 → #182 → #346 演进）：统一配置文件
+    #   local-agent/model_routing/models.yml，`npc_go.model_preference` 是偏好链唯一事实源。
+    #   default.chain 是「快档」（回合快），model_preference 是「参数大、判断深」——
+    #   取向不同，故单列一条链，不互相绑架。
+    # ★ 人类 2026-11-14 定调（Issue #346）：「默认选大参数的模型，兜底默认，
+    #   这样就会一直可以通；比较大的模型也不是静态的，有更新就可以换」。
+    #   落地方式 = 首档取偏好链首个（hy4）+ 下一 stage failStages 用**平台默认**兜底。
     - name: npc go
       type: npc:go
       options:
         role: "架构·秘书"            # 对应 .cnb/settings.yml 中的角色（兜底人设）
-        # 模型策略（Issue #147）——统一配置文件 local-agent/model_routing/models.yml：
-        #   default（不指定就默认通用）= 渠道链（主→二选→三选，逐档降级）
-        #     ① deepseek-v4.1-flash  主通道
-        #     ② codebuddy            二选备用（主渠道不通时启用）
-        #     ③ glm-5.3-flash        三选备用
-        #   roles（角色按需指定，Issue #182 复评）= 只在角色真正需要不同链时显式列出；
-        #     其余角色走 fallback_chain（= default.chain 的锚点引用），不在配置堆空壳链。
-        #   alias（版本别名，如 1017）= 实名登记，未确认真实平台 ID 不留伪配置。
-        # 说明：改模型只改 models.yml 一处，无需跨文件检查/修改，改完即长期生效。
-        #   npc:go 只接受单个 model 字段；多档降级由 llm 后端
-        #   （local-agent/model_routing/engine.py）运行时接管——
-        #   当前档返回不可用/超时/限流/5xx 时自动切下一档并留痕。
-        model: deepseek-v4.1-flash   # 与 models.yml default.chain[0] 保持一致
+        # ★ 为什么首档可以显式写 model：写死单一 ID 的风险（组织列表漂移 → stage 秒挂，
+        #   #177 的 deepseek-v4-flash、#346 的 hy3 两次事故同因）由**下面的 failStages 兜底**
+        #   消化——首档失败自动走「不写 model」的平台默认，不会再整条链断掉。
+        #   所以这里可以放心追求「参数大」，而不必为了求稳退回小模型。
+        # ★ 换模型只改 models.yml 的 model_preference[0] 一处，并同步本行；
+        #   tests/test_model_role_assign.sh ⑫ 机器核验两处一致（漂移即红灯）。
+        model: hy4                  # = models.yml npc_go.model_preference[0]
         #
         # 与模型绑定的能力参数（Issue #182「换模型≠提速」）——★显式指定自定义 model 时，
         # 平台**不再继承**默认模型配置，回落到内置默认（medium / 1m / 48k / 500）；
@@ -274,20 +282,23 @@ main:
         contextWindow: 1m
         maxTokens: 48k
         maxTurns: 500
-          # 其他可选模型（按需切换，建议改 models.yml 统一管理）：
-          # model: codebuddy          # 二选备用通道（用户指定）
-          # model: glm-5.3-flash      # 三选备用通道（用户指定）
-          # model: hy3                # ✅ 免费模型（混元 3），不消耗 AI Credits 账单
-          # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看
-          #
-          # ⚠️ 版本后缀不可臆造（Issue #182 用户问「指定 deepseek v4.1 flash 1017」）：
-          #   - 本仓规则里没有 `1017` 这个版本标识，models.yml 记的也是 `deepseek-v4.1-flash`；
-          #   - npc:go 的 model 只认组织「可选模型列表」里的**精确 ID**，写错整个 stage
-          #     直接 error（#177 的静默失效就是这么来的：deepseek-v4-flash 不在列表）；
-          #   - 故此处保持 `deepseek-v4.1-flash`，不擅自拼 `-1017` 后缀；
-          #     若平台确实提供带版本号的 ID，改 models.yml 一处 + 本行同步即可全局生效。
-          #   - 另：npc:go 的 model 只决定**云端这条执行体**用哪个模型；
-          #     它不影响任何模型的 tps（生成速度），别把速度问题归到它头上。
+  # ---- 兜底档：不写 model → 平台默认 ----
+  # ★ 这是「一直可以通」的那一道，绝不在这一档写死任何模型 ID。
+  #   实测（2026-11-14 真机 npc:go stage，非推测）：
+  #     首档 model: hy4 → error（若不在可选列表）
+  #     failStages 不写 model → success（走平台默认，组织怎么调都能跑）
+  #   stage 实测组合 `allowFailure: true` + failStages 已验证：首档 error → 兜底 success，
+  #   整条流水线 success，不会因模型校验把整链拖死。
+  failStages:
+    - name: npc go (fallback · 平台默认模型)
+      type: npc:go
+      options:
+        role: "架构·秘书"
+        # 刻意不写 model：平台默认模型是组织保证可用的那一个，随组织配置自动跟随。
+        thinkingLevel: medium
+        contextWindow: 1m
+        maxTokens: 48k
+        maxTurns: 500
 
 # 看板自动化：基于 Issue 声明头自动刷新模块版本演进看板 + 里程碑表
 # 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md

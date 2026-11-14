@@ -123,6 +123,26 @@ unavailable_signals:
 #     （medium / 1m / 48k / 500）；这里写死期望值，防「以为设了其实没设」。
 #   ★ 一致性由 tests/test_model_role_assign.sh ⑧ 机器核验（与 .cnb.yml 的 .npc_task 逐项相等）。
 npc_go:
+  # ---- 模型偏好链（Issue #346 · 人类定调「默认选大参数的模型，兜底默认」）----
+  # ★ 为什么单列而不等于 default.chain：default.chain 是「快档」（回合快），
+  #   而架构师这类角色要的是**参数大、判断深**；两者取向不同，不能共用一个首档。
+  # ★ 顺序即优先级：**第一个是期望的大参数模型**，其后逐个兜底，
+  #   最后一个可以不填——`.cnb.yml` 的 failStages 用「不写 model（平台默认）」兜底，
+  #   所以**永远有一条能通的路径**，不会因为组织列表变更而整条链路秒挂（#177/#346）。
+  # ★ 不写死单一 ID 的原因（2026-11-14 真机探针实测，npc:go stage 直接验证，
+  #   不是猜、不是文档抄）：
+  #     通过 → hy4 / glm-5.3 / glm-5.3-flash / deepseek-v4.1-flash
+  #     报 not in the optional models list → hy3 / qwen4 / qwen4-max / glm-4.6 /
+  #       hunyuan-4 / hunyuan-2.0 / hunyuan-turbos / deepseek-v4.1 / deepseek-v4.1-pro /
+  #       minimax-3.1 / minimax-3.1-flash / codebuddy / qwen3-max / qwen3-coder /
+  #       kimi-k2 / doubao-1.5-pro / glm-5 / klm-5.3-plus 等一长串
+  #   → 结论：**组织可选列表是会漂移的**，写死任意 ID 都有静默失效风险；
+  #     故「首档取偏好链首个 + failStages 用平台默认兜底」，两头都不写死。
+  # ★ 模型更新了怎么换：改本列表第一项即可（可以多个候选按序排），
+  #   改完由 tests/test_model_role_assign.sh ⑫ 机器核验与 .cnb.yml 一致。
+  model_preference:
+    - hy4
+    - glm-5.3
   # 推理深度：off / minimal / low / medium / high / xhigh / max
   thinkingLevel: medium
   # 上下文窗口：128k ~ 1m；降它有实际收益——单轮上下文变小，溢出压缩更少触发（「慢」的真实主因之一）。

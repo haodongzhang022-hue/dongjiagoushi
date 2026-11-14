@@ -9,7 +9,7 @@
   python -m model_routing.cli roles             # 逐角色实际生效模型（含是否显式指定）
   python -m model_routing.cli audit             # 体检：角色/别名双轴（空壳链/别名断裂/别名未接线/缺链）
   python -m model_routing.cli tiers [角色]      # 三档语义：档1 指定 / 档2 与其他角色一样 / 档3 兜底
-  python -m model_routing.cli params            # 平台 npc:go 可控参数（推理深度/上下文/输出/轮次）
+  python -m model_routing.cli params            # 平台 npc:go 可控参数 + 模型偏好链（大参数优先/兜底默认）
   python -m model_routing.cli probe <模型ID>    # 真实探针：平台到底认不认这个 ID（唯一可信来源）
 """
 import sys
@@ -61,8 +61,13 @@ def main(argv=None):
                          ensure_ascii=False, indent=2))
     elif cmd == "params":
         # 平台 npc:go 可控参数（与 .cnb.yml 的 .npc_task 一致性由 signal test 核验）
+        # ★ 首档模型是「大参数优先」的 model_preference[0]（Issue #346），
+        #   不是快档 default.chain[0]；兜底档恒为「平台默认」（不写 model），故不列出。
         print(json.dumps({"npc_go": spec.npc_go_params(),
-                          "default_model": spec.default_chain()[0]},
+                          "model_preference": spec.npc_model_preference(),
+                          "first_model": (spec.npc_model_preference() or [None])[0],
+                          "fallback_model": "platform-default（不写 model）",
+                          "fast_chain_first": spec.default_chain()[0]},
                          ensure_ascii=False, indent=2))
     elif cmd == "probe":
         # 真实探针：不确定「平台可选列表里到底有没有这个 ID」时，用真调用验证，
