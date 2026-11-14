@@ -1272,4 +1272,37 @@ finally:
 print("  ✅ 无 cnb CLI 也能查云端 [接单]：云轨不依赖 CLI，读评走 comment_stream HTTP")
 EOF
 
+echo "===== [manager] 43. 声明要查云却查不了：必须自己说出来，不许静默当「查了没有」 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr43.db")
+for k in ("CNB_REPO", "CNB_REPO_SLUG", "CNB_GROUP_SLUG", "CNB_REPO_NAME", "CNB_ROOT_SLUG"):
+    os.environ.pop(k, None)
+from data import admin, schema; admin.init(); schema.init_schema()
+import dispatch_engine as D
+
+# 病根（42 组的邻居）：42 把 CLI 那道多余的门拆了，但「声明要查却查不了」仍会
+# 安静返回 cloud_degraded=[] —— 调用方看到「查了，没回执」，与「根本没查」无法区分。
+# 这正是 CI 那次红的样子：门被关掉 + 不报警 = 判据与实际相反。
+orig_detect = D._detect_repo
+try:
+    D._detect_repo = lambda: ""
+    v = D.dispatch_verify([{"task_id": "tk43", "agent_id": "ag43",
+                            "role": "架构·开发", "issue_number": "1"}], cloud=True)
+    assert v["cloud_requested"] is True, v
+    assert v["cloud_checked"] is False, v
+    assert v["cloud_skip_reason"], "查不了必须给原因，不许静默跳过"
+    assert v["cloud_degraded"], "查不了必须显式 degraded（判据不完整）"
+    assert v["verified_all_awake"] is False, "判据不全不许判全放行"
+
+    # 没声明查云（默认）→ 不是「查不了」，是「没查」→ 不报 degraded（避免噪声）
+    v2 = D.dispatch_verify([{"task_id": "tk43b", "agent_id": "ag43b",
+                             "role": "架构·开发", "issue_number": "1"}])
+    assert v2["cloud_requested"] is False and v2["cloud_checked"] is False, v2
+    assert not v2["cloud_degraded"], "没请求查云不该报 degraded"
+finally:
+    D._detect_repo = orig_detect
+print("  ✅ 查不了给原因+degraded（判据不完整）；没请求查云不报噪声")
+EOF
+
 echo "===== [manager] ALL PASS ====="

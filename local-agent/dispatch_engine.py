@@ -666,6 +666,8 @@ def dispatch_verify(assignments, cloud=False):
       awaiting_receipt   : 未获接单回执、待真实唤醒的任务清单（假装分配会在这里现形）
       detail             : 每个任务的真实唤醒核验明细（含 receipt_source）
       cloud_degraded     : 评论流没读全/读取失败的条目（判据可能假阴性，须显式暴露）
+      cloud_requested    : 调用方是否声明要查云（区别于 cloud_checked=真去查了）
+      cloud_skip_reason  : 声明了要查却查不了的原因（非空即判据不完整，已并入 cloud_degraded）
 
     ## 双轨判据（本轮补漏 · Issue #239 收尾）
 
@@ -686,9 +688,20 @@ def dispatch_verify(assignments, cloud=False):
     # 于是云轨被整条关掉 → 明明该查云端 [接单] 却判「未回执」（本轮 CI 真踩到：
     # 证据脚本本地绿、云端红，差的就是这个 CLI）。
     # 真正的可用性由 `_cloud_receipt` 自己判：读不到就进 degraded 显式暴露。
-    cloud = bool(cloud) and has_issue and bool(_detect_repo())
+    # 但「声明要查却查不了」必须**自己说出来**（charter：不静默降级）：
+    # 无 Issue 载体 / 探测不到仓库时云轨整条不跑，若安静返回 cloud_degraded=[]，
+    # 调用方看到的就是「查了，没回执」—— 与「没查」无法区分，正是 CI 那次红的样子。
+    cloud_requested = bool(cloud)
+    cloud, cloud_skip = (cloud_requested and has_issue), ""
+    if cloud_requested and not has_issue:
+        cloud_skip = "无 Issue 载体（issue_number/issue 为空），云端评论无处可查"
+    elif cloud_requested and not _detect_repo():
+        cloud_skip = "探测不到当前仓库（org/repo），评论流 URL 无法构造"
+    cloud = cloud and not cloud_skip
 
     cloud_rows, cloud_degraded = {}, []
+    if cloud_skip:
+        cloud_degraded = [{"reason": cloud_skip, "skipped": True}]
     if cloud:
         try:
             cres = _cloud_receipt(assignments)
@@ -728,7 +741,9 @@ def dispatch_verify(assignments, cloud=False):
         "awaiting_receipt_count": len(awaiting),
         "awaiting_receipt": awaiting,
         "detail": detail,
+        "cloud_requested": cloud_requested,
         "cloud_checked": cloud,
+        "cloud_skip_reason": cloud_skip,
         "cloud_degraded": cloud_degraded,
         "note": ("所有任务均已获对端 [接单] 回执，真实唤醒成立，可放行到 L4"
                  if len(awaiting) == 0 else

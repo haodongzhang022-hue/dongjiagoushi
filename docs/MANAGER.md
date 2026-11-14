@@ -214,7 +214,7 @@ data:
 
 ---
 
-## 七、验收标准（`local-agent/tests/test_manager.sh` 42 组信号灯）
+## 七、验收标准（`local-agent/tests/test_manager.sh` 43 组信号灯）
 
 1. 计划即命令：单路 EXECUTE / 多路取首个 / 空 BLOCKED，无「纠结」出口；
 2. ACTIVATE 闸门：计划 → 逐条激活（任务 gid + 承接角色），空计划显式拒绝；
@@ -245,7 +245,8 @@ data:
 39. `dry_run` 不许冒充「平台已激活」：`local_only` 与 `activated` 两态分离（§12.2）；
 40. 云端 `[接单]` 真进判据（`receipt_source=cloud`），读不全显式 `cloud_degraded`（§12.3）；
 41. 演练不许碰平台：经理节点默认 `dry_run`，绝不靠环境探测成功与否来区分演练/真派发（§12.4）；
-42. 云端回执不许依赖 `cnb` CLI：读评走 `comment_stream` HTTP+token，藏掉 CLI 仍查得到 `[接单]`（§12.5）。
+42. 云端回执不许依赖 `cnb` CLI：读评走 `comment_stream` HTTP+token，藏掉 CLI 仍查得到 `[接单]`（§12.5）；
+43. 声明要查云却查不了必须自己说出来：`cloud_skip_reason` + `cloud_degraded`，不静默当「查了没有」；没请求查云不报噪声（§12.5.1）。
 
 ```bash
 cd local-agent && bash tests/test_manager.sh
@@ -795,7 +796,32 @@ cloud = bool(cloud) and has_issue and _cnb_available() and bool(_detect_repo())
 > 两者都不会报错，都只在特定环境现形。所以证据脚本必须**在两种环境都跑**
 > （有 cnb / 无 cnb），否则"本地绿"只证明本地绿。
 
-### 12.6 验收（`test_manager.sh` 37 → 42 组）
+### 12.5.1 顺着同一条病再扫一格：「声明要查却查不了」
+
+CI 转绿之后，我拿同一把尺子回扫云轨的**其余出口**，还剩一格：
+
+```python
+cloud = bool(cloud) and has_issue and bool(_detect_repo())   # 拆掉 CLI 那道门之后
+cloud_rows, cloud_degraded = {}, []
+if cloud: ...                                                 # 不成立就什么都不做
+```
+
+`cloud=True`（声明要查）但**探测不到仓库 / 没有 Issue 载体**时，云轨整条不跑，
+函数安静返回 `cloud_degraded=[]`。调用方看到的是「查了，没回执」——
+和「根本没查」无法区分。**又是 CI 那次红的同一个形状：门关着 + 不报警。**
+
+所以三态显式分开，不再压成一个布尔：
+
+| 字段 | 回答什么 |
+|---|---|
+| `cloud_requested` | 要不要求查（调用方声明） |
+| `cloud_checked` | 真去查了没 |
+| `cloud_skip_reason` | 求了为什么没查（非空即判据不完整，已并入 `cloud_degraded`） |
+
+「没查」和「查了没有」从此能分开读。`test_manager.sh` 第 43 组锁死，
+并反向锁住「没请求查云不该报 degraded」——降级信号只给真降级，不当噪声。
+
+### 12.6 验收（`test_manager.sh` 37 → 43 组）
 
 | 组 | 锁什么 |
 |----|--------|
@@ -804,6 +830,7 @@ cloud = bool(cloud) and has_issue and _cnb_available() and bool(_detect_repo())
 | 40 | 云端 `[接单]` 真进判据（`receipt_source=cloud`）；评论流读不全 → `cloud_degraded`，不静默判未回执 |
 | 41 | 演练不许碰平台：`run_pipeline`/经理节点默认 `real=False` 钉死 `dry_run`，不靠环境探测碰巧失败兜底 |
 | 42 | 云轨不许依赖 `cnb` CLI（读评走 HTTP+token）；把 CLI 藏起来仍能查到云端 `[接单]` |
+| 43 | 声明要查云却查不了（无仓库/无 Issue 载体）→ `cloud_skip_reason` + `cloud_degraded` + 不判全放行；没请求查云不报 degraded |
 
 新增功能级证据脚本 `scripts/feature-verify/manager/平台真碰过没.sh`（6 条）。
 单测全用 `dry_run=True` 跑，**天然碰不到平台变量与平台回执**——这两处断链只有真环境会现形，
