@@ -167,7 +167,7 @@ alias: {}   # 故意为空：1017 对应哪个平台真实 ID 尚未由人类确
 | **`llm/base.py` `call()`** | 签名加 `role=None`（统一接口）|
 | **`llm/openai_compat.py` `call()`** | 每次调用按 `role` 从唯一配置解析渠道链，取首档；失败**逐档降级**（`call_with_chain`）；全挂显式抛错；显式 `LOCAL_AGENT_MODEL` 时尊重单模型 |
 | **`llm/cli_fallback.py` `call()`** | 兼容 `role`（占位输出带角色名）|
-| **`.cnb.yml` `npc:go`** | `model:` 为渠道链首档 `deepseek-v4.1-flash`（npc:go 只接受单 model 字段；多档降级由后端运行时接管）|
+| **`.cnb.yml` `npc:go`** | 首档 `model:` = `npc_go.model_preference[0]`（大参数优先，现为 `hy4`）；**`failStages` 兜底档不写 model**（走平台默认）。npc:go 只接受单 model 字段，多档降级由后端运行时接管 |
 
 **非单次有效**：`spec` 每次解析都**重新读取** `models.yml`（不缓存死值）——
 改配置文件后无需重启/重装即生效；也可用 `MODEL_ROUTING_CONFIG` 指向别处。
@@ -195,6 +195,46 @@ PYTHONPATH=local-agent python3 -m model_routing.cli dryrun       # 本地演练�
   **改 `models.yml` 一处即可全仓生效**（单点收敛，不散改）。
 - `minimax-3.1-flash` / `codebuddy` / `glm-5.3-flash` 作为备用档，走同一 OpenAI 兼容端点（网关侧路由到对应模型）；
   若网关不支持某档模型名，该档调用失败即自动降级下一档，行为仍正确。
+
+## 七'、npc:go 模型偏好链（Issue #346 · 大参数优先 + 兜底默认）
+
+人类 2026-11-14 定调：「**默认选大参数的模型，兜底默认**，这样就会一直可以通；
+比较大的模型也不是静态的，有更新就可以换」。
+
+落地成两条互补的规则，配置在 `models.yml` 的 `npc_go.model_preference`（唯一事实源）：
+
+| 位置 | 写法 | 作用 |
+|---|---|---|
+| `.npc_task.stages[0]` | `model: hy4`（= `model_preference[0]`） | **追求参数大、判断深**——架构师这类角色的取向 |
+| `.npc_task.failStages[0]` | **不写 model** | **平台默认模型**——组织保证可用的那一道，随配置自动跟随 |
+
+**为什么分成两条链**：`default.chain` 是「快档」（回合快、tps 优先），
+`model_preference` 是「大参数」（判断深、能扛复杂推理）。取向不同，合并会让两者互相绑架
+（为了快把架构师按到小模型，或为了大参数把开发拖慢）。
+
+**为什么首档敢写死一个 ID**：单写死 ID 的风险（组织可选列表漂移 → stage 秒挂）
+由 failStages 兜底消化。`#177`（`deepseek-v4-flash` 不在列表）和 `#346`（`hy3` 不在列表）
+是同一根因的两次事故——现在「首档大参数 + 兜底平台默认」两头都不写死，链路不会再整条断掉。
+
+**实测（2026-11-14 真机 `npc:go` stage 逐一探针，不是猜、不是抄文档）**：
+
+```
+通过   → hy4 / glm-5.3 / glm-5.3-flash / deepseek-v4.1-flash
+不认    → hy3 / qwen4 / qwen4-max / glm-4.6 / glm-5 / hunyuan-4 / hunyuan-2.0 /
+          hunyuan-turbos / deepseek-v4.1 / deepseek-v4.1-pro / minimax-3.1 /
+          minimax-3.1-flash / codebuddy / qwen3-max / qwen3-coder / kimi-k2 /
+          doubao-1.5-pro / glm-5.3-plus 等
+          （均报 `not in the optional models list of your organization`）
+```
+
+`allowFailure` **必须放在流水线层**：放 job 层会让首档失败被判 success →
+**failStages 直接被跳过**（实测：首档 success 72ms / 兜底 skipped），
+变成「首档没跑成、兜底也没跑」的假绿。放流水线层则是：首档 error → 兜底真跑 → 整体上报 success。
+
+**换模型怎么做**：改 `models.yml` 的 `model_preference`（可排多个候选，按序优先），
+同步 `.cnb.yml` 首档一行；`local-agent/tests/test_model_routing.sh ⑫` 与
+`tests/test_model_role_assign.sh ⑦` 双端机器核验——两处不一致即红灯。
+**兜底档永远留空**，这条由 ⑫ 断言锁死（写死模型就报红）。
 
 ## 八、模型 ID 纪律（Issue #182）
 

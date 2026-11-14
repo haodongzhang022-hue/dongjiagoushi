@@ -143,17 +143,19 @@ except RuntimeError as e:
 print("  ✅ alias 空（无伪配置）；未登记版本别名在解析期显式报红（含 engine.resolve_models）")
 PY
 
-echo "---- ⑦ CLI 真跑 + 模型 ID 纪律（.cnb.yml model == default.chain[0]） ----"
+echo "---- ⑦ CLI 真跑 + 模型 ID 纪律（首档 == model_preference[0]，兜底档留空） ----"
 python3 -m model_routing.cli roles >/dev/null && echo "  ✅ cli roles"
 python3 -m model_routing.cli audit >/dev/null && echo "  ✅ cli audit（退出码 0）"
 python3 - <<'PY'
 import os, sys, re; sys.path.insert(0, '.')
 from model_routing import spec
+pref = spec.npc_model_preference()
+assert pref, "models.yml 缺 npc_go.model_preference（Issue #346）"
 text = open("../.cnb.yml", encoding="utf-8").read()
 m = re.search(r"^\s*model:\s*([A-Za-z0-9._\-]+)", text, re.M)
 assert m, "未在 .cnb.yml 找到 npc:go model 字段"
-assert m.group(1) == spec.default_chain()[0], (m.group(1), spec.default_chain()[0])
-print("  ✅ .cnb.yml model ==", m.group(1), "== models.yml default.chain[0]")
+assert m.group(1) == pref[0], (m.group(1), pref[0])
+print("  ✅ .cnb.yml 首档 model ==", m.group(1), "== model_preference[0]（大参数优先，不再等于快档 default.chain[0]）")
 PY
 
 echo "---- ⑧ 平台参数 + 别名键（PR #185）：npc_go/.cnb.yml 一致、家族号不误伤、空登记报红 ----"

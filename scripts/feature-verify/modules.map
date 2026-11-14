@@ -44,6 +44,10 @@ review: local-agent/roles/reviewer.py: local-agent/roles/reviewer\.py
 # dsh 新版适配（独立模块 dsh-adapter · Issue #145）
 dsh-adapter: local-agent/tests/test_dsh_adapter.sh: dsh-adapter/|local-agent/dsh_adapter/|local-agent/tests/test_dsh_adapter\.sh|docs/DSH_ADAPTER\.md
 
+# 模型路由 · npc 模型偏好链（大参数优先 + 兜底默认 · Issue #346）
+# 实现源：model_routing 配置/规格/CLI + .cnb.yml（.npc_task 首档与 failStages）
+model-routing: local-agent/model_routing/spec.py: local-agent/model_routing/|^\.cnb\.yml$|docs/MODEL_ROUTING\.md
+
 # 变更选择器自身（本表 + 主执行器）——证据库自保，改选择器必须跑自身样例
 selector: scripts/feature-verify.sh: scripts/feature-verify\.sh|scripts/feature-verify/modules\.map
 
