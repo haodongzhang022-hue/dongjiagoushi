@@ -786,3 +786,60 @@ def count_test_cache(status=None):
     else:
         row = db.query_one("SELECT COUNT(*) AS n FROM test_cache")
     return row["n"] if row else 0
+
+
+# ================= borrow_ledger（借人台账 · Issue #239 收尾轮） =================
+
+def add_borrow(task_key, role, ok, borrow_id="", lane="", handle="", reason="",
+               owner="", detail=None):
+    """登记一次跨岗借人的**结果**（成功失败都记，失败不记＝下轮重复踩坑）。"""
+    from gid import gen
+    db.execute(
+        """
+        INSERT INTO borrow_ledger
+            (borrow_id, task_key, role, ok, lane, handle, reason, owner, detail, ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (borrow_id or gen("borrow"), task_key, role, 1 if ok else 0, lane,
+         handle, reason, owner, _dumps(detail or {}), db.now_iso()),
+    )
+    return borrow_id or ""
+
+
+def list_borrows(task_key=None, role=None, limit=200):
+    """查借人台账（按时间倒序；可按任务/角色过滤）。"""
+    sql, params = "SELECT * FROM borrow_ledger", []
+    if task_key:
+        sql += " WHERE task_key=?"
+        params.append(task_key)
+    if role:
+        sql += (" AND" if task_key else " WHERE") + " role=?"
+        params.append(role)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    return [dict(r) for r in db.query(sql, params)]
+
+
+def borrow_failed_roles(task_key):
+    """该任务上**最近一次结果仍是失败**的角色（下轮自动跳过，不重复找同一个人）。
+
+    判定按角色取每条的最后一条记录：最后一条 ok=0 → 记入失败名单；
+    后来借成功过的（最后一条 ok=1）不再算失败——成功过的人可以再借。
+    """
+    rows = db.query(
+        "SELECT role, ok FROM borrow_ledger WHERE task_key=? ORDER BY id",
+        (task_key,),
+    )
+    last = {}
+    for r in rows:
+        last[r["role"]] = r["ok"]
+    return [role for role, ok in last.items() if not ok]
+
+
+def count_borrows(task_key=None):
+    if task_key:
+        row = db.query_one(
+            "SELECT COUNT(*) AS n FROM borrow_ledger WHERE task_key=?", (task_key,))
+    else:
+        row = db.query_one("SELECT COUNT(*) AS n FROM borrow_ledger")
+    return row["n"] if row else 0

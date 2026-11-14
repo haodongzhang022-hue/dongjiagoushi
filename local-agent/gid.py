@@ -32,6 +32,7 @@ _PREFIX = {
     "pool": "pl",
     "meter": "mt",
     "split": "sp",
+    "borrow": "bw",
 }
 
 

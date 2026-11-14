@@ -64,3 +64,7 @@ manager: local-agent/tests/test_manager.sh: local-agent/manager/|local-agent/dis
 # 经理"证据不认模拟器"（演练不算干活 · Issue #239 四轮）
 # 与上层 manager 区分：那条锁引擎整体，这条锁"证据来源分级"这一个可感知功能点。
 manager: scripts/feature-verify/manager/证据不认模拟器.sh: local-agent/manager/work\.py|local-agent/roles/base\.py|scripts/feature-verify/manager
+
+# 经理「借人台账记成败」（按需借人 + 成败留痕 + 失败换人 · Issue #239 收尾轮）
+# 与上层 manager 区分：那条锁引擎整体，这条锁"借人有没有被记住并改变下一轮"。
+manager: scripts/feature-verify/manager/借人台账记成败.sh: local-agent/manager/borrow\.py|local-agent/data/schema\.py|local-agent/data/repository\.py|local-agent/roles/team_lead\.py

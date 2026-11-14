@@ -156,17 +156,38 @@ class TeamLeadRole(BaseRole):
             pass
         return rec
 
-    def lead_borrow(self, task_key, role="架构·开发", reason=""):
-        """组内没有能承接的人 → 直接申请**跨岗借角色**（经理协调，不自闭）。"""
+    def lead_borrow(self, task_key, role="", reason="", task=""):
+        """组内没有能承接的人 → 申请**跨岗借角色**，并且**把结果记下来**。
+
+        借谁不写死（`role` 留空时按任务语义 + 名册派生）；借不到也落台账，
+        下次自动跳过这个人换下一个——否则同一批人会被反复借、反复失败
+        （Issue #239 收尾轮用户点名：缺这一步结果的记录）。
+        """
+        from manager import borrow as borrow_mod
+        target = role or (borrow_mod.need_roles(task or task_key) or
+                          [("架构·评审")])[0]
+        failed = borrow_mod.failed_roles(task_key)
+        if role and role in failed:  # 指定的人借败过：直接说清，别再重复
+            return {"task_key": task_key, "borrow_role": role, "handle": None,
+                    "ok": False, "reason": "该角色在这条任务上已借败过（台账在案）",
+                    "next": "换下一个候选或换手段", "failed_roles": failed}
         try:
-            handle = self.resolve(role=role)
+            handle = self.resolve(role=target)
         except Exception:  # noqa: BLE001 解析失败如实暴露
             handle = {"handle": "", "note": "HandleAbility 未解析出，须经理协调"}
+        ok = bool(isinstance(handle, dict) and handle.get("handle"))
+        borrow_mod.record(task_key, target, ok,
+                          handle=(handle or {}).get("handle", "") if isinstance(handle, dict) else "",
+                          lane="resolve", reason="" if ok else "handle 未解析出",
+                          owner=self.name)
         return {
             "task_key": task_key,
-            "borrow_role": role,
+            "borrow_role": target,
             "handle": handle,
+            "ok": ok,
             "reason": reason or "组内无人可承接，申请跨岗借角色",
+            "recorded": True,
+            "failed_roles": failed,
         }
 
     def lead_overview(self):

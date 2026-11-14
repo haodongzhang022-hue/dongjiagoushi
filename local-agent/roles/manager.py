@@ -180,6 +180,19 @@ class ManagerRole(BaseRole):
         """权责边界判定：权责内 SELF（自决执行，不申请授权）；不可逆/超成本/越界才 HUMAN。"""
         return self.manager_engine.authorize(action, **kwargs)
 
+    def manager_borrow(self, role="", task_key="", task="", exclude=()):
+        """按需借人：**真解析 @ → 真召唤 → 记下成败 → 失败换下一个**。
+
+        与写死角色名的旧姿势的区别：借谁由任务语义 + 名册派生；每次借人都进
+        `borrow_ledger` 台账，借败过的人下次自动跳过（不重复找不到人用）。
+        """
+        return self.manager_engine.borrow_role(role, task_key=task_key, task=task,
+                                               exclude=exclude)
+
+    def manager_borrow_overview(self, task_key=None):
+        """借人二级信息：借过谁 / 谁借到了 / 谁一直借不到（人类俯瞰用）。"""
+        return self.manager_engine.borrow_overview(task_key=task_key)
+
     def manager_self_check(self):
         """六项自检：承上/行下/启下/反馈/找通路/自决（供人类判定及格）。"""
         return self.manager_engine.self_check()
@@ -242,6 +255,7 @@ class ManagerRole(BaseRole):
                 "通用派发能力(复用 DispatchAbility，全员同源)",
             ],
             "entry": ["manager_carry", "manager_execute", "manager_activate",
+                      "manager_borrow", "manager_borrow_overview",
                       "manager_push", "manager_supervise", "manager_status",
                       "manager_guard", "manager_lanes", "manager_try_lanes",
                       "manager_authorize", "manager_self_check"],

@@ -877,4 +877,110 @@ print("  ✅ 驱动失败留痕不吞异常；组内未通过不放行；判词�
 print(f"      drive={d['did']} / 组内={drive.get('approved')}/{drive.get('total')} 判词={v['verdict']}")
 EOF
 
+echo "===== [manager] 30. 借人台账：成败都记，失败换人，不重复找同一个人 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr30.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine, borrow as borrow_mod
+
+m = ManagerEngine(repo="dongdongxiaozu/dongjiagoushi", dry_run=True)
+
+# ① 按需：借谁由任务语义派生，不写死某个人
+assert borrow_mod.need_roles("需要评审复评") == ["架构·评审"], borrow_mod.need_roles("需要评审复评")
+assert borrow_mod.need_roles("跑测试联调") == ["架构·测试"]
+
+# ② 借一次就要有一条台账（成败都记）——这正是上一版缺的那一步
+b = m.borrow_role("", task_key="t-ledger", task="需要评审复评", exclude=["架构·开发"])
+assert b["ok"] is True and b["role"] == "架构·评审", b
+rows = borrow_mod.history(task_key="t-ledger")
+assert len(rows) == 1, f"借人要落台账，实际 {rows}"
+assert rows[0]["role"] == "架构·评审" and rows[0]["ok"] == 1
+assert rows[0]["lane"] and rows[0]["handle"].startswith("@"), rows[0]
+print("  ✅ 借人按需（任务语义派生）+ 每次借人都落台账（含通路/handle/成败）")
+print(f"      台账条数={len(rows)} role={rows[0]['role']} lane={rows[0]['lane']}")
+EOF
+
+echo "===== [manager] 31. 借不到要换人：失败进台账，下轮自动跳过，不重复踩坑 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr31.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine, borrow as borrow_mod
+
+# 无 repo、无 cnb：只有 lead/self 兜底通路 → 借不到「那个人」，全部判失败
+m = ManagerEngine(repo="", dry_run=True)
+r1 = m.borrow_role("", task_key="t-fail", task="需要评审复评", attempts=2)
+assert r1["ok"] is False, r1
+assert len(r1["tried"]) == 2, f"一次借不到要换下一个，实际试了 {r1['tried']}"
+assert [t["ok"] for t in r1["tried"]] == [False, False]
+assert all(t["reason"] for t in r1["tried"]), "失败必须写清卡在哪（不能只写'失败'）"
+
+# 失败进台账：下轮自动跳过这批人（不重复找不到人用）
+failed = set(r1["failed_roles"])
+assert failed == {t["role"] for t in r1["tried"]}, (failed, r1["tried"])
+assert set(borrow_mod.failed_roles("t-fail")) == failed
+cands = m.borrow_candidates(exclude=["架构·开发"], task="需要评审复评",
+                            task_key="t-fail")
+assert not (failed & set(cands)), f"借败过的人不该再出现在候选里：{failed & set(cands)}"
+
+# 下轮换的是**没有借败过**的人（不是从同一个名字重来）
+r2 = m.borrow_role("", task_key="t-fail", task="需要评审复评", attempts=2)
+assert r2["tried"], r2
+assert not (failed & {t["role"] for t in r2["tried"]}), \
+    f"第二轮又借了失败过的人：{[t['role'] for t in r2['tried']]}"
+
+# 候选全借光 → 显式说"该换手段"，不原地循环
+m.borrow_role("", task_key="t-fail", task="需要评审复评", attempts=99)
+allfail = m.borrow_role("", task_key="t-fail", task="需要评审复评",
+                        retry_failed=True, attempts=99)
+assert allfail["next"], allfail
+print("  ✅ 借不到→记失败→下轮跳过→换下一个；全败显式提示换手段（不重复找不到人用）")
+print(f"      第1轮={[t['role'] for t in r1['tried']]} / 第2轮={[t['role'] for t in r2['tried']]}")
+EOF
+
+echo "===== [manager] 32. 借到人的判据：lead/self 兜底不算借到人（不自己作证） ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr32.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import borrow as borrow_mod
+
+# ① 真投给被借者的通路才算
+for lane in ("platform", "fullpath", "codebuddy", "direct_handle"):
+    assert borrow_mod.counts_as_borrowed({"ok": True, "lane": lane}), lane
+# ② lead（组内带编制）/ self（经理顶上）都是兜底，不是借到人
+for lane in ("lead", "self"):
+    assert not borrow_mod.counts_as_borrowed({"ok": True, "lane": lane}), lane
+assert not borrow_mod.counts_as_borrowed({"ok": False, "lane": "fullpath"})
+# ③ 没借到要给得出「卡在哪」（不缺省成一句"失败"）
+why = borrow_mod._why_not({"ok": False, "attempts": [
+    {"lane": "platform", "state": "skipped_unready", "missing": ["cnb（平台 CLI 不可用）"]}]})
+assert "cnb" in why, why
+print("  ✅ 只有真投给被借者的通路才算借到人；lead/self 兜底不算；失败要写清卡在哪")
+print(f"      真通路={list(borrow_mod.BORROWED_LANES)}")
+EOF
+
+echo "===== [manager] 33. 借人写进启下主链路：借人动作带台账凭据 + 失败有下一步 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr33.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager.engine import ManagerEngine
+
+m = ManagerEngine(repo="dongdongxiaozu/dongjiagoushi", dry_run=True)
+res = m.carry("1. 开发登录模块\n2. 评审登录模块", max_rounds=4)
+borrow_acts = [a for h in res["rounds"] for a in h["staffing"]
+               if a["action"] == "borrow_role"]
+assert borrow_acts, "启下主链路没走到借人"
+for a in borrow_acts:
+    assert a.get("borrow_recorded") is True, f"借人必须落台账：{a}"
+    assert a["borrow"].get("tried"), "借人要逐条留痕试过谁"
+    for t in a["borrow"]["tried"]:
+        assert t.get("role") and "ok" in t and "reason" in t, t
+    assert a.get("next_on_fail") is not None
+print("  ✅ 启下借人动作带台账凭据（tried/ok/reason）+ 失败有下一步，不是记个动作名")
+print(f"      借人动作 {len(borrow_acts)} 条")
+EOF
+
 echo "===== [manager] ALL PASS ====="
