@@ -214,7 +214,7 @@ data:
 
 ---
 
-## 七、验收标准（`local-agent/tests/test_manager.sh` 41 组信号灯）
+## 七、验收标准（`local-agent/tests/test_manager.sh` 42 组信号灯）
 
 1. 计划即命令：单路 EXECUTE / 多路取首个 / 空 BLOCKED，无「纠结」出口；
 2. ACTIVATE 闸门：计划 → 逐条激活（任务 gid + 承接角色），空计划显式拒绝；
@@ -244,7 +244,8 @@ data:
 38. repo 探测认对变量：云端只有 `CNB_REPO_SLUG` 也探测得到，`dry_run` 不被静默置 True（§12.1）；
 39. `dry_run` 不许冒充「平台已激活」：`local_only` 与 `activated` 两态分离（§12.2）；
 40. 云端 `[接单]` 真进判据（`receipt_source=cloud`），读不全显式 `cloud_degraded`（§12.3）；
-41. 演练不许碰平台：经理节点默认 `dry_run`，绝不靠环境探测成功与否来区分演练/真派发（§12.4）。
+41. 演练不许碰平台：经理节点默认 `dry_run`，绝不靠环境探测成功与否来区分演练/真派发（§12.4）；
+42. 云端回执不许依赖 `cnb` CLI：读评走 `comment_stream` HTTP+token，藏掉 CLI 仍查得到 `[接单]`（§12.5）。
 
 ```bash
 cd local-agent && bash tests/test_manager.sh
@@ -766,7 +767,35 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 > 教训是：**验证"修好了"之前，先验证"没有弄坏别的"。**
 > 我上一轮写完就跑了单测——单测全绿，因为它只测我改的那个函数。
 
-### 12.5 验收（`test_manager.sh` 37 → 41 组）
+### 12.5 CI 又抓到一个：云轨被我多卡了一道 CLI
+
+第一版提交后 CI 红在 `feature-verify` 的 `manager/平台真碰过没`，而**本地全绿**：
+
+```
+本地   CLOUD True cloud True   ✓
+云端   CLOUD False  False      ✗
+```
+
+差别只有一个：CI 镜像里**没装 `cnb` CLI**。我给 `dispatch_verify` 的云轨加了
+`_cnb_available()` 这道门槛——可**读回执走的是 `comment_stream` 的 HTTP + token，
+跟 `cnb` CLI 一点关系都没有**。多卡的这一道把云轨整条关掉了：
+
+```python
+cloud = bool(cloud) and has_issue and _cnb_available() and bool(_detect_repo())
+#                                       ^^^^^^^^^^^^^^^^ 无关依赖，CI 下恒 False
+```
+
+后果和 12.3 一模一样：明明该查云端 `[接单]`，却判「未回执」。**我修了一个"用自己的假设
+作证"，顺手又写了一个"用自己的环境假设作证"。**
+
+已去掉该门槛，可用性交给 `_cloud_receipt` 自己判（读不到就进 `degraded` 显式暴露）。
+`test_manager.sh` 第 42 组用"把 `cnb` 藏起来"的方式锁死。
+
+> 这轮的教训叠了一层：12.3 是**判据没接线**，12.5 是**接线接错了地方**。
+> 两者都不会报错，都只在特定环境现形。所以证据脚本必须**在两种环境都跑**
+> （有 cnb / 无 cnb），否则"本地绿"只证明本地绿。
+
+### 12.6 验收（`test_manager.sh` 37 → 42 组）
 
 | 组 | 锁什么 |
 |----|--------|
@@ -774,8 +803,9 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 | 39 | `dry_run` 下 `platform_activated=0` + `state=local_only`；真建出 Issue 才 `activated`/`platform_activated=1` |
 | 40 | 云端 `[接单]` 真进判据（`receipt_source=cloud`）；评论流读不全 → `cloud_degraded`，不静默判未回执 |
 | 41 | 演练不许碰平台：`run_pipeline`/经理节点默认 `real=False` 钉死 `dry_run`，不靠环境探测碰巧失败兜底 |
+| 42 | 云轨不许依赖 `cnb` CLI（读评走 HTTP+token）；把 CLI 藏起来仍能查到云端 `[接单]` |
 
-新增功能级证据脚本 `scripts/feature-verify/manager/平台真碰过没.sh`（5 条）。
+新增功能级证据脚本 `scripts/feature-verify/manager/平台真碰过没.sh`（6 条）。
 单测全用 `dry_run=True` 跑，**天然碰不到平台变量与平台回执**——这两处断链只有真环境会现形，
 所以证据脚本专门复刻云端变量环境 + 云端评论回执。
 

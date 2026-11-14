@@ -546,12 +546,6 @@ def deliver(task_key, agent_id, output, issue_ref="", role="架构·开发"):
 #                         否则接口默认 page_size=10 会静默截断、把「已回执」误判成
 #                         「链悬空」（Issue #166 · PR #161 真实踩坑）。
 # ============================================================
-def _cnb_available():
-    """平台 CLI 是否可用（可用才值得去查云端回执）。"""
-    from shutil import which
-    return bool(which("cnb"))
-
-
 def _detect_repo():
     """探测当前操作仓库（org/repo）—— **云端没有 `CNB_REPO` 这个变量**。
 
@@ -686,8 +680,13 @@ def dispatch_verify(assignments, cloud=False):
     """
     assignments = list(assignments or [])
     has_issue = any((a.get("issue_number") or a.get("issue")) for a in assignments)
-    # 显式声明 + 有 Issue 载体 + 平台可用，三者齐备才真去查云（缺一就不打网络）。
-    cloud = bool(cloud) and has_issue and _cnb_available() and bool(_detect_repo())
+    # 显式声明 + 有 Issue 载体 + 仓库可探测，三者齐备才真去查云。
+    # ⚠️ **不要卡 `_cnb_available()`**：读回执走的是 comment_stream 的 HTTP+token，
+    # 跟 `cnb` CLI 一点关系都没有。早先多卡了这一道，CI 镜像里没装 cnb CLI，
+    # 于是云轨被整条关掉 → 明明该查云端 [接单] 却判「未回执」（本轮 CI 真踩到：
+    # 证据脚本本地绿、云端红，差的就是这个 CLI）。
+    # 真正的可用性由 `_cloud_receipt` 自己判：读不到就进 degraded 显式暴露。
+    cloud = bool(cloud) and has_issue and bool(_detect_repo())
 
     cloud_rows, cloud_degraded = {}, []
     if cloud:
