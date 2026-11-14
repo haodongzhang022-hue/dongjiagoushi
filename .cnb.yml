@@ -210,13 +210,13 @@ main:
       type: npc:go
       options:
         role: "架构·秘书"            # 对应 .cnb/settings.yml 中的角色（兜底人设）
-        model: hy3                   # ✅ 官方免费模型（混元 3），不消耗 AI Credits 账单
-          # 原值 deepseek-v4-flash 不在组织「可选模型列表」内，npc:go 直接 error：
-          #   npc:go model "deepseek-v4-flash" is not in the optional models list of your organization.
-          # 该错误发生在 stage 层（Prepare success / npc go error），
-          # 会让「评论 @角色 → 真实唤醒」整条链路静默失效（对端收不到卡、也不回执）。
-          # 其他可选：glm-5；不写本字段则走平台默认模型。
-          # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看。
+        # 不写 model → 走平台默认模型（NPC_CONFIG）。
+        # 不要在这里写死模型 ID：npc:go 的 model 必须是「当前组织可选模型列表」里的项，
+        # 而该列表随组织配置变化。写死一个不在列表里的 ID，会让整个 stage 在 Prepare 之后直接 error：
+        #   npc:go model "<id>" is not in the optional models list of your organization.
+        # 表现是「评论 @角色 → 流水线起来 → 3 秒内 error」，对端收不到卡也不回执，从本地看像卡发出去了。
+        # 实测（2026-11-14，本组织）：hy3 / glm-5 / deepseek-v3.1 / deepseek-v4.1 / glm-4.6 全部报此错；
+        # 不指定 model 或 model: deepseek-v4.1-flash 正常。要不要显式指定，请先在 NPC 选择器确认模型 ID 在可选列表内。
 
 # 看板自动化：基于 Issue 声明头自动刷新模块版本演进看板 + 里程碑表
 # 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md
