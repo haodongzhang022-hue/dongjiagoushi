@@ -6,13 +6,15 @@
 # 用法（流水线里只用 resolve）：
 #   bash scripts/npc-model.sh resolve          # 解析 → 导出 NPC_MODEL / NPC_USE_DEFAULT
 #   bash scripts/npc-model.sh resolve --json   # 机器可读
+#   bash scripts/npc-model.sh resolve --role 架构·总师   # 指定角色（默认读 CNB_NPC_NAME）
 #   bash scripts/npc-model.sh info             # 人可读策略快照（含当前会选谁）
 #   bash scripts/npc-model.sh learn --log-file f  # 从 npc:go 失败日志认出被拒模型
 #
 # 为什么不在 .cnb.yml 里直接写 model：
 #   model 必须是「当前组织可选模型列表」里的 ID，列表会漂移。写死任意 ID 都有
 #   再次静默失效的风险，且故障只出现在 stage 层，表现为「评论 @角色 → 3 秒挂」。
-# 本脚本的做法：大参数优先 → 兜底不写 model（平台默认）→ 换模型只改 yml。
+# 本脚本的做法：角色闸门（只有架构师吃大模型）→ 兜底不写 model（平台默认）
+#   → 换模型只改 yml。
 # ============================================================
 set -eu
 
@@ -39,14 +41,18 @@ config_path = os.path.join(root, ".cnb", "npc-models.yml")
 if "--config" in args:
     config_path = args[args.index("--config") + 1]
 
+# 角色：命令行显式给 > 平台注入的 CNB_NPC_NAME（@角色 触发时自动带上）
+role_arg = args[args.index("--role") + 1] if "--role" in args else None
+
 if cmd == "resolve":
-    result = resolve(config_path=config_path)
+    result = resolve(config_path=config_path, role=role_arg)
     want_json = "--json" in args
     if want_json:
         print(json.dumps(result, ensure_ascii=False))
     else:
         # 人可读日志（进 CI 日志，便于事后复盘「这次为什么用这个模型」）
         print("[npc-model] 策略源: .cnb/npc-models.yml")
+        print("[npc-model] 触发角色: %s" % (result.get("role") or "（未识别，按非架构师处理）"))
         print("[npc-model] 选择来源: %s" % result["source"])
         print("[npc-model] 原因: %s" % result["reason"])
         if result["use_platform_default"]:
@@ -60,13 +66,16 @@ if cmd == "resolve":
 
 elif cmd == "info":
     spec = ModelSpec.load(config_path)
-    policy = select_model(spec)
+    policy = select_model(spec, role=role_arg)
     print("[npc-model] 配置: %s" % config_path)
+    print("[npc-model] 大模型角色(闸门): %s" % ("、".join(spec.big_model_roles) or "（无，全部走默认档）"))
+    print("[npc-model] 默认档(其余角色): %s" % (spec.default_model or "（未配置 → 平台默认）"))
     print("[npc-model] prefer(大参数优先): %s" % " -> ".join(spec.prefer))
     print("[npc-model] 可用候选: %s" % (", ".join(spec.usable) or "（无）"))
     print("[npc-model] 黑名单缓存: %s" % (", ".join(spec.unavailable) or "（空）"))
     print("[npc-model] 兜底: %s（= 不写 model，走平台默认模型）" % spec.fallback)
     print("[npc-model] 覆盖键: %s" % spec.override_env)
+    print("[npc-model] 当前角色: %s" % (policy.role or "（未识别）"))
     print("[npc-model] 当前会选: %s ← %s" % (
         policy.model or "平台默认模型", policy.reason))
     if spec.history:
@@ -91,7 +100,7 @@ elif cmd == "learn":
 PY
     ;;
   *)
-    echo "用法: bash scripts/npc-model.sh {resolve|info|learn} [--json|--config PATH|--log-file PATH]" >&2
+    echo "用法: bash scripts/npc-model.sh {resolve|info|learn} [--json|--role R|--config PATH|--log-file PATH]" >&2
     exit 2
     ;;
 esac

@@ -25,7 +25,7 @@
 | **全员** | 派发能力（DispatchAbility）| 派发/接单/分发 | `local-agent/dispatch/` | docs/DISPATCH_ABILITY.md | Issue #33 |
 | **全员** | 深度能力（DepthAbility L1-L7）| 唤醒/协作深度/到结果 | `local-agent/depth/` | docs/DEPTH_MODEL.md | Issue #47 |
 | **全员** | 真实唤醒校验（dispatch_verify）| 假装分配/未唤醒/待回执 | `dispatch_engine.py` + `dispatch/` | docs/DISPATCH_DEPTH.md §八 | Issue #100 |
-| **流水线** | NPC 模型策略（npc-model · 大参数优先+默认兜底）| 模型/大参数/兜底/可选模型列表/不写死/npc go 秒挂/换模型/NPC_MODEL_OVERRIDE | `.cnb/npc-models.yml` | docs/NPC_MODEL.md | PR #346 · module npc-model v0.1.0 |
+| **流水线** | NPC 模型策略（npc-model · 角色分层：架构师大参数 / 其余默认+兜底）| 模型/大参数/角色闸门/只有架构师/默认档/兜底/可选模型列表/不写死/npc go 秒挂/换模型/NPC_MODEL_OVERRIDE/CNB_NPC_NAME | `.cnb/npc-models.yml` | docs/NPC_MODEL.md | PR #346 · module npc-model v0.2.0 |
 | **全员** | 评论流统一读取（comment_stream · 默认全量）| 评论流/读评论/回执/悬空/分页/page_size/截断/静默/链悬空| `local-agent/comment_stream/` | docs/COMMENT_STREAM.md | Issue #166 · module dispatch-verify v0.1.0 |
 | **全员** | @ 定位能力（HandleAbility）| 跨仓库/@ 格式/权限 | `local-agent/handle/` | docs/HANDLE_ABILITY.md | 通用 |
 | **全员** | 标签能力（LabelAbility）| 打标/进度/优先级/标签 | `local-agent/label/` | docs/LABEL_AUTOMATION.md | Issue #51 |

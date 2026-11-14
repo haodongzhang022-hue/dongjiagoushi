@@ -6,7 +6,10 @@
   - 策略读入后立即**确定性校验**（不是 LLM 判断），非法配置直接失败，
     绝不允许"配置写错了就静默走个凑合值"；
   - 兜底只允许 `platform_default` 这一种语义（= npc:go 不写 model），
-    因为它才是"永远能通"的那条路；把某个模型 ID 当兜底等于把坑搬回去。
+    因为它才是"永远能通"的那条路；把某个模型 ID 当兜底等于把坑搬回去；
+  - **分层**：只有架构师角色吃大参数模型（`big_model_roles` 命中），其余角色一律
+    `default_model`（快档小模型）。分层的判据是「触发的 NPC 角色名」，来自平台注入的
+    `CNB_NPC_NAME`，不是人肉约定——见 `selector.select_model()`。
 """
 import os
 
@@ -16,8 +19,9 @@ DEFAULT_CONFIG_PATH = os.path.join(".cnb", "npc-models.yml")
 FALLBACK_PLATFORM_DEFAULT = "platform_default"
 
 # 决策来源标记（写进日志/回执，方便复盘中查明为什么用了这个模型）
-SOURCE_PREFER = "prefer"                # 命中 prefer 里的大参数模型
+SOURCE_PREFER = "prefer"                # 架构师角色命中 prefer 里的大参数模型
 SOURCE_OVERRIDE = "override"            # 环境变量临时覆盖
+SOURCE_ROLE_DEFAULT = "role_default"    # 非架构师角色 → 统一默认档模型
 SOURCE_FALLBACK = "fallback"            # 降级到平台默认
 
 
@@ -28,12 +32,15 @@ class ModelSpecError(ValueError):
 class ModelSpec(object):
     """一条模型策略。"""
 
-    def __init__(self, prefer, unavailable, fallback, override_env, history):
+    def __init__(self, prefer, unavailable, fallback, override_env, history,
+                 default_model=None, big_model_roles=None):
         self.prefer = prefer
         self.unavailable = unavailable
         self.fallback = fallback
         self.override_env = override_env
         self.history = history
+        self.default_model = default_model
+        self.big_model_roles = big_model_roles or []
 
     # ---------- 构造与校验 ----------
     @classmethod
@@ -78,7 +85,23 @@ class ModelSpec(object):
         if not isinstance(history, list):
             raise ModelSpecError("history 必须是字符串列表")
 
-        return cls(prefer, unavailable, fallback, override_env, history)
+        # 非架构师角色的统一默认档模型：**允许留空**（留空 = 走平台默认）。
+        # 为什么允许留空而不强制：默认档的语义是「其他角色不用特别照顾」，
+        # 只要不写死就必须能通；写不写由人决定，代码不臆造模型名。
+        default_model = data.get("default_model")
+        if default_model is not None:
+            if not isinstance(default_model, str):
+                raise ModelSpecError("default_model 必须是字符串（模型 ID）")
+            default_model = default_model.strip() or None
+
+        # 吃大参数模型（prefer）的角色名单。留空 = 谁都不吃，全部走默认档。
+        big_model_roles = data.get("big_model_roles") or []
+        if not isinstance(big_model_roles, list):
+            raise ModelSpecError("big_model_roles 必须是字符串列表")
+        big_model_roles = [str(x).strip() for x in big_model_roles if str(x).strip()]
+
+        return cls(prefer, unavailable, fallback, override_env, history,
+                   default_model=default_model, big_model_roles=big_model_roles)
 
     @classmethod
     def load(cls, path=None):
@@ -104,6 +127,16 @@ class ModelSpec(object):
     def is_blocked(self, model):
         return model in set(self.unavailable)
 
+    def wants_big_model(self, role):
+        """该角色是否吃大参数模型。
+
+        判据只有一条：角色名在 `big_model_roles` 里。角色名来自平台注入的
+        `CNB_NPC_NAME`（`.cnb/settings.yml` 里声明的全称，如「架构·总师」）。
+        读不到角色名（本地跑 / 非 NPC 事件）→ 返回 False，走默认档，
+        绝不因为"拿不准"就偷偷抬到贵模型上。
+        """
+        return bool(role) and role in set(self.big_model_roles)
+
     def to_dict(self):
         return {
             "prefer": list(self.prefer),
@@ -112,17 +145,20 @@ class ModelSpec(object):
             "fallback": self.fallback,
             "override_env": self.override_env,
             "history": list(self.history),
+            "default_model": self.default_model,
+            "big_model_roles": list(self.big_model_roles),
         }
 
 
 class ModelPolicy(object):
     """一次选择的决策结果。"""
 
-    def __init__(self, model, source, reason, spec=None):
+    def __init__(self, model, source, reason, spec=None, role=None):
         self.model = model            # 选中的模型 ID；None = 走平台默认（不写 model）
-        self.source = source          # prefer / override / fallback
+        self.source = source          # prefer / override / role_default / fallback
         self.reason = reason          # 人可读的原因（写进回执与日志）
         self.spec = spec
+        self.role = role              # 触发本次 NPC 的角色名（None = 不知道/非 NPC）
 
     @property
     def use_platform_default(self):
@@ -143,6 +179,7 @@ class ModelPolicy(object):
             "use_platform_default": self.use_platform_default,
             "source": self.source,
             "reason": self.reason,
+            "role": self.role,
         }
 
     def __repr__(self):

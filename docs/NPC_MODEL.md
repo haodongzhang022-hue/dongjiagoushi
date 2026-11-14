@@ -1,7 +1,7 @@
-# NPC 模型策略（npc-model · v0.1.0）
+# NPC 模型策略（npc-model · v0.2.0）
 
-> **一句话**：不写死模型 ID，默认选**大参数**模型，选不到就**兜底走平台默认**，
-> 平台有新模型就**改数据不改流水线**。
+> **一句话**：不写死模型 ID，**只有架构师角色吃大参数模型**，其余角色走默认快档，
+> 都选不到就**兜底走平台默认**，平台有新模型就**改数据不改流水线**。
 >
 > 唯一事实源：`.cnb/npc-models.yml` · 解析入口：`scripts/npc-model.sh` ·
 > 能力实现：`local-agent/npc_model/` · 信号灯：`local-agent/tests/test_npc_model.sh`
@@ -23,15 +23,40 @@ npc:go model "<id>" is not in the optional models list of your organization.
 `deepseek-v4.1-flash` 是小参数模型 —— 架构师要啃长文档、走架构八步、出结构化长产出，
 撑不住。
 
-## 二、策略：大参数优先 + 默认兜底
+但两个方向的极端都不对：**全部角色都吃大参数模型也是浪费**——大模型贵且慢，
+秘书/开发/进度推手做的是短判断，纯溢价。所以真正要的是**分层**。
+
+## 二、策略：角色分层 + 大参数优先 + 平台默认兜底
+
+人类 2026-11-14 原话：
+
+> 只架构师那个角色选这种大的模型，然后用 deepseek v4.1 flash，其他的都是默认就行，然后兜底。
 
 | 优先级 | 来源 | 行为 |
 |---|---|---|
 | 1 | **环境变量覆盖** | `NPC_MODEL_OVERRIDE=<模型ID>` 显式指定，不改仓库、不提 PR 就能换 |
-| 2 | **prefer（大参数优先）** | 从上到下取第一个「不在 unavailable 里」的候选 |
-| 3 | **fallback（平台默认）** | `platform_default` = **不写 `model`**，走平台默认模型 |
+| 2 | **角色闸门 · 架构师** | 触发角色在 `big_model_roles` 里 → `prefer` 取第一个「不在 unavailable 里」的大参数模型 |
+| 3 | **角色闸门 · 其余** | 一律 `default_model`（`deepseek-v4.1-flash`，快档） |
+| 4 | **fallback（平台默认）** | `platform_default` = **不写 `model`**，走平台默认模型 |
 
-三条一起构成闭环：**首选大参数 → 不可用自动降级 → 无论如何都通**。
+**闸门判据是平台注入的 `CNB_NPC_NAME`**（`@角色` 触发时自动带上，值就是
+`.cnb/settings.yml` 里的角色全称），不是人肉约定、不是各处自己写 `model`：
+
+```
+@dongdongxiaozu/dongjiagoushi(架构·总师) → CNB_NPC_NAME=架构·总师 → 大参数 hy4
+@dongdongxiaozu/dongjiagoushi(架构·开发) → CNB_NPC_NAME=架构·开发 → deepseek-v4.1-flash
+@CodeBuddy / 未识别                        → 非架构师 → deepseek-v4.1-flash
+```
+
+边界处理（都是确定性代码，不是"觉得差不多"）：
+
+- 角色名前缀 `架构·` / `市场·` 归一，写 `总师` 与 `架构·总师` 等价；
+- **读不到角色名**（本地跑、非 NPC 事件）→ 按非架构师处理，绝不因"拿不准"偷偷抬到贵模型；
+- **架构师的大参数全不可用** → 直接走平台默认，**不退而求其次用小模型写死**
+  （写死 = 把另一份漂移风险搬回来）；
+- **默认档被拉黑或没配** → 同样走平台默认，不硬塞一个可能失效的 ID。
+
+三层一起构成闭环：**架构师吃大参数 → 其余吃快档 → 谁都不通就用平台默认，永远能通**。
 
 关键设计（都是踩过坑换来的）：
 
@@ -48,6 +73,13 @@ npc:go model "<id>" is not in the optional models list of your organization.
 ## 三、配置（`.cnb/npc-models.yml`）
 
 ```yaml
+# ★ 角色闸门：只有这些角色吃大参数模型（其余一律 default_model）
+big_model_roles:
+  - 架构·总师        # 架构师本体（加角色 = 这里加一行）
+
+# ★ 非名单角色的统一默认档（用户原话「其他的都是默认就行」）
+default_model: deepseek-v4.1-flash
+
 prefer:            # 大参数优先顺序（从上到下取第一个可用的）
   - hy4            # 混元 4：当前本组织最大参数可选模型（实测可用）
   - qwen4          # 千问 4：等平台放进可选列表后，从 unavailable 移除即自动生效
@@ -61,6 +93,7 @@ fallback: platform_default   # 只允许这个值：不写 model，走平台默�
 override_env: NPC_MODEL_OVERRIDE
 history:                     # 变更留痕，换模型时写原因
   - "2026-11-14 v0.1.0 首次落地：hy4 为大参数首选，兜底走平台默认"
+  - "2026-11-14 v0.2.0 分层：只有 架构·总师 吃大模型，其余走 deepseek-v4.1-flash"
 ```
 
 ## 四、换模型的正确顺序
@@ -73,9 +106,10 @@ history:                     # 变更留痕，换模型时写原因
 
 然后：
 
-- **可用** → 加到 `prefer` 最前；
-- **不可用** → 加到 `unavailable`；
-- 两者都只改 `.cnb/npc-models.yml`，`.cnb.yml` 一个字都不动。
+- 想让更多角色吃大模型 → 把它加进 `big_model_roles`；
+- 换个更大的首选 → 改 `prefer` 最前；
+- 不可用 → 加到 `unavailable`（或从 `big_model_roles` / `default_model` 挪开）；
+- 三者都只改 `.cnb/npc-models.yml`，`.cnb.yml` 一个字都不动。
 
 临时试某个模型（不改仓库）：流水线 `env` 里设 `NPC_MODEL_OVERRIDE=<模型ID>`。
 
@@ -99,12 +133,12 @@ history:                     # 变更留痕，换模型时写原因
 .npc_task: &npc_task
   name: architect npc
   stages:
-    - name: resolve npc model
+    - name: resolve npc model          # 角色闸门 + 模型选择（确定性代码）
       script: bash scripts/npc-model.sh resolve
       exports:
         npc_model: NPC_MODEL
         npc_use_default: NPC_USE_DEFAULT
-    - name: npc go                     # 首选：命中大参数模型
+    - name: npc go                     # 首选：架构师=大参数 / 其余=默认档
       if: |
         [ "${NPC_USE_DEFAULT:-0}" != "1" ]
       type: npc:go
@@ -128,6 +162,11 @@ history:                     # 变更留痕，换模型时写原因
         role: "架构·秘书"              # 不写 model，走平台默认
 ```
 
+**为什么分层放在解析层而不是 `.cnb.yml`**：模型判断是确定性逻辑，塞进 YAML 就会变成
+一堆 `if` 拼字符串（也测不了）。现在 `.cnb.yml` 只做两件事——拿到 `NPC_MODEL` 就写、
+拿到空就走平台默认；角色闸门、黑名单顺延、兜底判定全在 `local-agent/npc_model/` 里，
+单测直接打。
+
 **为什么要有 `failStages` 一层**：`prefer` 命中的模型可能"配置里看着可用、组织那边已经撤了"。
 实测确认 `failStages` 里再跑一跳不写 `model` 的 `npc:go`，卡片照常打出去 ——
 这就是"一直可以通"的硬保证。（实测日志：首选 `npc go` error → `npc model diagnose`
@@ -141,7 +180,8 @@ history:                     # 变更留痕，换模型时写原因
 
 | 场景 | 首选 stage | fallback stage | 实际生效模型 |
 |---|---|---|---|
-| 正常（prefer 命中 hy4） | success | 未触发 | `model=hy4`（不是 flash ✅） |
+| 架构·总师触发，prefer 命中 hy4 | success | 未触发 | `model=hy4`（不是 flash ✅） |
+| 其余角色触发 | success | 未触发 | `model=deepseek-v4.1-flash`（默认档）|
 | 首选被组织拒（override 成假模型） | error | success | `model=deepseek-v4.1-flash`（兜底）|
 
 两条都用真流水线跑过，`Master[agent] model=<id>` 日志逐条核实。
@@ -149,8 +189,9 @@ history:                     # 变更留痕，换模型时写原因
 ## 六、CLI
 
 ```bash
-bash scripts/npc-model.sh info       # 人可读策略快照（当前会选谁、为什么）
-bash scripts/npc-model.sh resolve    # 流水线用：导出 NPC_MODEL / NPC_USE_DEFAULT
+bash scripts/npc-model.sh info       # 人可读策略快照（闸门/默认档/当前会选谁、为什么）
+bash scripts/npc-model.sh resolve    # 流水线用：读 CNB_NPC_NAME 判定角色后导出 NPC_MODEL
+bash scripts/npc-model.sh resolve --role '架构·总师'   # 手动指定角色（人工试跑/排查）
 bash scripts/npc-model.sh resolve --json
 bash scripts/npc-model.sh learn --log-file /path/to/log   # 从失败日志认模型
 NPC_MODEL_OVERRIDE=hy4 bash scripts/npc-model.sh resolve  # 临时覆盖
@@ -164,3 +205,5 @@ NPC_MODEL_OVERRIDE=hy4 bash scripts/npc-model.sh resolve  # 临时覆盖
 | `prefer` 第一个总是命中，后面候选成摆设 | 候选顺序即优先级，平台更新时把新大模型提到最前；黑名单保证不会反复撞墙 |
 | 兜底永远命中当默认小模型，没人发现首选坏了 | 首选 error 会进 `failStages` 的 `npc model diagnose` 日志，`learn` 直接给整改建议；pipeline 状态仍 success 但日志有据可查 |
 | 写死模型 ID 的诱惑 | 信号灯第 8 组断言 `.cnb.yml` 里没有任何生效的 `model: <具体ID>` |
+| 分层被偷偷抹平（又有角色蹭大模型） | `role_config` 用例断言 `big_model_roles` **只有架构·总师**、默认档就是 `deepseek-v4.1-flash`；多一个即红灯 |
+| 角色改名导致闸门静默失效 | 角色名前缀归一（`总师` ≡ `架构·总师`）；解析不出角色按非架构师处理，只影响性能不影响正确性 |
