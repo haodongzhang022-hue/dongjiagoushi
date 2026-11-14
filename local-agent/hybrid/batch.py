@@ -193,16 +193,32 @@ class CloudBatch(object):
         }
 
     def _create_issue(self, title, body):
-        # 唯一标题契约闸门（Issue #343）：批量提交也不许自由文本当标题
+        # 唯一标题契约闸门（Issue #343）：批量提交也不许自由文本当标题。
+        # 走 `expertise.issue_source` 读**真实存量**（不是传空清单）——传空等于告诉
+        # 闸门「仓库里没有任何 Issue」，reuse 分支永远进不去，去重形同虚设。
+        gated = None
         try:
             import sys as _sys
             _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             from expertise import issue_contract as _ic
-            gated = _ic.guard_create(title, [], module="local-agent",
-                                     issue_type="CHORE", seed=title)
+            from expertise import issue_source as _src
+            snap = _src.existing(self.repo)
+            gated = _ic.guard_create(title, snap.get("items") or [],
+                                     module="local-agent", issue_type="CHORE", seed=title)
+        except Exception:  # noqa: BLE001  契约不可用不阻断，显式降级（不假装守约）
+            gated = None
+        if gated is not None:
+            action = gated.get("action")
+            if action == "reject":
+                # 无法契约化 → 中止提交，绝不静默回落垃圾原标题
+                return {"error": "标题无法契约化，已中止提交：" + str(gated.get("reason") or ""),
+                        "gate": gated}
+            if action == "reuse":
+                return {"number": gated.get("reuse_number"), "reused": True,
+                        "title": gated.get("title"), "gate": gated,
+                        "url": "%s/%s/-/issues/%s" % (API_BASE, self.repo,
+                                                      gated.get("reuse_number"))}
             title = gated.get("title") or title
-        except Exception:  # noqa: BLE001  契约不可用不阻断，显式降级
-            pass
         url = "%s/%s/-/issues" % (API_BASE, self.repo)
         payload = json.dumps({"title": title, "body": body}, ensure_ascii=False)
         import urllib.request
@@ -211,6 +227,11 @@ class CloudBatch(object):
         try:
             with urllib.request.urlopen(req, timeout=20) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+                try:      # 回填存量：同批后续提交也能去重
+                    from expertise import issue_source as _src
+                    _src.remember(self.repo, data.get("number"), data.get("title"))
+                except Exception:  # noqa: BLE001
+                    pass
                 return {"number": data.get("number"), "state": data.get("state"),
                         "title": data.get("title"), "url": "%s/%s/-/issues/%s" % (API_BASE, self.repo, data.get("number"))}
         except Exception as e:  # noqa

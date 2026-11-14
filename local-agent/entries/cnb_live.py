@@ -101,24 +101,28 @@ def _run_cnb(args, timeout=60):
 # 一.5 建 Issue 前的唯一标题契约闸门（Issue #343 · 续接线）
 # ---------------------------------------------------------------------------
 def _gate_title(repo, title):
-    """把「想用的标题」过一遍唯一标题契约；契约不可用则原样放行（显式降级）。"""
+    """把「想用的标题」过一遍唯一标题契约；契约不可用则原样放行（显式降级）。
+
+    存量读法**不再本地自写一份**：走 `expertise.issue_source`（唯一实现）。
+    第一版这里用 `--state all`（非法值，实测 400）且把错误响应当清单解析 → 存量恒空
+    → 同 key 复用一次也不会发生，闸门形同虚设。
+    """
     try:
         from expertise import issue_contract as _ic
+        from expertise import issue_source as _src
     except Exception:  # noqa: BLE001
-        return {"action": "create", "title": title,
+        return {"action": "create", "title": title, "derived": False,
+                "existing_ok": False,
                 "reason": "契约模块不可用，降级为原样创建"}
-    existing = []
-    try:
-        res = _run_cnb(["issues", "list-issues", "--repo", repo,
-                        "--state", "all", "--page-size", "100"])
-        raw = res.get("raw", "")
-        import re as _re
-        for m in _re.finditer(r'number:\s*"?([0-9]+)"?[\s\S]{0,200}?title:\s*"?([^\n"]+)"?', raw):
-            existing.append({"number": m.group(1), "title": m.group(2).strip()})
-    except Exception:  # noqa: BLE001
-        existing = []
-    return _ic.guard_create(title, existing, module="platform-adapter",
-                            issue_type="CHORE", seed=title)
+    snap = _src.existing(repo) if repo else {"ok": False, "items": [],
+                                             "error": "未给 repo"}
+    gated = _ic.guard_create(title, snap.get("items") or [], module="platform-adapter",
+                             issue_type="CHORE", seed=title)
+    gated["existing_ok"] = bool(snap.get("ok"))
+    if not snap.get("ok"):
+        gated["reason"] = (str(gated.get("reason") or "")
+                           + "；存量读取失败，幂等降级：" + str(snap.get("error") or ""))
+    return gated
 
 
 # ---------------------------------------------------------------------------
@@ -131,11 +135,19 @@ def send(handle, repo=None, create_issue=True):
     """
     repo = repo or _detect_repo()
     req = handle.get("req") or "云开发请求"
-    title = (req.strip().splitlines()[0])[:60] or "云开发请求"
+    _lines = [ln for ln in str(req).splitlines() if ln.strip()]
+    title = (_lines[0].strip()[:60] if _lines else "") or "云开发请求"
     # 唯一标题契约闸门（Issue #343）：bridge 每次云开发请求都建锚点 Issue，
     # 标题直接取测试字符串是「同一天又长出三条测试流 Issue」的源头。
     # 契约化后：同诉求 → 同 key → 复用既有锚点，不再无限长垃圾。
     gated = _gate_title(repo, title)
+    if gated.get("action") == "reject":
+        # 无法契约化 = 不建（垃圾不进仓库），并如实返回原因，不静默回落原标题
+        return {"ok": False, "error": "标题无法契约化，未建锚点 Issue：" +
+                                      str(gated.get("reason") or ""),
+                "cloud_ref": {"issue_id": "", "sent_via": handle.get("entry"),
+                              "gate": gated},
+                "status": "pending"}
     existing = handle.get("issue_id")
     if not existing and gated.get("action") == "reuse" and gated.get("reuse_number"):
         existing = gated["reuse_number"]      # 同 key 已有锚点 → 复用，不新建
@@ -162,6 +174,12 @@ def send(handle, repo=None, create_issue=True):
         if ok:
             # cnb 输出为 YAML（data: 缩进），尽力解析 number
             issue_id = _extract_issue_id(res, text=res.get("raw", ""))
+            if issue_id:
+                try:                      # 回填存量：同进程后续 request 也能去重
+                    from expertise import issue_source as _src
+                    _src.remember(repo, issue_id, title)
+                except Exception:  # noqa: BLE001
+                    pass
     if not ok:
         return {"ok": False,
                 "error": res.get("error") or res.get("raw") or "cnb 建 Issue 失败",

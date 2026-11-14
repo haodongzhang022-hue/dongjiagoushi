@@ -386,9 +386,9 @@ EOF
 then ok "E8 Issue 唯一标题契约（幂等派发/重复收并/低信号拦截/正文契约）"; else bad "E8 Issue 契约失败"; fi
 
 echo ""
-echo "===== [expertise] E9. 契约接线：派发器建 Issue 前必须过闸门 ====="
+echo "===== [expertise] E9. 契约接线：三处建 Issue 出口必须过闸门（且不许自写读法）====="
 if "$PY" - <<'EOF'
-import sys; sys.path.insert(0, '.')
+import sys, inspect; sys.path.insert(0, '.')
 from expertise import issue_contract as ic
 
 # ① 不合格标题被契约化（不丢信息：原文保留在 original 里）
@@ -404,6 +404,9 @@ assert again["action"] == "reuse" and again["reuse_number"] == "42", again
 # 已关闭的也 reuse（历史遗留可指回），不新开
 closed = ic.guard_create("开发登录模块", [{"number": 7, "title": g["title"], "state": "closed"}])
 assert closed["action"] == "reuse" and closed["reuse_number"] == "7", closed
+# 存量脏标题（合不上契约）同名也要挡：这正是"同一天长出三条一样 Issue"的成因
+dirty = ic.guard_create("开发登录模块", [{"number": 353, "title": "开发登录模块"}])
+assert dirty["action"] == "reuse" and dirty["reuse_number"] == "353", dirty
 
 # ③ derive=False 时直接拒绝（不自动造标题）
 r = ic.guard_create("评审登录模块", [], derive=False)
@@ -414,18 +417,220 @@ ok_g = ic.guard_create("FEAT:expertise · pareto-frontier", [])
 assert ok_g["action"] == "create" and ok_g["derived"] is False
 assert ok_g["title"] == "FEAT:expertise · pareto-frontier"
 
-# ⑤ 真实接线证据：派发器/传输通道/批量提交都必须 import 到契约闸门
+# ⑤ 三处建 Issue 出口都必须真有闸门调用（函数写好了没人调 = 今天这个情况）
 import inspect
 sys.path.insert(0, 'local-agent')
 import dispatch_engine
 assert hasattr(dispatch_engine, "guard_issue_title"), "dispatch_engine 未挂契约闸门"
-src = inspect.getsource(dispatch_engine._create_issue)
-assert "guard_issue_title" in src, "_create_issue 绕过闸门 = 契约不生效"
+assert "guard_issue_title" in inspect.getsource(dispatch_engine._create_issue), \
+    "_create_issue 绕过闸门 = 契约不生效"
 from entries import cnb_live
 assert "_gate_title" in inspect.getsource(cnb_live.send), "bridge 锚点 Issue 未过闸门"
-print("  契约化/幂等/拒绝/放行 + 三处真接线 全部通过")
+from hybrid import batch as _batch
+assert "guard_create" in inspect.getsource(_batch.CloudBatch._create_issue), \
+    "hybrid.batch 建 Issue 绕过闸门（文案说三处，只断言两处 = 假信号灯）"
+
+# ⑥ 三处都**不再自写存量读法**：非法 issues `--state all` / 自写正则解析 一律不许出现
+#    （注意 `pulls list-pulls` 的 `--state all` 是合法值，故只核 issues 相关函数）
+from entries import cnb_live as _live
+targets = [("dispatch_engine", sys.modules["dispatch_engine"]),
+           ("cnb_live._gate_title", _live._gate_title),
+           ("cnb_live.send", _live.send),
+           ("hybrid.batch", _batch.CloudBatch._create_issue)]
+for mod, obj in targets:
+    src = inspect.getsource(obj)
+    assert '"--state", "all"' not in src and "'--state', 'all'" not in src, \
+        f"{mod} 仍在给 issues 传非法 --state all（实测 400 → 存量恒空）"
+    assert "issue_source" in src, \
+        f"{mod} 未走 issue_source 唯一实现（存量读法不许各写一份）"
+print("  契约化/幂等/拒绝/放行 + 三处真接线 + 单一存量读法 全部通过")
 EOF
-then ok "E9 契约接线（低信号契约化 · 同 key 复用 · 派发器不再绕过契约）"; else bad "E9 契约接线失败"; fi
+then ok "E9 契约接线（低信号契约化 · 同 key/同名复用 · 三处出口真接线 · 无非法 --state all）"; else bad "E9 契约接线失败"; fi
+
+echo ""
+echo "===== [expertise] E10. 闸门两端判定为真（存量读得到 · 不塌缩 · 不吞任务）====="
+if "$PY" - <<'EOF'
+import sys; sys.path.insert(0, '.')
+from expertise import issue_contract as ic
+from expertise import issue_source as src
+
+REPO = "acme/demo"
+
+# --- ① 全量语义 = 分别拉 open + closed 再合并（`all` 是非法值，实测 400；
+#        而"不带 --state"实测只返回 open，closed 的 218 条看不见）---
+seen = []
+def fake_ok(argv, timeout=180):
+    seen.append(list(argv))
+    st = argv[argv.index("--state") + 1] if "--state" in argv else "none"
+    num = "42" if st == "open" else "41"
+    return 0, ('status: 200\npage: 1\npageSize: 100\ntotal: 1\ntotalPages: 1\n'
+               'data[1]:\n  - number: "%s"\n    state: %s\n    title: "开发登录模块"\n'
+               % (num, st)), ""
+snap = src.fetch_issues(REPO, runner=fake_ok)
+assert snap["ok"] and sorted(i["number"] for i in snap["items"]) == ["41", "42"], snap
+states_used = [a[a.index("--state") + 1] for a in seen if "--state" in a]
+assert set(states_used) == {"open", "closed"}, f"全量必须两趟拉，实际 {states_used}"
+assert "all" not in states_used, "不得再传 --state all（非法值实测 400）"
+
+# --- ② 读失败不许冒充「仓库里没有 Issue」，且不许污染缓存 ---
+src.reset_cache()
+calls = {"n": 0}
+def fake_400(argv, timeout=180):
+    calls["n"] += 1
+    return 3, "status: 400\nerrcode: 400\nerrmsg: bad request", ""
+bad = src.existing(REPO, runner=fake_400)
+assert bad["ok"] is False and bad["items"] == [] and "失败" in bad["error"], bad
+before = calls["n"]
+assert before >= 1, "根本没真调 CLI 就读失败，说明在读缓存"
+# 缓存未被污染：下一次重探会真的再调（失败不写缓存）
+again = src.existing(REPO, runner=fake_ok)
+assert again["ok"] is True and again["items"], "一次 400 被永久缓存 → 幂等再也不恢复"
+third = src.existing(REPO, runner=fake_400)
+assert third["ok"] is True and third["items"], "成功读到非空后应命中缓存，不再受 400 影响"
+# rc=0 但响应体是 errcode 也算失败（别拿错误响应当清单解析）
+def fake_body_err(argv, timeout=180):
+    return 0, "status: 500\nerrcode: 500\nerrmsg: internal error", ""
+assert src.fetch_issues(REPO, runner=fake_body_err)["ok"] is False
+
+# --- ③ 半途失败整体失败（不返回半份清单冒充全量）---
+src.reset_cache()
+def fake_second_page_fail(argv, timeout=180):
+    if "--page" in argv and argv[argv.index("--page") + 1] == "2":
+        return 3, "boom", ""
+    return 0, ('totalPages: 3\ndata[1]:\n  - number: "1"\n    title: "x"\n'), ""
+half = src.fetch_issues(REPO, runner=fake_second_page_fail)
+assert half["ok"] is False and half["items"] == [], half
+# closed 那趟失败也是整体失败（不许只交半份存量冒充全量）
+def fake_closed_fail(argv, timeout=180):
+    if "--state" in argv and argv[argv.index("--state") + 1] == "closed":
+        return 3, "boom", ""
+    return 0, ('totalPages: 1\ndata[1]:\n  - number: "1"\n    title: "x"\n'), ""
+half2 = src.fetch_issues(REPO, runner=fake_closed_fail)
+assert half2["ok"] is False and half2["items"] == [], half2
+
+# --- ④ 新建回填 → 同批第 2 条起就能 reuse（否则同批去重不成立）---
+src.reset_cache()
+src.remember(REPO, "77", "开发登录模块")
+after = src.existing(REPO, runner=lambda a, timeout=180: (0, 'totalPages: 1\ndata[0]:\n', ""))
+assert any(i["number"] == "77" for i in after["items"]), "新建未回填 → 同批内重复建"
+g = ic.guard_create("开发登录模块", after["items"])
+assert g["action"] == "reuse" and g["reuse_number"] == "77", g
+
+# --- ⑤ 唯一键不塌缩：不同诉求必须是不同 key（否则两件事被静默并成一件）---
+pairs = [("API 接口改造", "登录模块 API"), ("开发登录模块 API", "CLI控制台发起二版"),
+         ("fix 登录", "fix 支付"), ("PR 修复登录崩溃", "PR 修复支付超时"),
+         # 这两条只能靠"覆盖率"判据挡（残片是合法词、不在关键字黑名单里）：
+         # 光靠黑名单会漏，必须真算 ascii 覆盖了原文多少有效字符
+         ("开发登录模块 v2beta", "结算模块 v2beta")]
+for a, b in pairs:
+    ka = ic.issue_key(ic.guard_create(a, [])["title"])
+    kb = ic.issue_key(ic.guard_create(b, [])["title"])
+    assert ka != kb, f"{a!r} 与 {b!r} 塌成同一个 key {ka!r} → 第二件事会被并进第一件"
+# 同一诉求必须稳定（幂等的根）
+assert ic.guard_create("API 接口改造", [])["title"] == ic.guard_create("API 接口改造", [])["title"]
+# 内容全是 ascii 的照常可读，不被摘要化
+assert ic.slugify_key("refactor login module") == "refactor-login-module"
+# 有中文被丢弃时：可读残片 + 内容摘要后缀（可读性让位唯一性，绝不吞任务）
+k1 = ic.slugify_key("update README 说明文档")
+k2 = ic.slugify_key("update README 使用手册")
+assert k1.startswith("update-readme-") and k2.startswith("update-readme-"), (k1, k2)
+assert k1 != k2, "换一个字就是另一件事，不能共用一个键"
+assert ic.issue_key(ic.build_title("CHORE", "local-agent", k1)), "带后缀的键仍须合法"
+
+# --- ⑥ derive 后必须复核：占位词当唯一键不得放行 ---
+for bad_title in ("p0", "tmp", "todo"):
+    gg = ic.guard_create(bad_title, [])
+    assert gg["action"] in ("create", "reject"), gg
+    if gg["action"] == "create":
+        low, why = ic.is_low_signal(gg["title"])
+        assert low is False, f"{bad_title!r} 契约化后仍是低信号却被放行：{gg}"
+# 空标题无法摘要 → 明确拒绝，不造垃圾
+assert ic.guard_create("", [])["action"] == "reject"
+assert ic.guard_create("   ", [])["action"] == "reject"
+
+# --- ⑦ 三处出口的 action 分支真判（reject 不回落原标题 / reuse 不建新）---
+import inspect
+import dispatch_engine
+d_src = inspect.getsource(dispatch_engine._create_issue)
+assert 'action == "reject"' in d_src and 'action == "reuse"' in d_src, \
+    "dispatch_engine 未按 action 分支处理（reject/reuse 会被当成 create）"
+from entries import cnb_live
+c_src = inspect.getsource(cnb_live.send)
+assert '"reject"' in c_src, "cnb_live.send 未处理 reject（会静默回落原标题建垃圾）"
+from hybrid import batch as _batch
+b_src = inspect.getsource(_batch.CloudBatch._create_issue)
+assert '"reject"' in b_src and '"reuse"' in b_src, \
+    "hybrid.batch 未按 action 分支处理（空清单 + 回落原标题）"
+
+# --- ⑧ 真行为（不是看源码字符串）：派发器同批去重 / 不吞任务 / 拒绝不建 ---
+src.reset_cache()
+created_titles = []
+class _Res(object):
+    def __init__(self, out, rc=0):
+        self.stdout, self.stderr, self.returncode = out, "", rc
+
+def _fake_run(cmd, **kw):
+    if "create-issue" in cmd:
+        n = 500 + len(created_titles)
+        title = cmd[cmd.index("--title") + 1]
+        created_titles.append(title)
+        return _Res('data:\n  number: "%s"\n' % n)
+    if "list-issues" in cmd:
+        bucket = src._CREATED.get("acme/d", [])
+        if not bucket:
+            return _Res("totalPages: 1\ndata[0]:\n")
+        lines = ["totalPages: 1", "data[%d]:" % len(bucket)]
+        for it in bucket:
+            lines += ['  - number: "%s"' % it["number"], "    title: %s" % it["title"]]
+        return _Res("\n".join(lines))
+    return _Res("")
+
+dispatch_engine.subprocess.run = _fake_run     # 只替换本进程内的调用，不动真实 CLI
+ids = [dispatch_engine._create_issue("acme/d", "开发登录模块", "b") for _ in range(3)]
+assert len(ids) == 3 and ids[0] == ids[1] == ids[2], f"同批同名应只建一条，实际 {ids}"
+assert len(created_titles) == 1, f"同批重复建了 {len(created_titles)} 条：{created_titles}"
+# 不同诉求不许被并成一件（第二件事必须真的建出来）
+other = [dispatch_engine._create_issue("acme/d", t, "b")
+         for t in ("API 接口改造", "登录模块 API")]
+assert len(set(other)) == 2, f"两件不同的事被并成一件：{other}"
+assert len(created_titles) == 3, created_titles
+# 拒绝路径不建、不回落原标题
+assert dispatch_engine._create_issue("acme/d", "", "b") is None
+assert len(created_titles) == 3, "空标题被建成垃圾 Issue"
+
+# --- ⑨ bridge：同诉求复用锚点，不新建第二条 ---
+from entries import cnb_live as _live
+src.reset_cache()
+live_calls = []
+def _fake_cnb(args, timeout=60):
+    live_calls.append(list(args))
+    if "list-issues" in args:
+        bucket = src._CREATED.get("acme/d", [])
+        if not bucket:
+            return {"ok": True, "raw": "totalPages: 1\ndata[0]:\n"}
+        lines = ["totalPages: 1", "data[%d]:" % len(bucket)]
+        for it in bucket:
+            lines += ['  - number: "%s"' % it["number"], "    title: %s" % it["title"]]
+        return {"ok": True, "raw": "\n".join(lines)}
+    if "create-issue" in args:
+        return {"ok": True, "raw": 'data:\n  number: "900"\n'}
+    return {"ok": True, "raw": ""}
+_real_run_cnb = _live._run_cnb
+_live._run_cnb = _fake_cnb
+try:
+    h = {"req": "开发登录模块", "entry": "local"}
+    r1 = _live.send(h, repo="acme/d")
+    r2 = _live.send(h, repo="acme/d")
+    assert r1["cloud_ref"]["issue_id"] == "900", r1
+    assert r2["cloud_ref"]["issue_id"] == "900", r2
+    assert sum(1 for c in live_calls if "create-issue" in c) == 1, \
+        "同诉求第二次又新建了锚点 Issue（幂等没生效）"
+finally:
+    _live._run_cnb = _real_run_cnb
+
+print("  存量读取/失败不缓存/同批回填/唯一键不塌缩/derive复核/action分支/真行为去重 全部通过")
+EOF
+then ok "E10 闸门两端判定为真（读得到存量 · 失败不缓存 · 不塌缩不吞任务 · 按 action 分支）"; else bad "E10 闸门行为判定失败"; fi
 
 echo ""
 echo "──────────────────────────────────────────────"
