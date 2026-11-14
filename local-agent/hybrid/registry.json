@@ -736,6 +736,20 @@
       "cpu_cost_est": 1.2,
       "time_est": 4.0,
       "kind": "cpu-dense"
+    },
+    "local-agent/tests/test_expertise.sh": {
+      "name": "test_expertise",
+      "covers": [
+        "local-agent/expertise/",
+        "local-agent/roles/architect.py",
+        "local-agent/roles/base.py",
+        "scripts/issue-contract.py",
+        "data/ai-frontier.yaml"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 2.0,
+      "time_est": 12.0,
+      "kind": "cpu-dense"
     }
   }
 }
