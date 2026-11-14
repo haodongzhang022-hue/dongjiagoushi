@@ -120,6 +120,9 @@
 | 我要把一个需求拆给多个 agent 干活 | 架构·经理 `manager_execute(plan)`（计划→真激活→督促→监督）|
 | 我怎么确认"真有人干了"而不是模拟器绿了 | `manager.work.credential_of()` → 只认 `role`/`external`，`simulated` 判 fake |
 | 经理只出表格、不真建 Issue / 假装分工 | ACTIVATE 闸门 `ManagerEngine.activate()`（建不出 Issue = blocked_no_issue）|
+| 经理说"平台激活 N 条"，平台却没 Issue | 激活口径三档 `platform_active`/`local_only`/`blocked_no_issue`（真写平台要 `live=True`）|
+| 经理在云端永远不碰平台 | 仓库探测认平台真实变量（`CNB_GROUP_SLUG`+`CNB_REPO_NAME`），`repo=None`=探测 |
+| 引擎单测全绿但流水线里的角色不及格 | `orchestrator` 复用角色自身引擎 + 走 `carry`（测位置比测次数重要）|
 | 经理给了计划还纠结要不要做 | `resolve_choice()`：单路必然 EXECUTE，没有"纠结"这个出口 |
 | 没人接单、活掉地上了 | 经理 `manager_push()` → 调配小组长 `LeadEngine.drive()` 带队落地 |
 | 小组长只会拆表不会带队 | `LeadEngine` 派开发→客观验证→整合交付，一个没过不放行 |

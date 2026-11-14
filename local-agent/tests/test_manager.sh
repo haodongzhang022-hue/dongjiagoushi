@@ -1076,4 +1076,156 @@ print("  ✅ 单条借人记录可按 id 反查（返回值 = 库里实际写入
 print(f"      borrow_id={bid}")
 EOF
 
+echo "===== [manager] 38. 平台激活不冒充：没写平台就不许说「平台激活」 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr38.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine
+
+# 病灶（五轮）：`platform_active = bool(issue_no) or self.dry_run` —— dry_run 下恒 True，
+# 于是"一条 Issue 都没建"被算成"平台激活"，summary 还输出「平台激活 N 条」。
+# 这不是没功能，是**口径在给自己作证**，跟 #342 的 work_started 同一个病。
+m = ManagerEngine(dry_run=True)          # repo 探测得到，但没开 live
+act = m.activate([{"task_key": "开发A", "title": "开发A", "role": "架构·开发",
+                   "domain": "自检", "detail": "x"}])
+rec = act["activated"][0]
+assert rec["platform_active"] is False, f"没建 Issue 就不许标 platform_active：{rec}"
+assert rec["state"] == "local_only", rec
+assert act["platform_activated"] == 0, act
+assert act["local_only"] == 1, act
+assert "平台真建 Issue 0/1" in m.execute_plan(
+    [{"task_key": "开发B", "title": "开发B", "role": "架构·开发",
+      "domain": "自检", "detail": "x"}], push=False, supervise=False)["summary"]
+
+# 真建成 → platform_active 才 True（判据只认 issue 编号）
+class FakeRun:
+    returncode = 0
+    stdout = 'status: 201' + chr(10) + 'data:' + chr(10) + '  number: "9001"'
+    stderr = ""
+import dispatch_engine as D
+orig = D.subprocess.run
+D.subprocess.run = lambda *a, **k: FakeRun()
+try:
+    m2 = ManagerEngine(repo="org/repo", dry_run=False)
+    act2 = m2.activate([{"task_key": "回归", "title": "回归任务（平台真建）",
+                         "role": "架构·开发", "domain": "自检", "detail": "x"}])
+    assert act2["platform_activated"] == 1, act2
+    assert act2["activated"][0]["issue"] == 9001
+    assert act2["activated"][0]["state"] == "activated"
+finally:
+    D.subprocess.run = orig
+print("  ✅ 没碰平台→local_only（不算激活）；真建成 Issue→才算 platform_active")
+EOF
+
+echo "===== [manager] 39. 仓库探测不假设变量名：平台注入啥就认啥 ====="
+$PY - <<'EOF'
+import os, tempfile, importlib
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr39.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+
+# 病灶（五轮）：上一版读 `os.environ["CNB_REPO"]`，可 CNB 云端实际注入的是
+# `CNB_GROUP_SLUG` + `CNB_REPO_NAME`（没有 CNB_REPO）→ repo 恒空 → 永远 dry_run →
+# **经理在任何真实环境里都不会去建 Issue**，而它还会报「平台激活 N 条」。
+import manager.engine as E
+from manager import ManagerEngine
+from handle import resolver as _hr
+
+# 断掉 git remote 兜底，单独验证"平台注入变量"这一条源（否则本地仓库会把结论盖住）
+_orig_remote = _hr._git_remote_org_repo
+_hr._git_remote_org_repo = lambda: (None, None)
+
+saved = {k: os.environ.get(k) for k in
+         ("CNB_REPO", "CNB_GROUP_SLUG", "CNB_REPO_NAME",
+          "CNB_REPO_SLUG", "CNB_ROOT_SLUG", "GIT_ORG", "GIT_REPO")}
+for k in saved:
+    os.environ.pop(k, None)
+try:
+    # ① 平台实际注入形态（GROUP_SLUG + REPO_NAME）必须被认出来
+    os.environ["CNB_GROUP_SLUG"] = "acme"
+    os.environ["CNB_REPO_NAME"] = "svc"
+    assert E._detect_repo() == "acme/svc", E._detect_repo()
+    # ② 通用别名 CNB_REPO 也认（兼容其他宿主）
+    os.environ.pop("CNB_GROUP_SLUG"); os.environ.pop("CNB_REPO_NAME")
+    os.environ["CNB_REPO"] = "x/y"
+    assert E._detect_repo() == "x/y", E._detect_repo()
+    # ③ 显式 repo="" 表示"确实没有仓库"，不去探测（本地/离线场景）
+    os.environ.pop("CNB_REPO")
+    assert ManagerEngine(repo="").repo == ""
+finally:
+    _hr._git_remote_org_repo = _orig_remote
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+# ④ 探测到仓库也不等于可以乱写平台：真建 Issue 是不可逆副作用，必须显式开 live
+assert ManagerEngine().dry_run is True, "默认不许往平台刷任务 Issue"
+assert ManagerEngine(live=True).live_requested is True
+print("  ✅ 认平台真实注入变量（GROUP_SLUG+REPO_NAME）；repo='' 才是没有仓库；live 需显式开")
+EOF
+
+echo "===== [manager] 40. 流水线经理节点真接线：带 repo + 带承接方 + 走承上启下 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr40.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+import orchestrator
+
+# 病灶（五轮）：`orchestrator._run_role_engine` 现造 `ManagerEngine(devs_per_team=...)`——
+# ① 没 repo → dry_run → 平台一条都没建，却输出「平台激活 N 条」；
+# ② workers=None → 启下「调人/借人/加派」全是空动作（九轮前的老病复发）；
+# ③ 走 execute_plan 而非 carry → 承上（裁不可执行）与反馈（多轮）根本没跑。
+from roles import get_role
+role = get_role("架构·经理")
+out = orchestrator._run_role_engine(role, "1. 开发登录模块\n2. 评审登录模块", 
+                                   {"id": "plan", "role": "架构·经理"})
+eng = role.manager_engine
+assert eng.workers is not None and eng.workers.roles(), "流水线里的经理必须带承接方"
+assert "承上启下" in out, f"必须走承上启下入口（carry），实际输出：{out}"
+assert "平台真建 Issue" in out or "真推进" in out, out
+assert "平台激活" not in out, f"旧措辞（会把本地登记说成平台激活）不许再出现：{out}"
+
+# 承接方真接线：启下手段能拿到真凭据（不是动作名）
+from manager import ManagerEngine
+m = ManagerEngine(dry_run=True, workers=role.manager_workers())
+res = m.carry("1. 开发登录模块\n2. 评审登录模块")
+assert res["escalated"] is False and all(v["verdict"] == "real" for v in res["verdicts"])
+print("  ✅ 流水线经理节点：带 repo + 带承接方 + 走 carry；输出三档口径不含糊")
+print(f"      {out.splitlines()[0][:70]}…")
+EOF
+
+echo "===== [manager] 41. 真写入要显式开：不许一跑就把任务 Issue 刷进仓库 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr41.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+import manager.engine as E
+
+# 历史教训：收尾轮 activate() 一跑就往仓库刷了八十来个测试 Issue 还开着。
+# 真建 Issue 是**写平台**，不能因为"探测到 repo 了"就顺手放行。
+saved = os.environ.get("CNB_MANAGER_LIVE")
+try:
+    os.environ.pop("CNB_MANAGER_LIVE", None)
+    assert E._live_requested() is False
+    for v in ("1", "true", "YES", "on"):
+        os.environ["CNB_MANAGER_LIVE"] = v
+        assert E._live_requested() is True, v
+    for v in ("0", "false", "", "no"):
+        os.environ["CNB_MANAGER_LIVE"] = v
+        assert E._live_requested() is False, v
+finally:
+    if saved is None:
+        os.environ.pop("CNB_MANAGER_LIVE", None)
+    else:
+        os.environ["CNB_MANAGER_LIVE"] = saved
+
+m = E.ManagerEngine()
+# 没开 live → 即使有 repo + cnb，也 dry_run（不碰平台）
+assert m.dry_run is True
+assert m.status()["live_requested"] is False
+print("  ✅ 默认不写平台；CNB_MANAGER_LIVE=1 / live=True 才真建 Issue（不可逆副作用显式开）")
+EOF
+
 echo "===== [manager] ALL PASS ====="

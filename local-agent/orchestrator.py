@@ -44,15 +44,26 @@ def _run_role_engine(role, req, node):
     name = getattr(role, "name", "") or ""
     try:
         if name == "架构·经理":
-            from manager import ManagerEngine
-            eng = ManagerEngine(
-                devs_per_team=getattr(role, "devs_per_team", 2),
-            )
-            res = eng.execute_plan(req)
-            return (f"[经理引擎] 激活 {res['count']} 条 / 平台激活 "
-                    f"{res.get('platform_activated', 0)} 条 / "
-                    f"blocked_no_issue={res.get('blocked_no_issue', 0)}；"
-                    f"监督结论：{res['summary']}")
+            # 五轮修正（第四处）：上一版这里 `ManagerEngine(devs_per_team=...)` 现造一个
+            # 引擎——没有 repo、没有承接方、也不走承上启下入口，于是：
+            #   ① `repo` 空 → dry_run → 平台一条 Issue 都没建，却输出「平台激活 N 条」；
+            #   ② `workers=None` → 启下「调人/借人/加派」全是空动作（九轮前的老病复发）；
+            #   ③ 走 `execute_plan` 而不是 `carry` → 承上（翻译/裁不可执行）与反馈（多轮）没跑。
+            # 现在直接用**角色自己那个引擎**（带 repo/owner/承接方）+ 承上启下入口。
+            eng = role.manager_engine
+            if getattr(eng, "workers", None) is None:
+                try:
+                    eng.workers = role.manager_workers()
+                except Exception:  # noqa: BLE001 承接方装不上即如实空手，不假装有
+                    eng.workers = None
+            res = eng.carry(req)
+            return (f"[经理引擎] 承上启下：北极星={res['north_star']} / "
+                    f"可执行 {len((res.get('upstream') or {}).get('items', []))} 条"
+                    f"（裁掉 {len((res.get('upstream') or {}).get('dropped', []))} 条）/ "
+                    f"轮次 {len(res['rounds'])} / 真推进 {sum(1 for v in res['verdicts'] if v['verdict'] == 'real')}"
+                    f" / 未落地 {len(res['unresolved'])}"
+                    f"{'（已带证据上交）' if res['escalated'] else ''}；"
+                    f"结论：{res['note']}\n{res['report']['结论']}")
         if name == "架构·小组长":
             from manager import LeadEngine
             eng = LeadEngine(

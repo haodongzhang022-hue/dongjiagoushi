@@ -666,3 +666,110 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 > 这轮的教训：**"试过了"和"记住了"是两件事。**
 > 只试不记，团队就是个失忆的人——每轮都在同一个坑前重新摔一次，
 > 而且每次都觉得自己很努力。
+
+---
+
+## 十二、五轮：口径不许替自己作证 —— 三档分明 + 真接线（Issue #239 五轮）
+
+> 你说「继续，这几个处理了」。上一轮（#376）已经合进 `main`（`7693828`），
+> `test_manager.sh` 37 组在干净 `main` 上全绿。所以这轮不加新功能——
+> **拿前面几轮自己立的尺子，去量"已经合并、已经全绿"的成品。**
+
+量出三处，全都在同一条缝上：**汇报的和发生的，不是一件事。**
+
+### 12.1 报告「平台激活 N 条」，平台一条 Issue 都没有
+
+```python
+"platform_active": bool(issue_no) or self.dry_run,   # ← dry_run 下恒 True
+```
+
+`dry_run` 是"不碰平台"，却在这里被算成"平台激活"。于是实操长这样：
+
+```
+[经理引擎] 激活 2 条 / 平台激活 2 条 / blocked_no_issue=0
+```
+
+跑到仓库里看：**一条 Issue 都没有。**
+
+这和 #342 的 `work_started` 是同一个病——**判据由自己制造，等于自己给自己开合格证**。
+只是这次造的不是"开工"，是"激活"这个词本身。
+
+现在三档分明，谁也别糊：
+
+| 档 | 判据 | 算不算激活 |
+|----|------|-----------|
+| `platform_active` | 平台真建出 Issue 编号 | ✅ 真激活 |
+| `local_only` | 只本地登记（task/agent gid 都在），没写平台 | ❌ 不算（但也不是失败） |
+| `blocked_no_issue` | 该建却没建成（开了 live 却失败） | ❌ 等于没分工 |
+
+summary 随之改成直白说：`平台真建 Issue 0/2 条任务；2 条只本地登记（没碰平台，不算激活）`。
+
+**顺带加闸**：真建 Issue 是不可逆外部副作用（收尾轮一跑就刷了八十来个测试 Issue 还开着）。
+现在默认**不写平台**，必须 `live=True` 或 `CNB_MANAGER_LIVE=1` 显式开。
+
+### 12.2 仓库探测只认一个变量名，于是经理永远不碰平台
+
+```python
+self.repo = repo or os.environ.get("CNB_REPO") or ""   # ← 平台没这个变量
+```
+
+CNB 云端实际注入的是 `CNB_GROUP_SLUG` + `CNB_REPO_NAME`（还有 `CNB_REPO_SLUG`），
+**没有 `CNB_REPO`**。于是 `repo` 恒空串 → `dry_run` 恒 True →
+**经理在任何真实环境里都不会去建 Issue**，同时按上一条继续报"平台激活 N 条"。
+
+两条错叠在一起，效果是：它看起来很忙，实际一步没走出去，而且每一句汇报都在替它作证。
+
+现在 `repo` 语义收紧：
+
+- `repo=None`（默认）= **去探测**：平台注入变量 → git remote；
+  **不取 `detect_current_org_repo()` 的默认约定兜底**——默认值是"假设"，不是"探测到的"，
+  把假设写成探测结果，跟"演练算干活"是同一个病。
+- `repo=""` = 显式声明"没有仓库"（本地/离线）。
+
+### 12.3 引擎及格 ≠ 流水线里那个经理及格
+
+`orchestrator._run_role_engine` 里现造一个引擎：
+
+```python
+eng = ManagerEngine(devs_per_team=...)   # 没 repo、没 workers、不走 carry
+res = eng.execute_plan(req)
+```
+
+三个后果一次全中：
+
+| 缺什么 | 后果 |
+|--------|------|
+| 没 `repo` | 恒 `dry_run` → 平台一条都不建，还输出"平台激活" |
+| `workers=None` | 启下「调人/借人/加派」全是空动作（九轮前的老病复发） |
+| 走 `execute_plan` | 承上（裁不可执行）与反馈（多轮）根本没跑 |
+
+单测全绿，是因为单测**直接调引擎**，绕开了流水线这条路。
+所以「引擎及格」和「流水线里的经理及格」能长期共存——**测的位置比测的次数重要。**
+
+现在复用角色自己的引擎（带 repo/owner/承接方）+ 走 `carry`，输出改成承上启下口径。
+
+### 12.4 验收（`test_manager.sh` 37 → 41 组）
+
+| 组 | 锁什么 |
+|----|--------|
+| 38 | 没写平台 → `local_only` / `platform_activated=0`；summary 说"平台真建 0/N"；真建成才 `activated` |
+| 39 | 认平台真实注入变量（`GROUP_SLUG`+`REPO_NAME`）；`repo=""` 才是没仓库；`live` 需显式开 |
+| 40 | 流水线经理节点：带 repo + 带承接方（27 个在册）+ 走 carry；输出不含旧措辞 |
+| 41 | 真写平台要显式开：`CNB_MANAGER_LIVE` 未开时，有 repo 也不去写 |
+
+功能级证据脚本新增 2 份（均已登记 `modules.map`）：
+
+- `scripts/feature-verify/manager/平台激活不冒充.sh`——判"口径与事实是否一致"；
+- `scripts/feature-verify/manager/经理节点真接线.sh`——判"真实调用链上那个经理是不是同一个"。
+
+回归：`local-agent/` 全量 67 个脚本，除 `test_hybrid_pipeline.sh` / `test_topology_slim.sh`
+（**干净 `main` 上同样红**，既有问题，未顺手改）外 0 红；根 `tests/` 18 个全绿；
+文档一致性 101/101；`feature-verify --check-map` 🟢；`--module manager` **6/6** 绿。
+
+> 这轮的教训：**"跑通了"要先问"跑的是哪儿"。**
+>
+> 直接调引擎能绿，流水线里的那个可能一次都没碰过平台；
+> `platform_active` 能绿，因为它自己写自己；
+> `repo` 探测能绿，因为它读到的是假设的默认值。
+>
+> 一句话——**能自己制造的绿灯，都不算证据。**
