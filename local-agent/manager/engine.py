@@ -112,9 +112,10 @@ NOT_MANAGER = {
 _ACCEPT_EVENTS = ("accepted", "awake_ack")
 _WORK_EVENTS = ("work_started", "delivered")
 _FAKE_RECEIPT = "[接单]"          # 只有梗概、没有后续动作 = 假装
-# 设为 1 的理由：**"开工了、量了一次、距离一点没动"本身就是证据**——
-# `track_progress(current=1, current=1)` 是原地踏步，不是"还没开始"。设成 2
-# 会让最常见的那种停滞（报一次进度就消失）躲过判定。
+# 设为 2 的理由：单点不变不算停滞——**报一次进度就消失**是最常见的形态，
+# 但那一次可能只是"刚开始量"，也可能是 `track_progress(current=1, current=1)`
+# 这种原地踏步；单点分不出是哪种，所以要求连续 2 轮距离纹丝不动才判停滞
+# （宁可晚一轮报，不误伤刚开始推进的任务）。
 _STALL_ROUNDS = 2                 # 连续 2 轮距离纹丝不动 → 判停滞（单点不算）
 MAX_FLOW_ROUNDS = 4               # 承上启下默认调整轮数（超限显式上交，不静默）
 BORROW_MAX_ATTEMPTS = 3           # 单次借人最多试几个候选（借不到就下轮换人，不刷名册）

@@ -794,16 +794,17 @@ def add_borrow(task_key, role, ok, borrow_id="", lane="", handle="", reason="",
                owner="", detail=None):
     """登记一次跨岗借人的**结果**（成功失败都记，失败不记＝下轮重复踩坑）。"""
     from gid import gen
+    bid = borrow_id or gen("borrow")
     db.execute(
         """
         INSERT INTO borrow_ledger
             (borrow_id, task_key, role, ok, lane, handle, reason, owner, detail, ts)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (borrow_id or gen("borrow"), task_key, role, 1 if ok else 0, lane,
+        (bid, task_key, role, 1 if ok else 0, lane,
          handle, reason, owner, _dumps(detail or {}), db.now_iso()),
     )
-    return borrow_id or ""
+    return bid
 
 
 def list_borrows(task_key=None, role=None, limit=200):

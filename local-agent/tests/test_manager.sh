@@ -716,7 +716,8 @@ m2 = ManagerEngine(dry_run=True, workers=reg)
 r2 = m2.execute_plan("1. 实现报表模块")
 v2 = r2["supervise"]["verdicts"][0]
 assert v2["credential"] in ("role", "external"), v2
-assert v2["event"] if False else True
+assert "progressed" in v2["events"] or "delivered" in v2["events"], \
+    f"判 real 必须落在成果上（progressed/delivered），实际 {v2['events']}"
 assert v2["verdict"] == "real", f"真上工应判 real，实际 {v2}"
 print("  ✅ 演练=simulated 不算干活 / 真承接方上工=role 才算；判据由代码分级")
 print(f"      演练→{v['verdict']}({v['credential']}) / 真上工→{v2['verdict']}({v2['credential']})")
@@ -981,6 +982,98 @@ for a in borrow_acts:
     assert a.get("next_on_fail") is not None
 print("  ✅ 启下借人动作带台账凭据（tried/ok/reason）+ 失败有下一步，不是记个动作名")
 print(f"      借人动作 {len(borrow_acts)} 条")
+EOF
+
+echo "===== [manager] 34. 凭据分级只认成果：回执 + 派发方补的开工都不算 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr34.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager.work import record_work, credential_of, is_ready
+
+# 两笔都能由派发方自己写：accepted 是回执，work_started 是 dispatch_trigger 走 L3→L4 补的
+record_work("回执任务", "accepted", agent="ag-x", role="架构·开发", task_id="tk34")
+record_work("回执任务", "started", agent="ag-x", role="架构·开发", task_id="tk34",
+            note="已接单并开始执行任务")
+c = credential_of("tk34")
+assert c["level"] not in ("role", "external"), \
+    f"回执+开工凑两条不算成果，实际被判 {c['level']}：{c['real_events']}"
+assert is_ready(c) is False, "把自己能写的两笔动作当凭据 = 又给自己作证"
+
+# 真推进才算（对照，不误伤）
+record_work("回执任务", "progressed", agent="ag-x", role="架构·开发",
+            task_id="tk34", goal_total=2.0, current=1.0, delta=1.0)
+c2 = credential_of("tk34")
+assert c2["level"] == "role" and is_ready(c2), c2
+print("  ✅ accepted/work_started 都不算凭据（都可由派发方自己写）；只有 progressed/delivered 才算")
+print(f"      回执+开工→{c['level']} / 加一次真推进→{c2['level']}")
+EOF
+
+echo "===== [manager] 35. 小组长借人：卡真投出去才算借到，解析出 @ 不算 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr35.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import borrow as borrow_mod
+from roles import get_role
+
+lead = get_role("架构·小组长")
+
+# ① 台账上已借败的人被点名 → 直接说清在案，不再重复试一次
+borrow_mod.record("tk35", "架构·测试", False, reason="平台无通路", lane="")
+r0 = lead.lead_borrow("tk35", role="架构·测试", task="跑测试联调")
+assert r0["ok"] is False and "台账在案" in r0["reason"], r0
+assert len(borrow_mod.history("tk35")) == 1, "点名借败过的人不该再落一条新记录"
+
+# ② 留空按需：候选全在这条任务上借败过 → 不给同一个人，直接说该换手段
+r1 = lead.lead_borrow("tk35", task="跑测试联调")
+assert r1["borrow_role"] == "" and "换手段" in r1["next"], r1
+
+# ③ 换一条没借败过的任务 → 真召唤，且台账只记「真投给被借者的通路」
+r2 = lead.lead_borrow("tk35b", task="需要评审复评")
+row = borrow_mod.history("tk35b")[0]
+assert r2["borrow_role"] == "架构·评审", r2
+assert row["lane"] in borrow_mod.BORROWED_LANES, \
+    f"台账只该记真投出的通路，实际 lane={row['lane']!r}"
+assert row["ok"] == (1 if r2["ok"] else 0), (row, r2)
+assert "awakened" in r2, "必须回传是否真唤醒（回执没到＝卡投出去了但人还没接）"
+print("  ✅ 解析出 @ 只是必要条件；台账只认真投出的通路；借败过的人不重复试")
+print(f"      lane={row['lane']} ok={row['ok']} awakened={r2['awakened']}")
+EOF
+
+echo "===== [manager] 36. 台账两套口径对齐：先败后成的人不再被报「仍借不到」 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr36.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import borrow as borrow_mod
+
+borrow_mod.record("tk36", "架构·评审", False, reason="无通路", lane="")
+borrow_mod.record("tk36", "架构·评审", True, lane="fullpath",
+                  handle="@dongdongxiaozu/dongjiagoushi(架构·评审)")
+# failed_roles 认"最近一次"，先败后成 → 空；overview 的 stuck 必须同口径
+assert borrow_mod.failed_roles("tk36") == [], borrow_mod.failed_roles("tk36")
+ov = borrow_mod.overview("tk36")
+assert ov["stuck"] == [], f"overview 与 failed_roles 口径不一致：stuck={ov['stuck']}"
+assert "仍借不到" in ov["note"] and "无" in ov["note"], ov["note"]
+print("  ✅ 同一本台账一个口径：overview.stuck 与 failed_roles 都取「最近一次」")
+print(f"      failed_roles={borrow_mod.failed_roles('tk36')} / stuck={ov['stuck']}")
+EOF
+
+echo "===== [manager] 37. 借人记录可回溯：add_borrow 返回真 id ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr37.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from data import repository as repo, db
+
+bid = repo.add_borrow("tk37", "架构·评审", True, lane="fullpath")
+row = db.query_one("SELECT borrow_id FROM borrow_ledger WHERE task_key='tk37'")
+assert bid, "add_borrow 必须返回可回溯的 borrow_id，不能恒返回空串"
+assert bid.startswith("bw-"), bid
+assert bid == row["borrow_id"], (bid, row["borrow_id"])
+print("  ✅ 单条借人记录可按 id 反查（返回值 = 库里实际写入的 borrow_id）")
+print(f"      borrow_id={bid}")
 EOF
 
 echo "===== [manager] ALL PASS ====="

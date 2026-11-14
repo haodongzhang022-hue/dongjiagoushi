@@ -630,7 +630,24 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 
 角色层入口：`ManagerRole.manager_borrow()` / `manager_borrow_overview()`。
 
-### 11.6 验收（`test_manager.sh` 29 → 33 组）
+### 11.6 复评修正：把台账自己的窟窿堵上
+
+上一版本轮 PR 被评审打回五处，都在**台账能不能自证**这一层：
+
+| 病灶 | 为什么错 | 现在 |
+|------|----------|------|
+| `credential_of` 仍留 `len(real_events) >= 2` | `accepted + work_started` 这两笔**都能由派发方自己写**，凑条数就是把"自己给自己作证"放回来 | 只认 `committed`（`progressed`/`delivered`），`external` 也必须有成果 |
+| `lead_borrow` 把"解析出 @"记成 `ok=1` | `lane="resolve"` 不在 `BORROWED_LANES`，却写了成功；台账最新一条被洗白 → `failed_roles()` 把人放回来，下轮重复借 | 真投接力卡才算借到；失败写清卡在哪，`lane` 只记真投出的通路 |
+| `overview()` 与 `failed_roles()` 两套口径 | `history()` 新→旧，`last_ok` 循环结束留的是**最早一条**，先败后成的人被报成"仍借不到" | 按旧→新遍历，两者都取"最近一次" |
+| `add_borrow()` 恒返回 `""` | `gen("borrow")` 生成后没保留，单条记录无法按 id 反查 | `bid = borrow_id or gen("borrow")`，写库与返回同值 |
+| `_STALL_ROUNDS` 注释说"设为 1 的理由"但取值是 2 | 按注释改阈值的人会得到相反效果 | 注释改成"设为 2 的理由"，与取值一致 |
+
+另外补两条同源口子：`lead_borrow` 留空按需派生时**没有排除台账里借败过的人**
+（"按需"又从同一个人开始，这轮修的"重复找不到人用"等于白修）；`test_manager.sh` 里
+`assert v2["event"] if False else True` 是恒真断言（等于没锁），改为真判"判 real 必须有
+`progressed`/`delivered`"。
+
+### 11.7 验收（`test_manager.sh` 29 → 37 组）
 
 | 组 | 锁什么 |
 |----|--------|
@@ -638,6 +655,10 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 | 31 | 借不到→记失败→下轮自动跳过→换下一个；全败显式提示换手段 |
 | 32 | 借到人只认真投给被借者的通路；`lead`/`self` 兜底不算；失败要写清卡在哪 |
 | 33 | 借人写进启下主链路：动作带 `tried/ok/reason` + `next_on_fail`，不是记个动作名 |
+| 34 | 凭据分级只认成果：`accepted + work_started` 凑两条不算，`progressed` 才算 |
+| 35 | 小组长借人：卡真投出去才记成功；解析出 @ 不算；借败过的人不重复试 |
+| 36 | 台账两套口径对齐：`overview.stuck` 与 `failed_roles()` 都取"最近一次" |
+| 37 | 借人记录可回溯：`add_borrow` 返回真 `bw-` id，与库内实际写入一致 |
 
 新增功能级证据脚本 `scripts/feature-verify/manager/借人台账记成败.sh`（判的是
 "结果有没有被记住、记住之后有没有改变下一轮的选择"，写死不记结果也照样能绿的单测它挡不住）。

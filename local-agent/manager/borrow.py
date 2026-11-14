@@ -151,7 +151,10 @@ def overview(task_key=None):
     """二级信息：借过谁、谁借到了、谁一直借不到（供人类/经理俯瞰）。"""
     rows = history(task_key=task_key, limit=500)
     by_role = {}
-    for r in rows:
+    # `history()` 是**新→旧**（`ORDER BY id DESC`）；`last_*` 要的是"最近一次"，
+    # 所以按**旧→新**遍历，否则循环结束时留下的是最早一条，与 `failed_roles()`
+    # （按 id 正序取最新）反着走——同一本台账两套口径，先败后成的角色会被报成"仍借不到"。
+    for r in reversed(rows):
         cur = by_role.setdefault(r["role"], {"role": r["role"], "tries": 0,
                                              "ok": 0, "fail": 0,
                                              "last_ok": 0, "last_reason": "",
