@@ -115,7 +115,7 @@ Issue 正文必须含五段（与 `docs/ISSUE_TRACKING.md` 对齐），缺段即
 | 演练 | 批量操作先 dry-run | 不可逆动作先出计划再执行 |
 | 信号灯 | `test_expertise.sh` E8/E9/E10 | 契约被改坏即红灯 |
 
-### 4.1 接线（v0.2.0 → v0.2.1 · 从「有引擎」到「真生效」）
+### 4.1 接线（v0.2.0 → v0.2.1 → v0.2.2 · 从「有引擎」到「真生效」到「形状不漏」）
 
 只造出 `plan()` 不算落实——**谁不调它谁就绕过**。2026-11-14 实测正是这样：契约已合进
 main，可派发器仍用自由文本当标题，同一天又长出「开发 / 评审 / 测试登录模块」三条。
@@ -127,6 +127,14 @@ main，可派发器仍用自由文本当标题，同一天又长出「开发 / �
 | 经理派发 L2 | `dispatch_engine._create_issue()` → `guard_issue_title()` | 低信号标题契约化；同 key / 同名复用返回既有编号，**不再新建** |
 | bridge 云开发锚点 | `entries.cnb_live.send()` → `_gate_title()` | 同诉求 → 同 key → 复用既有锚点 Issue |
 | 批量提交 | `hybrid.batch._create_issue()` | 读真实存量过闸门；`reuse` 直接返回既有编号，`reject` 中止提交 |
+
+**批量提交的 `reuse` 不等于「提交成功」**（v0.2.2）：`flush()` 原先见返回 `number` 非空就清队列，
+而标题是「首任务前 N 字 + 条数」——首标题同名、条数相同的两批必然同标题 → 第二批被判 `reuse`，
+**整批新任务随队列一起消失、body 从未发出**（比重复更糟）。现在两道硬约束：
+
+- 标题带**整批内容指纹**（标题+描述+验收的 sha256 前 8 位），不同批次不再同标题；
+- `reuse` 分支核对**命中的标题与本批是否一致**：一致才清队列并如实标 `duplicate`
+  （`submitted=0`）；不一致则**保留队列 + 显式报错**，绝不静默吞活。
 | 手工治理 | `scripts/issue-contract.py` | audit / plan / dedupe（dry-run 默认），与派发器共用同一读法 |
 
 **三处出口各写一份读法 = 三层都会坏**。v0.2.0 正是这么坏的：两处各写了一份
@@ -149,9 +157,16 @@ v0.2.1 把「读存量」收成唯一实现 `expertise/issue_source.py`，三条
 
 | 原文 | 唯一键 | 说明 |
 |---|---|---|
-| `refactor login module` | `refactor-login-module` | 全 ascii，可读优先 |
+| `refactor login module` | `refactor-login-module` | 全 ascii **且未被截断**，可读优先 |
 | `update README 说明文档` | `update-readme-41dd91a6` | 可读残片 + 内容摘要后缀 |
 | `开发登录模块` | `task-8d0f0b8499ae9cd9` | 残片代表不了原意 → 纯摘要 |
+| `Update the cloud pipeline stage one description ... AAA` | `update-the-cloud-pipeline-stage-one-de-2d7eeb18` | **超 48 字符**：残片截断后必须带摘要后缀 |
+
+**超长纯 ascii 不许免后缀**（v0.2.2）：v0.2.1 的判据只看「ascii 覆盖率 = 1.0」，
+而残片本身早被截到 48 字符 —— 纯英文长标题在第 48 字符之后的内容**完全不参与唯一性**。
+实测 `<前缀...> pipeline stage one` / `<同前缀...> pipeline stage two` 压出同一个键，
+第二条走 `reuse` 被并进第一条，**两件事被静默合成一件**。现在免后缀要同时满足
+「覆盖率 1.0」**和**「残片未被截断（≤48 字符）」，缺一即带摘要后缀。
 
 `derive` 之后还会**再复核一次** `is_low_signal`：`p0`/`tmp`/`todo` 这类占位词当唯一键
 被明确判为低信号，却在 v0.2.0 被原样放行；现在命中即换摘要键重 derive，仍不合格才 reject。
@@ -163,7 +178,9 @@ v0.2.1 把「读存量」收成唯一实现 `expertise/issue_source.py`，三条
 
 - **E9 接线存在**：`inspect.getsource` 断言三处出口真有闸门调用、且都不再自写存量读法；
 - **E10 行为为真**：假 runner 注入 400 / 半途失败 / 同批重复 / 不同诉求塌缩，
-  断言「失败不污染缓存」「建完回填能 reuse」「不同诉求必须不同键」「action 分支真判」。
+  断言「失败不污染缓存」「建完回填能 reuse」「不同诉求必须不同键」「action 分支真判」；
+- **E11 形状级卡点**：E10 的用例全在 48 字符内、也不走 `flush()` 真路径，覆盖不到
+  「长标题截断塌缩」「批量静默吞活」两种形状 —— E11 专测这两条 + 文档口径不自相矛盾。
 
 ## 五、已知边界
 

@@ -429,12 +429,18 @@ def slugify_key(text, seed=""):
     同一段文本永远压出同一个键（幂等的根），不同文本永远压出不同键（不吞任务）。
     """
     normalized = normalize(text).lower()
-    ascii_part = _SLUG_RE.sub("-", normalized).strip("-")
-    ascii_part = re.sub(r"-{2,}", "-", ascii_part)[:48].strip("-")
+    raw_ascii = _SLUG_RE.sub("-", normalized).strip("-")
+    raw_ascii = re.sub(r"-{2,}", "-", raw_ascii)
+    ascii_part = raw_ascii[:48].strip("-")
     usable = (ascii_part and ascii_part[0].isalnum() and len(ascii_part) >= 2
               and ascii_part not in _LOW_SIGNAL_KEYS)
     if usable:
-        if _ascii_coverage(normalized) >= 0.999:      # 全是 ascii：残片就是全部内容
+        # 「残片就是全部内容」有两个条件，缺一就会吞任务：
+        #   ① 覆盖率 1.0（没被剔掉中文）；② **没被截断**（≤48 字符）。
+        # 第一版只判①，纯英文长标题截到 48 字符后直接返回残片，第 48 字符之后的
+        # 内容不参与唯一性 —— 实测 `...pipeline stage one/two` 压出同一个键，
+        # 第二条诉求被 reuse 进第一条的 Issue（比原来的重复更糟：两件事并成一件）。
+        if _ascii_coverage(normalized) >= 0.999 and len(raw_ascii) <= 48:
             return ascii_part
         # 有实质内容被丢弃：残片只当"读得懂的线索"，唯一性由摘要后缀保证
         return "%s-%s" % (ascii_part[:38].strip("-"), _stable_digest(seed or text)[:8])
@@ -477,6 +483,7 @@ def guard_create(title, existing=None, *, module="local-agent",
             "action": "reuse", "title": candidate, "original": original,
             "key": issue_key(candidate), "derived": derived,
             "reuse_number": str(target.get("number")),
+            "matched_title": target.get("title") or "",
             "reason": (extra_reason + "；" if extra_reason else "")
                       + f"已存在同 key Issue #{target.get('number')}，复用不再新建",
         }
@@ -490,6 +497,7 @@ def guard_create(title, existing=None, *, module="local-agent",
             return {
                 "action": "reuse", "title": candidate, "original": original,
                 "key": key, "derived": derived, "reuse_number": str(target.get("number")),
+                "matched_title": target.get("title") or "",
                 "reason": (extra_reason + "；" if extra_reason else "")
                           + f"已存在同 key Issue #{target.get('number')}，复用不再新建",
             }

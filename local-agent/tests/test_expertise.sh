@@ -632,6 +632,103 @@ print("  存量读取/失败不缓存/同批回填/唯一键不塌缩/derive复�
 EOF
 then ok "E10 闸门两端判定为真（读得到存量 · 失败不缓存 · 不塌缩不吞任务 · 按 action 分支）"; else bad "E10 闸门行为判定失败"; fi
 
+echo "===== [expertise] E11. 卡片修复的行为验证（长标题不塌缩 · 批量不吞活 · 文档不自相矛盾）====="
+if "$PY" - <<'EOF'
+import sys, json, os; sys.path.insert(0, '.')
+from expertise import issue_contract as ic
+from expertise import issue_source as src
+
+# --- ① 英文长标题超 48 字符仍不许塌缩（残片截断后必须带摘要后缀）---
+# 原实现：`_ascii_coverage>=0.999` 就 `return ascii_part`，而 ascii_part 已被截到
+# 48 字符 → 第 48 字符之后不参与唯一性 → 两条不同诉求压出同一个键 → 第二条被 reuse
+# 并进第一条的 Issue（比重复更糟）。E10 第⑤组用例全在 48 字符内，覆盖不到这一层。
+LONG_A = "Update the cloud pipeline stage one description with more detail AAAA"
+LONG_B = "Update the cloud pipeline stage one description with more detail BBBB"
+assert len(ic._SLUG_RE.sub("-", LONG_A.lower()).strip("-")) > 48, "用例没超过 48 字符，测不到截断"
+kA, kB = ic.slugify_key(LONG_A), ic.slugify_key(LONG_B)
+assert kA != kB, f"超长英文标题仍塌缩：{kA!r} == {kB!r}"
+keyA = ic.issue_key(ic.guard_create(LONG_A, [])["title"])
+keyB = ic.issue_key(ic.guard_create(LONG_B, [])["title"])
+assert keyA != keyB, "闸门层面仍把两件事并成一件"
+# 截断后仍要可读（残片当线索），不能直接退化成纯摘要
+assert kA.startswith("update-the-cloud-pipeline-stage-one"), kA
+# 同一诉求稳定（幂等的根没被破坏）
+assert ic.guard_create(LONG_A, [])["title"] == ic.guard_create(LONG_A, [])["title"]
+# 短纯 ascii 照旧可读（不能被顺手改成摘要）
+assert ic.slugify_key("refactor login module") == "refactor-login-module"
+
+# --- ② hybrid.batch：不同批次不得互相 reuse 吞活 ---
+from hybrid import batch as B
+t_batch1 = [{"title": "登录模块改造", "description": "第一批 A"},
+            {"title": "结算模块改造", "description": "第一批 B"}]
+t_batch2 = [{"title": "登录模块改造", "description": "第二批 A 不同"},
+            {"title": "结算模块改造", "description": "第二批 B 不同"}]
+def _title(tasks):
+    return "[批量] %s 等 %d 个任务（CloudBatch · %s）" % (
+        tasks[0]["title"][:20], len(tasks), B._batch_fingerprint(tasks))
+ta, tb = _title(t_batch1), _title(t_batch2)
+assert ta != tb, "两批不同任务仍同标题 → 过闸门必被判 reuse"
+assert ic.issue_key(ic.guard_create(ta, [])["title"]) != \
+       ic.issue_key(ic.guard_create(tb, [])["title"]), "两批不同任务仍塌成一个 key"
+# 真跑 flush：走真实路径（假云端），验证队列不被静默清空
+import urllib.request
+created = []
+class _Resp(object):
+    def __init__(self, d): self._d, self.status = d, 200
+    def read(self): return json.dumps(self._d).encode()
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+def _fake_urlopen(req, timeout=20):
+    body = json.loads(req.data.decode())
+    created.append(body)
+    return _Resp({"number": str(700 + len(created)), "title": body["title"],
+                  "state": "open"})
+urllib.request.urlopen = _fake_urlopen
+os.environ.setdefault("cnbcooldong", "x")
+src.reset_cache()
+q = "/tmp/expertise_e11_queue.json"
+if os.path.exists(q):
+    os.remove(q)
+b = B.CloudBatch(repo="acme/b", min_tasks=1, queue_file=q)
+b.enqueue("登录模块改造", "第一批 A")
+b.enqueue("结算模块改造", "第一批 B")
+r1 = b.flush()
+assert r1.get("submitted") == 2 and len(created) == 1, r1
+b.enqueue("登录模块改造", "第二批 A 不同")
+b.enqueue("结算模块改造", "第二批 B 不同")
+r2 = b.flush()
+assert len(created) == 2, "第二批新任务被静默吞掉（队列清了、body 从未发出）"
+assert r2.get("submitted") == 2 and r2.get("queue_cleared") == 2, r2
+assert b._load()["tasks"] == [], "提交成功后队列应清空"
+# 同一批再 flush = 真重复：命中的是同一批内容 → 不新建、队列清、如实标 duplicate
+b.enqueue("登录模块改造", "第二批 A 不同")
+b.enqueue("结算模块改造", "第二批 B 不同")
+r3 = b.flush()
+assert len(created) == 2, "同批重复 flush 又新建了 Issue"
+assert r3.get("duplicate") is True and r3.get("submitted") == 0, r3
+# 命中标题与本批不一致时（脏存量同名/键塌缩）→ 保留队列 + 显式报错，绝不静默吞活
+class _FakeBatch(B.CloudBatch):
+    def _create_issue(self, title, body):
+        return {"number": "1234", "reused": True, "title": title,
+                "gate": {"matched_title": "CHORE:local-agent · 别的东西"},
+                "url": "x"}
+fb = _FakeBatch(repo="acme/b", min_tasks=1, queue_file=q)
+fb.enqueue("测试流任务", "内容")
+kept = fb.flush()
+assert kept.get("error") and kept.get("queue_cleared") == 0, kept
+assert len(fb._load()["tasks"]) == 1, "内容不一致却清了队列 → 活被吞了"
+
+# --- ③ issue_source 文档不许再自相矛盾（「全量=不带 --state」是错的）---
+_flat = " ".join((src.__doc__ or "").split()).replace("`", "")
+assert "分别拉 open + closed 再合并" in _flat, \
+    "全量语义必须写明 open+closed 两趟（不带 --state 只返回 open）"
+assert "全量语义 = 不带" not in _flat, \
+    "文档又写回「全量=不带 --state」→ 后来者照改会丢 218 条 closed 存量"
+
+print("  超长标题不塌缩/批量不吞活/同批真重复/内容不符不静默/文档不自相矛盾 全部通过")
+EOF
+then ok "E11 本轮三条卡点的行为验证（长标题不塌缩 · 批量不吞活 · 文档自洽）"; else bad "E11 本轮卡点行为验证失败"; fi
+
 echo ""
 echo "──────────────────────────────────────────────"
 echo "expertise 信号灯：通过 $PASS 组，失败 $FAIL 组"
