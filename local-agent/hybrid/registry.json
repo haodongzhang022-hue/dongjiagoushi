@@ -685,6 +685,20 @@
       "cpu_cost_est": 2.0,
       "time_est": 6.0,
       "kind": "light"
+    },
+    "local-agent/tests/test_npc_model.sh": {
+      "name": "test_npc_model",
+      "covers": [
+        ".cnb/npc-models.yml",
+        ".cnb.yml",
+        "local-agent/npc_model/",
+        "scripts/npc-model.sh",
+        "docs/NPC_MODEL.md"
+      ],
+      "depends_on": [],
+      "cpu_cost_est": 0.6,
+      "time_est": 2.0,
+      "kind": "light"
     }
   }
 }

@@ -1,0 +1,94 @@
+# ============================================================
+# NPC 模型选择配置（唯一事实源 · module npc-model v0.1.0）
+# 仓库：dongjiagoushi（架构师体系）
+# ------------------------------------------------------------
+# 为什么要有这个文件：
+#   `npc:go` 的 `model` 必须是「当前组织可选模型列表」里的 ID，而该列表由组织
+#   配置决定、会随平台更新漂移。写死在 .cnb.yml 里，组织一调整就在 stage 层
+#   静默 error（Prepare success / npc go error），表现为「评论 @架构·总师 →
+#   流水线起来 → 3 秒内挂」，对端既不回执也不接单，最难查。
+#
+# 我们要的策略（用户诉求）：
+#   ① 不写死模型，但「默认选参数大的模型」——架构师要啃长文档、走八步、
+#      出结构化长产出，小 flash 模型撑不住；
+#   ② 同时必须有兜底：大模型万一不可用，也要「一直可以通」；
+#   ③ 大模型不是静态的，平台有更新就能换 —— 换模型只改本文件，不改流水线。
+#   ④ ★分层（2026-11-14 人类增补，PR #346）：「只架构师那个角色选这种大的模型，
+#      其他的都是默认就行，然后兜底」——大模型贵且慢，只给真正需要深判断的角色，
+#      其余角色统一走默认档（deepseek-v4.1-flash），谁都不许各写各的 model。
+#
+# 落地方式（由 local-agent/npc_model/ + scripts/npc-model.sh 解析）：
+#   big_model_roles 吃大参数模型的角色名单（判据 = 平台注入的 CNB_NPC_NAME）。
+#               留空 = 谁都不吃，全部走 default_model。
+#   default_model  非名单角色的统一默认档（留空 = 走平台默认）。
+#   prefer      大参数优先顺序（从上到下）。取第一个「不在 unavailable 里」的。
+#   unavailable 已实测确认不在本组织可选列表的 ID。命中即跳过、顺延下一个，
+#               所以我把它当「黑名单缓存」——平台上线后从这里移除即可生效。
+#   fallback    兜底策略，只允许 platform_default：npc:go 不写 model 字段，
+#               走平台默认模型（永远能跑通的那条路）。
+#   override_env 环境变量覆盖键，临时换模型不用改仓库、不用提 PR。
+#
+# 换模型/改策略的正确顺序：
+#   1) 先确认 ID 真在「当前组织可选模型列表」里（任一方式）：
+#      - 在评论里 @ 一个 NPC，看 npc go stage 是否报 "optional models list"；
+#      - `cnb build start-build --config` 起一条探针流水线，stage 里跑 npc:go；
+#      - 平台「NPC 选择器 / 云原生开发 Agent 设置」看可选模型下拉。
+#   2) 可用 → 加到 prefer 最前；不可用 → 加到 unavailable。
+#   3) 只改本文件，.cnb.yml 不动。
+#
+# 实测记录（2026-11-14 · dongdongxiaozu 组织 · 16 + 24 条探针流水线）：
+#   ✅ 可选：hy4（大参数，首选）、deepseek-v4.1-flash（= 平台默认，小参数）
+#   ❌ 不在可选列表：hy3 / qwen4 / qwen3-max / qwen-max / hunyuan-4 /
+#      hunyuan-large / glm-5 / glm-4.6 / deepseek-v4.1 / deepseek-v4.1-pro /
+#      claude-sonnet-4.5 / claude-opus-4 / gpt-5 / doubao-pro / kimi-k2 …
+# ============================================================
+
+# ★ 角色闸门：只有这些角色吃大参数模型（其余一律 default_model）
+#   为什么用角色名而不是「所有 NPC」：大模型贵、慢；秘书/开发/进度推手这些角色
+#   做的是短判断，大参数模型纯溢价。分层后想加一个大模型角色 = 这里加一行。
+#   判据是平台注入的 CNB_NPC_NAME（@角色 触发时自动带上），不是人肉约定：
+#     @dongdongxiaozu/dongjiagoushi(架构·总师) → CNB_NPC_NAME=架构·总师 → 大模型
+#     @CodeBuddy / 秘书 / 开发 …            → 默认档
+#   角色名前缀「架构·」/「市场·」在解析时归一，写「总师」和「架构·总师」等价。
+big_model_roles:
+  - 架构·总师        # 架构师本体：啃长文档、走架构八步、出结构化长产出
+
+# ★ 非名单角色的统一默认档：用户原话「其他的都是默认就行」。
+#   走平台默认的 deepseek-v4.1-flash（快档，实测本组织可选）。
+#   万一哪天它不在可选列表了 → 解析层判定后自动降级「不写 model」走平台默认，
+#   再加 failStages 兜底一跳，链条不会断。
+default_model: deepseek-v4.1-flash
+
+# 大参数优先顺序（从上到下取第一个可用的）
+prefer:
+  - hy4          # 混元 4：当前本组织最大参数可选模型（实测可用）
+  - qwen4        # 千问 4：等平台放进可选列表后，从 unavailable 移除即自动生效
+
+# 已知不可用（黑名单缓存）：命中即跳过，顺延 prefer 的下一个
+unavailable:
+  - hy3
+  - qwen4
+  - qwen3-max
+  - qwen-max
+  - hunyuan-4
+  - hunyuan-large
+  - glm-5
+  - glm-4.6
+  - deepseek-v4.1
+  - deepseek-v4.1-pro
+  - claude-sonnet-4.5
+  - claude-opus-4
+  - gpt-5
+  - doubao-pro
+  - kimi-k2
+
+# 兜底：platform_default = npc:go 不写 model，走平台默认模型
+fallback: platform_default
+
+# 环境变量覆盖键（临时换模型不改仓库）
+override_env: NPC_MODEL_OVERRIDE
+
+# 变更留痕：换模型时把原因写这里，方便复盘
+history:
+  - "2026-11-14 v0.1.0 首次落地：hy4 为大参数首选，兜底走平台默认"
+  - "2026-11-14 v0.2.0 分层：只有 架构·总师 吃大模型（hy4），其余角色走 default_model（deepseek-v4.1-flash），兜底仍是平台默认"

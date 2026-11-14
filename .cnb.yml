@@ -37,6 +37,11 @@ main:
             test -f local-agent/hybrid/sync.py   && echo "  ✅ hybrid/sync.py 存在"
             test -f local-agent/hybrid/cost.py   && echo "  ✅ hybrid/cost.py 存在"
             test -f scripts/local-exec.sh        && echo "  ✅ scripts/local-exec.sh 存在"
+            test -f .cnb/npc-models.yml          && echo "  ✅ .cnb/npc-models.yml 存在"
+            test -f scripts/npc-model.sh         && echo "  ✅ scripts/npc-model.sh 存在"
+            echo ""
+            echo "==== NPC 模型策略信号灯（大参数优先 + 平台默认兜底） ===="
+            bash local-agent/tests/test_npc_model.sh
             echo ""
             echo "==== hybrid 路由自检（纯逻辑，低 CPU，云端可跑） ===="
             pip install -q -r local-agent/requirements.txt 2>/dev/null || true
@@ -200,23 +205,85 @@ main:
             echo "  ✅ 评审整批测试通过（Bus · 一批跑完 + sync/cost/quota 留痕）"
 
 
-# NPC 任务兜底（Issue/PR 评论 @NPC 触发）
-# 主路线是官方 @CodeBuddy 自动加载 architect skill；
-# 此处保留 npc:go 兜底，供未来按 .cnb/settings.yml 定义自建 NPC 或平台触发时使用。
+# ============================================================
+# NPC 任务（Issue/PR 评论 @NPC 触发）
+# ------------------------------------------------------------
+# 主路线是官方 @CodeBuddy 自动加载 architect skill；此处是 npc:go 兜底。
+#
+# 模型策略（module npc-model v0.2.0 · 唯一事实源 .cnb/npc-models.yml）：
+#   ① 不写死模型：model 必须是「当前组织可选模型列表」里的 ID，列表会漂移，
+#      写死任意 ID 都有再次静默失效的风险（故障只在 stage 层，表现为
+#      「评论 @角色 → 3 秒挂」，对端不接单不回执，最难查）；
+#   ② ★分层（人类 2026-11-14 定调）：「只架构师那个角色选这种大的模型，
+#      其他的都是默认就行，然后兜底」——
+#        · 架构·总师 → 大参数（prefer[0] = hy4）：啃长文档、走八步、出长结构化产出；
+#        · 其余角色 → default_model（deepseek-v4.1-flash，快档）；
+#      分层判据是平台注入的 CNB_NPC_NAME（@角色 触发自动带），不是人肉约定；
+#   ③ 兜底保证一直能通：任何角色选不到可用模型 → 「不写 model」走平台默认；
+#   ④ 模型有更新就能换：只改 .cnb/npc-models.yml，本文件不动。
+#      临时换：流水线 env 里设 NPC_MODEL_OVERRIDE=<模型ID>（不必改仓库）。
+#   分工：角色闸门 + 模型选择全在 scripts/npc-model.sh resolve 里做（确定性代码），
+#      本文件只负责「拿到 NPC_MODEL 就写，拿到空就走平台默认」，不掺判断逻辑。
+# 策略解析与留痕：scripts/npc-model.sh（resolve/info/learn），见 docs/NPC_MODEL.md
+# ============================================================
 .npc_task: &npc_task
   name: architect npc
+  # ★ 显式声明镜像（= NPC 事件流水线的平台默认镜像），不靠「合并默认」：
+  #   `resolve npc model` 要跑 python3 + pyyaml 解析 .cnb/npc-models.yml；
+  #   实测若不声明镜像（如 api_trigger 起探针），落到 cnbcool/default-build-env
+  #   会直接 `python3: command not found`，模型解析整段挂掉 → npc:go 全跳过。
+  #   钉住 default-npc：既有 python3 + pyyaml，也是 npc:go 需要的运行环境。
+  docker:
+    image: cnbcool/default-npc:latest
+  # 这里**故意不设 allowFailure**：模型被组织撤掉时必须红一次，提醒「该更新模型配置」。
+  # 如果设成 true，连「首选和兜底都失败」也会显示成功，等于把真故障藏掉。
+  # 红的语义因此很明确：环境漂移了，卡已经由 failStages 兜底发出去，但配置要跟上。
+  # 实测（2026-11-14）：首选被拒 → failStages 兜底跑平台默认模型成功，
+  # 对端仍能收到卡；流水线红只作为「去改 .cnb/npc-models.yml」的显式提醒。
   stages:
+    - name: resolve npc model
+      script: |
+        # 角色闸门 + 模型选择（确定性代码，不靠 LLM 判断）：
+        #   CNB_NPC_NAME=架构·总师      → prefer[0]（大参数 hy4）
+        #   CNB_NPC_NAME=其他/未识别    → default_model（deepseek-v4.1-flash）
+        #   候选不可用                  → 不写 model，走平台默认（NPC_USE_DEFAULT=1）
+        bash scripts/npc-model.sh resolve
+      exports:
+        npc_model: NPC_MODEL
+        npc_use_default: NPC_USE_DEFAULT
     - name: npc go
+      # 首选路径：解析出了具体模型才写 model（架构师=大参数，其余=默认档）
+      if: |
+        [ "${NPC_USE_DEFAULT:-0}" != "1" ]
       type: npc:go
       options:
-        role: "架构·秘书"            # 对应 .cnb/settings.yml 中的角色（兜底人设）
-        model: hy3                   # ✅ 官方免费模型（混元 3），不消耗 AI Credits 账单
-          # 原值 deepseek-v4-flash 不在组织「可选模型列表」内，npc:go 直接 error：
-          #   npc:go model "deepseek-v4-flash" is not in the optional models list of your organization.
-          # 该错误发生在 stage 层（Prepare success / npc go error），
-          # 会让「评论 @角色 → 真实唤醒」整条链路静默失效（对端收不到卡、也不回执）。
-          # 其他可选：glm-5；不写本字段则走平台默认模型。
-          # 模型 ID 可在 NPC 选择器 / 云原生开发 Agent 设置中查看。
+        # role 仅在「自行提供提示词」场景生效；@角色 触发时提示词由被 @ 的角色自带
+        # （平台按 settings.yml 注入），故这里的 role 不影响谁被 @ 到的人设。
+        role: "架构·秘书"
+        model: $NPC_MODEL
+    - name: npc go (platform default)
+      # 兜底路径：解析层判定无可用模型 → 不写 model，走平台默认模型
+      if: |
+        [ "${NPC_USE_DEFAULT:-0}" = "1" ]
+      type: npc:go
+      options:
+        role: "架构·秘书"
+  # 首选模型被组织拒（不在可选列表）→ 就地降级兜底，不让唤醒链路静默挂掉。
+  # 实测（2026-11-14）：failStages 里再跑一跳不写 model 的 npc:go，
+  # pipeline 最终判定 success（首选 error + 兜底 success），链路真正打得出卡。
+  failStages:
+    - name: npc model diagnose
+      script: |
+        # 闭环学习：从失败日志认出被拒的模型 ID，直接给出「该改哪一行」
+        bash scripts/npc-model.sh learn --log-text "${CNB_BUILD_FAILED_MSG:-}"
+    - name: npc go (fallback)
+      # 首档被组织拒 → 就地降级「不写 model」的平台默认档，卡照常打出去。
+      # 注意这里**不能再挑模型**：兜底存在的意义就是「不再依赖任何具体 ID」。
+      if: |
+        printf '%s' "${CNB_BUILD_FAILED_MSG:-}" | grep -q "optional models list"
+      type: npc:go
+      options:
+        role: "架构·秘书"
 
 # 看板自动化：基于 Issue 声明头自动刷新模块版本演进看板 + 里程碑表
 # 生成器：scripts/generate-dashboard.py → 输出 docs/DASHBOARD.md
