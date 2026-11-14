@@ -698,7 +698,7 @@
       "depends_on": [],
       "cpu_cost_est": 0.6,
       "time_est": 2.0,
-      "kind": "cpu-light"
+      "kind": "light"
     }
   }
 }
