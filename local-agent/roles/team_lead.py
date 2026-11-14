@@ -156,17 +156,67 @@ class TeamLeadRole(BaseRole):
             pass
         return rec
 
-    def lead_borrow(self, task_key, role="架构·开发", reason=""):
-        """组内没有能承接的人 → 直接申请**跨岗借角色**（经理协调，不自闭）。"""
+    def lead_borrow(self, task_key, role="", reason="", task=""):
+        """组内没有能承接的人 → 申请**跨岗借角色**，并且**把结果记下来**。
+
+        借谁不写死（`role` 留空时按任务语义 + 名册派生）；借不到也落台账，
+        下次自动跳过这个人换下一个——否则同一批人会被反复借、反复失败
+        （Issue #239 收尾轮用户点名：缺这一步结果的记录）。
+        """
+        from manager import borrow as borrow_mod
+        failed = borrow_mod.failed_roles(task_key)
+        if role and role in failed:  # 指定的人借败过：直接说清，别再重复
+            return {"task_key": task_key, "borrow_role": role, "handle": None,
+                    "ok": False, "reason": "该角色在这条任务上已借败过（台账在案）",
+                    "next": "换下一个候选或换手段", "failed_roles": failed}
+        # 留空按需派生时**必须排除台账里已借败的人**——否则"按需"又从同一个人开始，
+        # 这轮修的"重复找不到人用"就白修了（任务文本命中的第一个往往正是失败过的那个）。
+        if role:
+            target = role
+        else:
+            pool = borrow_mod.need_roles(task or task_key) or ["架构·评审"]
+            picked = borrow_mod.pick_candidates(pool, task=task or task_key,
+                                                tried_failed=failed)
+            if not picked:
+                return {"task_key": task_key, "borrow_role": "", "handle": None,
+                        "ok": False, "reason": "候选全在台账上借败过",
+                        "next": "换手段（拆小/转小组长/加派/上交）",
+                        "failed_roles": failed}
+            target = picked[0]["role"]
+        # 借到人 = **卡真投给了被借的那个人**，不是"解析出了 @ 就算借到"。
+        # 只记解析成功会把刚借败的人洗白（台账最新一条变 ok=1 → failed_roles 把人放回来），
+        # 下轮又从同一个人重复借 —— 正是本轮要治的病，不能被自己的台账再犯一次。
+        handle, why = "", ""
         try:
-            handle = self.resolve(role=role)
-        except Exception:  # noqa: BLE001 解析失败如实暴露
-            handle = {"handle": "", "note": "HandleAbility 未解析出，须经理协调"}
+            res = self.resolve(role=target)
+            handle = (res or {}).get("handle", "") if isinstance(res, dict) else str(res)
+        except Exception as e:  # noqa: BLE001 解析失败如实暴露
+            why = f"handle 解析失败（{type(e).__name__}: {e}）"
+        wake = {}
+        if handle:
+            try:
+                wake = self.awake(
+                    task_key, target,
+                    context=f"{handle} [触发:{target}]。组内无人可承接，跨岗借角色，"
+                            f"请回执 [接单]（原因：{reason or '组内无人可承接'}）",
+                    from_agent=self.name) or {}
+            except Exception as e:  # noqa: BLE001 投递失败写清卡在哪，不吞
+                why = f"接力卡投递失败（{type(e).__name__}: {e}）"
+        delivered = {"ok": bool(handle and wake), "lane": "direct_handle" if handle else ""}
+        ok = borrow_mod.counts_as_borrowed(delivered)
+        borrow_mod.record(task_key, target, ok, handle=handle,
+                          lane=delivered["lane"],
+                          reason="" if ok else (why or "接力卡未投出"),
+                          owner=self.name)
         return {
             "task_key": task_key,
-            "borrow_role": role,
-            "handle": handle,
+            "borrow_role": target,
+            "handle": handle or None,
+            "ok": ok,
+            "awakened": bool(wake.get("awakened")),
             "reason": reason or "组内无人可承接，申请跨岗借角色",
+            "recorded": True,
+            "failed_roles": borrow_mod.failed_roles(task_key),
         }
 
     def lead_overview(self):

@@ -16,6 +16,7 @@ from .engine import (
     parse_plan, resolve_choice,
 )
 from .lead_engine import LeadEngine
+from . import borrow as borrow_ledger
 from .work import (
     RoleWorkFace, ShadowWorker, WorkerRegistry, credential_of, is_ready,
     READY_LEVELS, record_work,
@@ -26,5 +27,5 @@ __all__ = [
     "RoleWorkFace", "ShadowWorker", "WorkerRegistry",
     "credential_of", "is_ready", "READY_LEVELS", "record_work",
     "DUTIES", "NOT_MANAGER",
-    "parse_plan", "resolve_choice",
+    "parse_plan", "resolve_choice", "borrow_ledger",
 ]

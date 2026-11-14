@@ -330,10 +330,22 @@ class ManagerFlow:
                     action["added"] = added
                     action["executed"] = bool(added)
                 elif code == "borrow_role":
-                    borrow = self.engine.borrow_role("架构·开发",
-                                                     task_key=v["task_key"])
+                    # 借人是"这个岗接不住才去别处借"——不能写死借「架构·开发」
+                    # （开发本来就是接不住的那个，借同一个名字等于原地等死）。
+                    # 更关键的是**记结果**：借不到要落到台账，下一轮自动跳过他
+                    # 换下一个候选；否则同一批人会被反复借、反复失败（用户点名）。
+                    borrow = self.engine.borrow_role(
+                        "", task_key=v["task_key"], task=v.get("title") or "",
+                        exclude=(v["role"],))
                     action["borrow"] = borrow
                     action["executed"] = bool(borrow.get("ok"))
+                    # 借人没成不是"这个动作失败了"，是"该换下一个候选/换手段了"
+                    action["borrow_recorded"] = bool(borrow.get("tried"))
+                    action["next_on_fail"] = borrow.get("next", "")
+                    if not borrow.get("ok"):
+                        action["note"] = (
+                            "借人未成（已记台账，下次自动跳过这批人）→ "
+                            + (action.get("note") or "下一轮换手段"))
                 elif code == "split":
                     subs = self.engine.split_task(rec)
                     action["split"] = subs

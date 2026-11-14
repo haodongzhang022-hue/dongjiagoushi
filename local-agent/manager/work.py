@@ -238,9 +238,14 @@ def credential_of(task_id, role=""):
         meters = list(store.meters_for_task(task_id) or [])
     except Exception:  # noqa: BLE001
         meters = []
-    if external:
+    # 「干了」的判据是**成果**，不是动作条数：只 accept 只算接单，只 start 也只算
+    # 开了个工；`accepted + work_started` 这两笔**都能由派发方自己写出来**
+    # （`dispatch_trigger` 走 L3→L4 会给已回执任务补一笔 work_started），
+    # 按条数凑 ≥2 就是把"自己给自己作证"重新放回来。故只认 progressed / delivered。
+    committed = [e for e in real_events if e in ("progressed", "delivered")]
+    if external and committed:
         level = "external"
-    elif real_events:
+    elif committed:
         level = "role"
     elif sim_kinds:
         level = "simulated"
@@ -249,7 +254,7 @@ def credential_of(task_id, role=""):
     return {"level": level, "events": events, "meters": len(meters),
             "simulated": simulated, "real_events": real_events,
             "why": {"external": "外部可核验凭据（Issue/PR/CI）",
-                    "role": "承接方真回执 + 真推进",
+                    "role": "承接方真推进/真交付（回执与开工都只是动作，不算）",
                     "simulated": "演练注入，不算干活",
                     "none": "无任何证据"}[level]}
 

@@ -57,9 +57,13 @@ if _LOCAL_AGENT_DIR not in sys.path:
 from .base import BaseRole
 
 
-#: 默认承接方（经理派活的主要对象）：能真上工的角色
-DEFAULT_WORKER_ROLES = ("架构·开发", "架构·评审", "架构·测试",
-                        "架构·小组长", "架构·交付")
+#: 默认承接方（经理派活的主要对象）：**从团队名册派生，不写死**。
+#: 写死角色名的代价是真实的：`borrow_role()` 曾硬啃「架构·开发」，于是「借角色」
+#: 在开发本来就接不了的时候永远借同一个、必失败，再退回来报"跨岗借不到"。
+#: 现在谁能承接 = 名册里谁真能装载出实例（代码判，可漂移可扩展）。
+def default_worker_roles():
+    from . import roster_available
+    return tuple(roster_available())
 
 
 class ManagerRole(BaseRole):
@@ -176,6 +180,19 @@ class ManagerRole(BaseRole):
         """权责边界判定：权责内 SELF（自决执行，不申请授权）；不可逆/超成本/越界才 HUMAN。"""
         return self.manager_engine.authorize(action, **kwargs)
 
+    def manager_borrow(self, role="", task_key="", task="", exclude=()):
+        """按需借人：**真解析 @ → 真召唤 → 记下成败 → 失败换下一个**。
+
+        与写死角色名的旧姿势的区别：借谁由任务语义 + 名册派生；每次借人都进
+        `borrow_ledger` 台账，借败过的人下次自动跳过（不重复找不到人用）。
+        """
+        return self.manager_engine.borrow_role(role, task_key=task_key, task=task,
+                                               exclude=exclude)
+
+    def manager_borrow_overview(self, task_key=None):
+        """借人二级信息：借过谁 / 谁借到了 / 谁一直借不到（人类俯瞰用）。"""
+        return self.manager_engine.borrow_overview(task_key=task_key)
+
     def manager_self_check(self):
         """六项自检：承上/行下/启下/反馈/找通路/自决（供人类判定及格）。"""
         return self.manager_engine.self_check()
@@ -190,7 +207,7 @@ class ManagerRole(BaseRole):
         from manager.work import WorkerRegistry
         from . import get_role
         reg = WorkerRegistry()
-        for name in (roles or DEFAULT_WORKER_ROLES):
+        for name in (roles or default_worker_roles()):
             try:
                 role = get_role(name)
                 if role is None:
@@ -238,6 +255,7 @@ class ManagerRole(BaseRole):
                 "通用派发能力(复用 DispatchAbility，全员同源)",
             ],
             "entry": ["manager_carry", "manager_execute", "manager_activate",
+                      "manager_borrow", "manager_borrow_overview",
                       "manager_push", "manager_supervise", "manager_status",
                       "manager_guard", "manager_lanes", "manager_try_lanes",
                       "manager_authorize", "manager_self_check"],

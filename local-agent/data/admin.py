@@ -57,6 +57,21 @@ def archive(archive_id, kind, title, content, source=""):
     return archive_id
 
 
+# ---------- 借人台账（跨岗借角色成败留痕 · Issue #239 收尾轮） ----------
+def record_borrow(task_key, role, ok, lane="", handle="", reason="", owner="",
+                  detail=None):
+    """记一次跨岗借人的结果（成功失败都记）+ 留进度事件，可回溯。"""
+    rec = repo.add_borrow(task_key=task_key, role=role, ok=ok, lane=lane,
+                          handle=handle, reason=reason, owner=owner,
+                          detail=detail or {})
+    repo.record_progress(owner or "data_admin",
+                         "borrowed" if ok else "borrow_failed",
+                         {"task_key": task_key, "role": role, "lane": lane,
+                          "handle": handle, "reason": reason},
+                         task_key)
+    return rec
+
+
 def archive_agents_snapshot(label="snapshot"):
     """将当前全部 agent 档案归档为一个快照（里程碑级存档）。"""
     agents = repo.list_agents()

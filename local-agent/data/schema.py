@@ -584,6 +584,28 @@ SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_testcache_script ON test_cache(script)",
     "CREATE INDEX IF NOT EXISTS idx_testcache_fp ON test_cache(fingerprint)",
+
+    # ---- 34. 借人台账（borrow_ledger · 跨岗借角色的成败留痕 · Issue #239 收尾轮）----
+    # 痛点：借人"记了个动作名"、失败不留痕 → 同一任务下轮又从同一个借不到的人试起，
+    # 日志里一堆重复的无用人名。本表把**每次借人的结果**（谁/哪条通路/成没成/为什么）
+    # 落库，供「失败换人、不重复找同一个人」判定（失败不记 = 下轮重复踩坑）。
+    """
+    CREATE TABLE IF NOT EXISTS borrow_ledger (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        borrow_id     TEXT NOT NULL,            -- 借人记录 id（bw-前缀）
+        task_key      TEXT DEFAULT '',          -- 为哪条任务借的人
+        role          TEXT NOT NULL,            -- 借的是哪个角色
+        ok            INTEGER DEFAULT 0,        -- 1=借到人 / 0=没借到
+        lane          TEXT DEFAULT '',          -- 落到的通路（fullpath/codebuddy/lead/self）
+        handle        TEXT DEFAULT '',          -- 实际召唤用的 @ 格式
+        reason        TEXT DEFAULT '',          -- 没借到的原因（卡在哪条通路/缺什么）
+        owner         TEXT DEFAULT '',          -- 谁发起的借人（经理/小组长）
+        detail        TEXT DEFAULT '{}',        -- 完整留痕（候选、逐条通路结果）
+        ts            TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_borrow_task ON borrow_ledger(task_key)",
+    "CREATE INDEX IF NOT EXISTS idx_borrow_role ON borrow_ledger(role)",
 ]
 
 

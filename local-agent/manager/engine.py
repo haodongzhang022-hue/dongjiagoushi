@@ -112,8 +112,13 @@ NOT_MANAGER = {
 _ACCEPT_EVENTS = ("accepted", "awake_ack")
 _WORK_EVENTS = ("work_started", "delivered")
 _FAKE_RECEIPT = "[接单]"          # 只有梗概、没有后续动作 = 假装
-_STALL_ROUNDS = 2                 # 连续无进展轮数阈值 → 判停滞
+# 设为 2 的理由：单点不变不算停滞——**报一次进度就消失**是最常见的形态，
+# 但那一次可能只是"刚开始量"，也可能是 `track_progress(current=1, current=1)`
+# 这种原地踏步；单点分不出是哪种，所以要求连续 2 轮距离纹丝不动才判停滞
+# （宁可晚一轮报，不误伤刚开始推进的任务）。
+_STALL_ROUNDS = 2                 # 连续 2 轮距离纹丝不动 → 判停滞（单点不算）
 MAX_FLOW_ROUNDS = 4               # 承上启下默认调整轮数（超限显式上交，不静默）
+BORROW_MAX_ATTEMPTS = 3           # 单次借人最多试几个候选（借不到就下轮换人，不刷名册）
 _JUMP_ROUNDS = 3                  # 连续回退 delta 轮数阈值 → 判横跳
 
 
@@ -378,9 +383,14 @@ class ManagerEngine:
             a.setdefault("detail", a.get("title", ""))
             a["planned_index"] = idx
 
-        # dry_run 时 enable_issue=False（不碰平台），真实模式才建 Issue
+        # dry_run 时 enable_issue=False（不碰平台），真实模式才建 Issue。
+        # 演练（simulate）下派发层**不投接力卡、不开工**：`dispatch` 里的 L3→L4
+        # 会把已经回执的任务补一笔 `work_started`，那笔"开工"是派发方自己写的，
+        # 留在真任务上就会被后续监督当成"真在推进"——绿的其实是模拟器。
+        # 演练只为验证经理自己的链路，不该往真任务上记别人的动作。
         result = dispatch_engine.dispatch(
             self.repo, assignments, enable_issue=not self.dry_run,
+            trigger=not self.simulate,
         )
 
         activated = []
@@ -448,13 +458,20 @@ class ManagerEngine:
                     accepted.append(rec)
                     rec["state"] = "accepted"
                     continue
-            # 演练/测试：模拟对端回执（**simulated 级，不算干活**，仅让链路可离线跑）
+            # 演练/测试：模拟对端回执（**simulated 级，不算干活**，仅让链路可离线跑）。
+            # 必须排在真唤醒之前：`dispatch_trigger` 走 L3→L4，会对回了 [接单] 的任务
+            # 补一笔 `work_started`（"已开工"）。放在演练**之后**，那笔开工就落在
+            # 真任务上，被后续监督当成"真在推进"——这就是"绿的其实是模拟器"最后一条尾巴。
             if self._simulated_accept(rec):
                 rec["state"] = "simulated_ack"
                 awaiting.append(rec)
                 continue
-            # ② 真实唤醒一次（投接力卡）；唤醒本身失败 → 立刻换下一条通路（不空等）
+            # ② 真实唤醒一次（投接力卡）；唤醒本身失败 → 立刻换下一条通路（不空等）。
+            # 注意 `dispatch_trigger` 走的是 L3→L4：对已回执的任务会补一笔
+            # `work_started`，那笔"开工"不是承接方干的，不能当经理的证据。
             awake = self._reawake(rec)
+            if awake.get("sent"):
+                rec["trigger_emitted_work"] = True  # 本轮唤醒本身带出的开工，记账剔除
             rec["reawake"] = awake
             if not awake.get("sent"):
                 rec["lane_fallback"] = self._fallback_lane(rec)
@@ -718,28 +735,145 @@ class ManagerEngine:
                                           "error": f"{type(e).__name__}: {e}"})
         return added
 
-    def borrow_role(self, role, *, task_key=""):
-        """真跨岗借角色：用 HandleAbility 解析目标仓库里有权限的 @ 格式再召唤。
+    def borrow_candidates(self, exclude=(), task="", task_key="", retry_failed=False):
+        """跨岗可以借谁：**从团队名册派生 + 按任务语义排序 + 排除台账里借败的人**。
 
-        不是写一句"调用 HandleAbility 定位"——真调用，真拿到 handle，真去唤醒。
+        借人的语义是"本单位接不住 → 去别的功能域借"，所以候选必须
+        ① 在册（`get_role` 能装载出实例）② 不是被借走的那个岗 ③ 不是经理自己
+        ④ **不是这条任务上已经借败过的人**（失败不记 = 下轮重复找同一个人）。
+
+        `retry_failed=True` 时允许重试历史失败者（候选全借光后的显式兜底）。
         """
-        handle = ""
+        try:
+            from roles import roster_available
+        except Exception:  # noqa: BLE001 名册拿不到就退回已有承接方
+            roster_available = lambda: []
+        exclude = set(exclude or ())
+        pool = [r for r in roster_available()
+                if r not in exclude and r != self.owner]
+        if not pool:
+            pool = [r for r in ("架构·开发", "架构·评审", "架构·测试")
+                    if r not in exclude]
+        text = str(task or task_key or "")
+        pool.sort(key=lambda r: 0 if (r.split("·")[-1] and r.split("·")[-1] in text) else 1)
+        tried_failed = () if retry_failed else self.borrow_failed(task_key or text)
+        try:
+            from .borrow import pick_candidates
+            picked = pick_candidates(pool, task=text, exclude=exclude,
+                                     tried_failed=tried_failed)
+            return [p["role"] for p in picked]
+        except Exception:  # noqa: BLE001 台账取不到就退化为原序（显式降级）
+            return pool
+
+    def borrow_failed(self, task_key):
+        """该任务上「最近一次仍失败」的借人对象（台账派生，下轮跳过）。"""
+        from . import borrow as borrow_mod
+        try:
+            return tuple(borrow_mod.failed_roles(task_key) if task_key else ())
+        except Exception:  # noqa: BLE001 台账不可用时不臆断
+            return ()
+
+    def borrow_role(self, role="", *, task_key="", task="", exclude=(),
+                    attempts=None, retry_failed=False):
+        """按需跨岗借角色：**真解析 @ → 真召唤 → 记下成败 → 失败立刻换下一个**。
+
+        治用户点名的「缺这一步结果的记录，会重复找不到人用」：
+          - 每次借人都写 `borrow_ledger`（谁/哪条通路/成没成/为什么）；
+          - 这条任务上已经借败的人，下一次**不再自动重复借**；
+          - 一次借不到就试下一个候选，直到借到人或候选全败；
+          - 候选全败**显式说明"该换手段了"**（继续借只会重复踩同一批坑）。
+
+        「借到人」只认通路真投给被借者（`fullpath/codebuddy/direct_handle/platform`），
+        `lead` / `self` 兜底不算——把 self 记成借到人＝又给自己作了一次证。
+        """
+        from . import borrow as borrow_mod
+        exclude = set(exclude or ())
+        if role:
+            exclude.add(role)  # 指定了就不从同一个开始绕
+        key = task_key or str(task or "")
+        pool = self.borrow_candidates(exclude=exclude, task=task or task_key,
+                                      task_key=task_key,
+                                      retry_failed=retry_failed)
+        if role and role not in pool:
+            pool = [role] + [r for r in pool if r != role]
+        if not pool:
+            out = {"ok": False, "role": "", "handle": "", "lane": "",
+                   "candidates": [], "tried": [], "failed_roles": [],
+                   "reason": "名册里没有可借的候选人（该换手段：拆小/转小组长/上交）",
+                   "next": "借人这条路已走满 → 该换手段（拆小/转小组长/加派/上交）"}
+            self._log("borrow_no_candidate", out)
+            return out
+
+        # 每轮最多试 BORROW_MAX_ATTEMPTS 人：一次借不到就换下一个，但别一口气把
+        # 整个名册都试穿（那是刷日志，不是找人）；剩下的人留给下一轮，台账已记住
+        # 谁借败过，所以下轮自动跳过、不会重复。
+        limit = max(1, int(attempts or BORROW_MAX_ATTEMPTS))
+        tried, last = [], None
+        for cand in pool[:limit]:
+            one = self._borrow_once(cand, task_key=key)
+            tried.append(one)
+            last = one
+            if one["ok"]:
+                break
+        all_failed = [t for t in tried if not t["ok"]]
+        out = {
+            "ok": bool(last and last["ok"]),
+            "role": (last or {}).get("role", ""),
+            "handle": (last or {}).get("handle", ""),
+            "lane": (last or {}).get("lane", ""),
+            "reason": (last or {}).get("reason", ""),
+            "candidates": pool,
+            "tried": tried,
+            # 兼容既有调用方：最后一次尝试的唤醒结果（含 tried/attempts 通路留痕）
+            "wake": (last or {}).get("wake", {}),
+            "failed_roles": [t["role"] for t in all_failed],
+            "next": ("已借到人" if last and last["ok"] else
+                     ("候选全败 → 该换手段（拆小/转小组长/加派/上交），"
+                      "别再在这一批人身上循环" if len(tried) >= len(pool) else
+                      "本轮借不到，下轮自动跳过他继续试下一个")),
+        }
+        self._log("borrow_role", out)
+        return out
+
+    def _borrow_once(self, role, *, task_key=""):
+        """借一个人的一次完整尝试：解析 @ → 真召唤 → **记台账（成败都记）**。"""
+        from . import borrow as borrow_mod
+        handle, why = "", ""
         try:
             from handle import HandleAbility
-            ha = HandleAbility(agent_name=self.owner, repo=self.repo)
             org, _, repo_name = self.repo.partition("/")
-            resolved = ha.resolve(org, repo_name, role)
+            # 注意 `HandleAbility` 的入参名是 owner/current_org/current_repo，
+            # 上一版写成 `agent_name=/repo=` 直接 TypeError 被吞，于是**每次都在降级**
+            # 手写 @（还恰好看不出错）。这里按真实签名传，解析失败才算降级并写进台账。
+            ha = HandleAbility(owner=self.owner, current_org=org or None,
+                               current_repo=repo_name or None)
+            resolved = ha.resolve(target_org=org, target_repo=repo_name, role=role)
             handle = resolved.get("handle", "") if isinstance(resolved, dict) else str(resolved)
         except Exception as e:  # noqa: BLE001 解析失败降级为手写 @ 并留痕
             handle = f"@{self.repo}({role})" if self.repo else f"@{role}"
+            why = f"handle 解析降级：{type(e).__name__}: {e}"
             self._log("borrow_role_resolve_failed",
                       {"role": role, "error": f"{type(e).__name__}: {e}"})
         wake = self.wake_role(role, task_key=task_key,
                               note=f"跨岗借角色，handle={handle}")
-        out = {"role": role, "handle": handle, "wake": wake,
-               "ok": wake.get("ok", False)}
-        self._log("borrow_role", out)
+        ok = borrow_mod.counts_as_borrowed(wake)
+        reason = why or ("" if ok else borrow_mod._why_not(wake))
+        out = {"role": role, "handle": handle, "wake": wake, "ok": ok,
+               "lane": (wake or {}).get("lane", ""), "reason": reason}
+        # 台账：成败都记（这一步缺失就是"重复找不到人用"的根因）
+        led = borrow_mod.record(task_key, role, ok, handle=handle,
+                                lane=out["lane"], reason=reason,
+                                owner=self.owner,
+                                detail={"tried": wake.get("tried") if isinstance(wake, dict) else [],
+                                        "attempts": wake.get("attempts") if isinstance(wake, dict) else []})
+        if led.get("ledger_error"):
+            out["ledger_error"] = led["ledger_error"]
         return out
+
+    def borrow_overview(self, task_key=None):
+        """借人二级信息：借过谁、谁借到了、谁一直借不到（供人类/经理俯瞰）。"""
+        from . import borrow as borrow_mod
+        return borrow_mod.overview(task_key=task_key)
 
     def split_task(self, rec, parts=None):
         """真拆分：把过大的任务拆成若干可独立承接的子任务（不是记名字）。"""
@@ -810,25 +944,43 @@ class ManagerEngine:
                 "events": sorted(set(events)), "meter_rounds": len(meters),
                 "credential": cred["level"], "credential_ready": is_ready(cred)}
 
+        # 判活看两种东西：① 距离（进度尺推没推）② 凭据（是不是真承接方干的）。
+        # 开工了却连续不推进/反复回退是"卡住"，比"没接单"更该被揪出来。
+        stall, jump = _judge_series(meters)
+
+        # 哪些"开工"不该算承接方的功劳：演练投卡、以及**本轮经理唤醒自己带出的**
+        # `work_started`（`dispatch_trigger` 走 L3→L4，对已回执任务会补一笔开工）。
+        # 这些不是承接方干的活，剔除后再判。
+        # 这条任务上**有没有承接方真留在案上的成果**（推进/交付），这才叫"干了"；
+        # 单纯 `work_started` 不论谁写的都不算——它是动作，不是成果。
+        produced = _produced_count(task_id)
+        # 卡住（停滞/横跳）只要**有开过工 + 有刻度**就成立：推了两次还在原地，
+        # 说明对方在瞎忙，不能因为"没推进"就当没干活放过去。
+        stuck_work = has_work and bool(meters)
+        real_work = produced > 0
+
         if simulated_only and not is_ready(cred):
+            if stuck_work and stall:
+                return {**base, "verdict": "stall", "disposition": "interrupt",
+                        "reason": f"有刻度却连续 {_STALL_ROUNDS}+ 轮距离不变（停滞）"}
+            if stuck_work and jump:
+                return {**base, "verdict": "jump", "disposition": "interrupt",
+                        "reason": f"连续 {_JUMP_ROUNDS}+ 轮进度回退（横跳不收敛）"}
             return {**base, "verdict": "fake", "disposition": "hand_to_lead",
                     "reason": "只有演练回执（simulated），没有真实承接方开工 —— 不算分工"}
-
-        # 停滞 / 横跳（量化距离说话）
-        stall, jump = _judge_series(meters)
-        if has_work and stall:
+        if stuck_work and stall:
             return {**base, "verdict": "stall", "disposition": "interrupt",
                     "reason": f"连续 {_STALL_ROUNDS}+ 轮到目标距离不变"}
-        if has_work and jump:
+        if stuck_work and jump:
             return {**base, "verdict": "jump", "disposition": "interrupt",
                     "reason": f"连续 {_JUMP_ROUNDS}+ 轮进度回退（横跳不收敛）"}
-        if has_work:
+        if real_work:
             return {**base, "verdict": "real", "disposition": "keep",
-                    "reason": "有接单回执 + 开工/交付证据，真在推进"}
+                    "reason": "有接单回执 + 承接方真开工/交付证据，真在推进"}
         if has_receipt:
             # 最典型的假装：回了 [接单] 就没下文
             return {**base, "verdict": "fake", "disposition": "hand_to_lead",
-                    "reason": "回执了 [接单] 但无开工证据、无进度尺推进 —— 假装分工"}
+                    "reason": "回执了 [接单] 但无承接方开工证据、无进度尺推进 —— 假装分工"}
         return {**base, "verdict": "awaiting", "disposition": "hand_to_lead",
                 "reason": "无接单回执、无开工证据 —— 派发未落地"}
 
@@ -991,7 +1143,9 @@ class ManagerEngine:
             "not_manager": NOT_MANAGER,
             "entry": ["carry", "execute_plan", "activate", "push", "supervise",
                       "status", "guard", "delegate_to_lead",
-                      "try_lanes", "lanes", "authorize", "self_check"],
+                      "try_lanes", "lanes", "authorize", "self_check",
+                      "borrow_role", "borrow_candidates", "borrow_overview",
+                      "borrow_failed"],
             "decisions": {"single_path": "EXECUTE", "multi_path": "EXECUTE",
                           "empty": "BLOCKED"},
             "rules": self.RULES,
@@ -1067,6 +1221,52 @@ def _judge_series(meters):
     net_progress = sum(tail)
     jump = len(tail) >= _JUMP_ROUNDS and net_progress >= 0
     return stall, jump
+
+
+def _work_events(task_id):
+    """承接方"开工/交付"事件条数（原始计数，剔除工作交给调用方）。"""
+    from data import db
+    try:
+        rows = db.query("SELECT event FROM progress WHERE task_id=?", (task_id,))
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(1 for r in rows
+               if (r["event"] if not isinstance(r, tuple) else r[0]) in _WORK_EVENTS)
+
+
+def _produced_count(task_id):
+    """承接方留在案上的**成果**条数（progressed / delivered）。
+
+    只统计成果的含义：回了 [接单] 又补了一笔"开工"仍然不算干活——
+    开工是动作，推进和交付才是结果（治"接了单就没下文"）。
+    """
+    from data import db
+    try:
+        rows = db.query("SELECT event FROM progress WHERE task_id=?", (task_id,))
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(1 for r in rows
+               if (r["event"] if not isinstance(r, tuple) else r[0])
+               in ("progressed", "delivered"))
+
+
+def _self_induced_work_count(task_id):
+    """派发方自己带出来的"开工"条数：投接力卡时 `dispatch_trigger` 会给已回执
+    任务补一笔 `work_started`（经理唤醒动作的副产物），**不能算承接方开工**，
+    也不能当成"真在推进"的证据。"""
+    from data import db
+    try:
+        rows = db.query("SELECT event, detail FROM progress WHERE task_id=?",
+                        (task_id,))
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    for r in rows:
+        ev = r["event"] if not isinstance(r, tuple) else r[0]
+        detail = r["detail"] if not isinstance(r, tuple) else r[1]
+        if ev in _WORK_EVENTS and "已接单并开始执行任务" in str(detail or ""):
+            n += 1
+    return n
 
 
 def _plan_guess(activated):
