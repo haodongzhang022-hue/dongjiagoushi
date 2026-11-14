@@ -98,6 +98,30 @@ def _run_cnb(args, timeout=60):
 
 
 # ---------------------------------------------------------------------------
+# 一.5 建 Issue 前的唯一标题契约闸门（Issue #343 · 续接线）
+# ---------------------------------------------------------------------------
+def _gate_title(repo, title):
+    """把「想用的标题」过一遍唯一标题契约；契约不可用则原样放行（显式降级）。"""
+    try:
+        from expertise import issue_contract as _ic
+    except Exception:  # noqa: BLE001
+        return {"action": "create", "title": title,
+                "reason": "契约模块不可用，降级为原样创建"}
+    existing = []
+    try:
+        res = _run_cnb(["issues", "list-issues", "--repo", repo,
+                        "--state", "all", "--page-size", "100"])
+        raw = res.get("raw", "")
+        import re as _re
+        for m in _re.finditer(r'number:\s*"?([0-9]+)"?[\s\S]{0,200}?title:\s*"?([^\n"]+)"?', raw):
+            existing.append({"number": m.group(1), "title": m.group(2).strip()})
+    except Exception:  # noqa: BLE001
+        existing = []
+    return _ic.guard_create(title, existing, module="platform-adapter",
+                            issue_type="CHORE", seed=title)
+
+
+# ---------------------------------------------------------------------------
 # 二、真实信号发送（request：在云端真实建云开发请求 Issue 作锚）
 # ---------------------------------------------------------------------------
 def send(handle, repo=None, create_issue=True):
@@ -108,8 +132,16 @@ def send(handle, repo=None, create_issue=True):
     repo = repo or _detect_repo()
     req = handle.get("req") or "云开发请求"
     title = (req.strip().splitlines()[0])[:60] or "云开发请求"
-    # 若已有关联 issue_id 则复用（在既有 Issue 上发真实信号评论），否则真实新建
+    # 唯一标题契约闸门（Issue #343）：bridge 每次云开发请求都建锚点 Issue，
+    # 标题直接取测试字符串是「同一天又长出三条测试流 Issue」的源头。
+    # 契约化后：同诉求 → 同 key → 复用既有锚点，不再无限长垃圾。
+    gated = _gate_title(repo, title)
     existing = handle.get("issue_id")
+    if not existing and gated.get("action") == "reuse" and gated.get("reuse_number"):
+        existing = gated["reuse_number"]      # 同 key 已有锚点 → 复用，不新建
+    if gated.get("title") and not existing:
+        title = gated["title"]                # 标题契约化后再建
+    # 若已有关联 issue_id 则复用（在既有 Issue 上发真实信号评论），否则真实新建
     if existing:
         # 复用：在既有 Issue 上发一条"云开发请求已投递"真实评论作为信号
         body = ("[bridge 真实传输] 云开发请求已投递（entries.cnb_live · v0.5.0 真实本地实测）：\n"

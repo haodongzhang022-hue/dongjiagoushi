@@ -387,3 +387,84 @@ def build_body(*, objective, in_scope, out_of_scope, acceptance, verification,
         f"## 信息来源与时效\n" + "\n".join(src_lines) + "\n\n"
         f"## 版本声明\n" + ("\n".join(ver_lines) if ver_lines else "- （待补双版本声明）") + "\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# 四、派发前闸门（接线层：把契约真正挂到「建 Issue」这一步上）
+# ---------------------------------------------------------------------------
+# 为什么需要这一层：`plan()/dedupe_plan()` 只是**纯计算**，谁不调它谁就绕过契约。
+# 2026-11-14 实测就是这样——专家层与契约都合进 main 了，可 `dispatch_engine` /
+# `entries.cnb_live` 建 Issue 时仍然直接用自由文本当标题，于是同一天又长出
+# `开发登录模块 / 评审登录模块 / 测试登录模块` 三条。**契约不接线 = 不生效。**
+# 本层 `guard_create()` 是派发器唯一入口：给「想用的标题」，它返回
+# create（含契约化后的标题）/ reuse（已有同 key，别再建）/ reject（无法契约化）。
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def slugify_key(text, seed=""):
+    """把任意文本压成合法唯一键；压不出来时用 seed 的稳定摘要兜底。
+
+    中文标题（`开发登录模块`）没有可用 ascii，直接摘要——**保证稳定且唯一**，
+    绝不为了"好看"放行不合契约的键。
+    """
+    ascii_part = _SLUG_RE.sub("-", normalize(text).lower()).strip("-")
+    ascii_part = re.sub(r"-{2,}", "-", ascii_part)[:48].strip("-")
+    if len(ascii_part) >= 2 and ascii_part[0].isalnum():
+        return ascii_part
+    return "task-" + _stable_digest(seed or text)
+
+
+def derive_title(text, *, module="local-agent", issue_type="CHORE", seed=""):
+    """把不合格的标题**契约化**（保住唯一与幂等，不丢信息——原文进正文）。"""
+    return build_title(issue_type, module, slugify_key(text, seed=seed or text))
+
+
+def guard_create(title, existing=None, *, module="local-agent",
+                 issue_type="CHORE", seed="", derive=True):
+    """建 Issue 前唯一闸门：返回 create / reuse / reject，**永不返回原始垃圾标题**。
+
+    title    : 调用方想用的标题（可以是自由文本）
+    existing : [{number, title, state?}] 现有 Issue（含已关闭）
+    derive   : True=不合格标题自动契约化（保住幂等）；False=直接 reject
+
+    返回 {action, title, original, reason, derived, reuse_number, key}
+    """
+    original = normalize(title)
+    existing = existing or []
+    by_key = {}
+    for issue in existing:
+        k = issue_key(issue.get("title", ""))
+        if k:
+            by_key.setdefault(k, []).append(issue)
+
+    def _decide(candidate, derived, extra_reason=""):
+        key = issue_key(candidate)
+        hits = by_key.get(key) or []
+        open_hits = [h for h in hits if (h.get("state") or "open") == "open"]
+        target = (open_hits or hits or [None])[0]
+        if target is not None:
+            return {
+                "action": "reuse", "title": candidate, "original": original,
+                "key": key, "derived": derived, "reuse_number": str(target.get("number")),
+                "reason": (extra_reason + "；" if extra_reason else "")
+                          + f"已存在同 key Issue #{target.get('number')}，复用不再新建",
+            }
+        return {
+            "action": "create", "title": candidate, "original": original,
+            "key": key, "derived": derived, "reuse_number": None,
+            "reason": extra_reason or "符合唯一标题契约",
+        }
+
+    low, why = is_low_signal(original)
+    if not low:
+        return _decide(original, derived=False)
+
+    if not derive:
+        return {"action": "reject", "title": "", "original": original, "key": None,
+                "derived": False, "reuse_number": None, "reason": why}
+
+    derived_title = derive_title(original, module=module, issue_type=issue_type,
+                                 seed=seed or original)
+    return _decide(derived_title, derived=True,
+                   extra_reason=f"原标题不合格（{why}）→ 契约化为 {derived_title!r}")

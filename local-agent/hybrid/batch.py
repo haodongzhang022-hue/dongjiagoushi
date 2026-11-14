@@ -193,6 +193,16 @@ class CloudBatch(object):
         }
 
     def _create_issue(self, title, body):
+        # 唯一标题契约闸门（Issue #343）：批量提交也不许自由文本当标题
+        try:
+            import sys as _sys
+            _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from expertise import issue_contract as _ic
+            gated = _ic.guard_create(title, [], module="local-agent",
+                                     issue_type="CHORE", seed=title)
+            title = gated.get("title") or title
+        except Exception:  # noqa: BLE001  契约不可用不阻断，显式降级
+            pass
         url = "%s/%s/-/issues" % (API_BASE, self.repo)
         payload = json.dumps({"title": title, "body": body}, ensure_ascii=False)
         import urllib.request

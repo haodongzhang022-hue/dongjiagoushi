@@ -386,6 +386,48 @@ EOF
 then ok "E8 Issue 唯一标题契约（幂等派发/重复收并/低信号拦截/正文契约）"; else bad "E8 Issue 契约失败"; fi
 
 echo ""
+echo "===== [expertise] E9. 契约接线：派发器建 Issue 前必须过闸门 ====="
+if "$PY" - <<'EOF'
+import sys; sys.path.insert(0, '.')
+from expertise import issue_contract as ic
+
+# ① 不合格标题被契约化（不丢信息：原文保留在 original 里）
+g = ic.guard_create("开发登录模块", [])
+assert g["action"] == "create", g
+assert g["derived"] is True
+assert ic.issue_key(g["title"]) == "CHORE:local-agent:task-" + ic._stable_digest("开发登录模块")
+assert g["original"] == "开发登录模块"
+
+# ② 幂等：同诉求再来一次 → reuse，绝不建第二个（这是「不重复」的结构性保证）
+again = ic.guard_create("开发登录模块", [{"number": 42, "title": g["title"]}])
+assert again["action"] == "reuse" and again["reuse_number"] == "42", again
+# 已关闭的也 reuse（历史遗留可指回），不新开
+closed = ic.guard_create("开发登录模块", [{"number": 7, "title": g["title"], "state": "closed"}])
+assert closed["action"] == "reuse" and closed["reuse_number"] == "7", closed
+
+# ③ derive=False 时直接拒绝（不自动造标题）
+r = ic.guard_create("评审登录模块", [], derive=False)
+assert r["action"] == "reject" and r["title"] == "", r
+
+# ④ 合格标题原样放行，不被改写
+ok_g = ic.guard_create("FEAT:expertise · pareto-frontier", [])
+assert ok_g["action"] == "create" and ok_g["derived"] is False
+assert ok_g["title"] == "FEAT:expertise · pareto-frontier"
+
+# ⑤ 真实接线证据：派发器/传输通道/批量提交都必须 import 到契约闸门
+import inspect
+sys.path.insert(0, 'local-agent')
+import dispatch_engine
+assert hasattr(dispatch_engine, "guard_issue_title"), "dispatch_engine 未挂契约闸门"
+src = inspect.getsource(dispatch_engine._create_issue)
+assert "guard_issue_title" in src, "_create_issue 绕过闸门 = 契约不生效"
+from entries import cnb_live
+assert "_gate_title" in inspect.getsource(cnb_live.send), "bridge 锚点 Issue 未过闸门"
+print("  契约化/幂等/拒绝/放行 + 三处真接线 全部通过")
+EOF
+then ok "E9 契约接线（低信号契约化 · 同 key 复用 · 派发器不再绕过契约）"; else bad "E9 契约接线失败"; fi
+
+echo ""
 echo "──────────────────────────────────────────────"
 echo "expertise 信号灯：通过 $PASS 组，失败 $FAIL 组"
 if [ "$FAIL" -ne 0 ]; then

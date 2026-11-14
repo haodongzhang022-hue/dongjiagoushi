@@ -22,6 +22,7 @@
   - L4 要求：接单回执 + 进度尺推进 + 交付留痕。
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -77,10 +78,71 @@ def declare_assignments(assignments):
 # ============================================================
 # L2 分发：拆分任务 + 分配角色 + 投池 + 创建 Issue
 # ============================================================
+# ------------------------------------------------------------
+# 建 Issue 前的唯一闸门（Issue 唯一标题契约 · 接线层）
+# ------------------------------------------------------------
+# 契约模块 `expertise.issue_contract` 早就落地了，但派发器没调它 = 不生效：
+# 2026-11-14 实测同一天又长出「开发/评审/测试登录模块」三条测试流 Issue。
+# 这里把 `guard_create()` 挂到**唯一建 Issue 出口**上：标题契约化 + 同 key 复用，
+# 保证「名字唯一、不重复、可检索」是结构性的，而不是靠调用方自觉。
+_EXISTING_CACHE = {}
+
+
+def _existing_issues(repo):
+    """读云端现有 Issue（含已关闭），供幂等判定；读不到返回 []（不阻断派发）。"""
+    if repo in _EXISTING_CACHE:
+        return _EXISTING_CACHE[repo]
+    items = []
+    try:
+        result = subprocess.run(
+            ["cnb", "issues", "list-issues", "--repo", repo,
+             "--state", "all", "--page-size", "100"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        text = result.stdout or ""
+        for m in re.finditer(
+            r'number:\s*"?([0-9]+)"?[\s\S]{0,200}?title:\s*"?([^\n"]+)"?',
+            text,
+        ):
+            items.append({"number": m.group(1), "title": m.group(2).strip()})
+        for m in re.finditer(r'title:\s*"?([^\n"]+)"?[\s\S]{0,200}?number:\s*"?([0-9]+)"?', text):
+            items.append({"number": m.group(2), "title": m.group(1).strip()})
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        items = []
+    _EXISTING_CACHE[repo] = items
+    return items
+
+
+def guard_issue_title(repo, title, module="local-agent", issue_type="CHORE", seed=""):
+    """派发前闸门：返回 {action: create|reuse|reject, title, ...}（契约唯一入口）。"""
+    try:
+        from expertise import issue_contract as _ic
+    except Exception:  # noqa: BLE001  专家层不可用不阻断派发，但显式降级
+        return {"action": "create", "title": title, "original": title,
+                "derived": False, "reuse_number": None,
+                "reason": "契约模块不可用，降级为原样创建（显式暴露）"}
+    return _ic.guard_create(title, _existing_issues(repo) if repo else [],
+                            module=module, issue_type=issue_type, seed=seed)
+
+
 def _create_issue(repo, title, body):
-    """调用 cnb CLI 创建独立 Issue（平台留痕）。返回 issue_number 或 None。"""
+    """调用 cnb CLI 创建独立 Issue（平台留痕）。返回 issue_number 或 None。
+
+    所有派发都经 `guard_issue_title()`：低信号标题契约化、同 key 复用不重复建。
+    """
     if not repo:
         return None
+    gated = guard_issue_title(repo, title, seed=title)
+    if gated["action"] == "reject":
+        return None
+    if gated["action"] == "reuse":
+        return _to_int(gated.get("reuse_number"))
+    title = gated["title"]
+    if gated.get("derived"):
+        body = (body or "") + (
+            f"\n\n---\n> 原标题 `{gated['original']}` 不符合唯一标题契约，"
+            f"已契约化为 `{title}`（见 `docs/ISSUE_CONTRACT.md`）。原文见上文。\n")
     try:
         cmd = ["cnb", "issues", "create-issue",
                "--repo", repo, "--title", title, "--body", body]

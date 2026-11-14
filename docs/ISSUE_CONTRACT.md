@@ -109,11 +109,28 @@ Issue 正文必须含五段（与 `docs/ISSUE_TRACKING.md` 对齐），缺段即
 
 | 层 | 约束 | 失败时 |
 |---|---|---|
-| 派发器 | 所有建 Issue 必须经 `plan()` | 直连 API 建 Issue 视为违规 |
+| 派发器 | 所有建 Issue 必须经 `guard_create()` / `guard_issue_title()` | 直连 API 建 Issue 视为违规 |
 | 契约 | 标题不合规即 `rejected` | 不让垃圾进仓库 |
 | 正文 | 五段缺一即不合规 | `validate_body()` 拦截 |
 | 演练 | 批量操作先 dry-run | 不可逆动作先出计划再执行 |
-| 信号灯 | `test_expertise.sh` E8 | 契约被改坏即红灯 |
+| 信号灯 | `test_expertise.sh` E8/E9 | 契约被改坏即红灯 |
+
+### 4.1 接线（v0.2.0 · 从「有引擎」到「真生效」）
+
+只造出 `plan()` 不算落实——**谁不调它谁就绕过**。2026-11-14 实测正是这样：契约已合进
+main，可派发器仍用自由文本当标题，同一天又长出「开发 / 评审 / 测试登录模块」三条。
+
+现在把 `guard_create()` 挂到**建 Issue 的唯一出口**上：
+
+| 出口 | 接线点 | 行为 |
+|---|---|---|
+| 经理派发 L2 | `dispatch_engine._create_issue()` → `guard_issue_title()` | 低信号标题契约化；同 key 复用返回既有编号，**不再新建** |
+| bridge 云开发锚点 | `entries.cnb_live.send()` → `_gate_title()` | 同诉求 → 同 key → 复用既有锚点 Issue，垃圾不再无限长 |
+| 批量提交 | `hybrid.batch._create_issue()` | 标题先过契约再提交 |
+| 手工治理 | `scripts/issue-contract.py` | audit / plan / dedupe（dry-run 默认） |
+
+契约不可用（专家层缺失）时**降级为原样创建并在 `reason` 显式暴露**，不静默假装已守契约。
+E9 信号灯直接断言这三处代码里真有闸门调用（`inspect.getsource` 检查），防"文档说接了"。
 
 ## 五、已知边界
 

@@ -77,7 +77,8 @@
 | **专家级** | 帕累托前沿判定 | 帕累托/前沿/支配/多目标/选型/取舍/备选 | `local-agent/expertise/pareto.py` | docs/EXPERT_ARCHITECT.md §四 | Issue #343 |
 | **门禁** | 功能性代码验证门禁 | 外部验证/验证门禁/真实执行/功能验证/反造假/自述 | `local-agent/expertise/external_validation.py` | docs/EXPERT_ARCHITECT.md §三 | Issue #343 |
 | **门禁** | 信息时效性闸门 | 时效性/陈旧/过期/信息过时/日期/来源 | `local-agent/expertise/freshness.py` | docs/EXPERT_ARCHITECT.md §六 | Issue #343 |
-| **治理** | Issue 唯一标题契约 | issue 重复/命名不唯一/幂等派发/收并/低信号/去重 | `local-agent/expertise/issue_contract.py` | docs/ISSUE_CONTRACT.md | Issue #343 |
+| **治理** | Issue 唯一标题契约 | issue 重复/命名不唯一/幂等派发/收并/低信号/去重 | `local-agent/expertise/issue_contract.py` | docs/ISSUE_CONTRACT.md | 2026-11-14 · issue-contract v0.2.0 · Issue #343 |
+| **治理** | 建 Issue 唯一闸门（契约接线） | guard_create/契约化/派发器接线/不再绕过/同key复用 | `issue_contract.guard_create()` → `dispatch_engine.guard_issue_title()` / `cnb_live._gate_title()` / `hybrid.batch` | docs/ISSUE_CONTRACT.md §4.1 | 2026-11-14 · issue-contract v0.2.0 · Issue #343 |
 
 ## 二、角色总索引
 
