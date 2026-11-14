@@ -218,6 +218,11 @@ main:
 # ============================================================
 .npc_task: &npc_task
   name: architect npc
+  # 这里**故意不设 allowFailure**：模型被组织撤掉时必须红一次，提醒「该更新模型配置」。
+  # 如果设成 true，连「首选和兜底都失败」也会显示成功，等于把真故障藏掉。
+  # 红的语义因此很明确：环境漂移了，卡已经由 failStages 兜底发出去，但配置要跟上。
+  # 实测（2026-11-14）：首选被拒 → failStages 兜底跑平台默认模型成功，
+  # 对端仍能收到卡；流水线红只作为「去改 .cnb/npc-models.yml」的显式提醒。
   stages:
     - name: resolve npc model
       script: |

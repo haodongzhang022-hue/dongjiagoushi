@@ -129,8 +129,22 @@ history:                     # 变更留痕，换模型时写原因
 ```
 
 **为什么要有 `failStages` 一层**：`prefer` 命中的模型可能"配置里看着可用、组织那边已经撤了"。
-实测确认 `failStages` 里再跑一跳不写 `model` 的 `npc:go`，pipeline 最终判定 **success**
-（首选 error + 兜底 success），链路真正打得出卡 —— 这就是"一直可以通"的硬保证。
+实测确认 `failStages` 里再跑一跳不写 `model` 的 `npc:go`，卡片照常打出去 ——
+这就是"一直可以通"的硬保证。（实测日志：首选 `npc go` error → `npc model diagnose`
+打出被拒模型 + 整改建议 → `npc go (fallback)` 跑在 `deepseek-v4.1-flash` 上成功。）
+
+**为什么不给 `.npc_task` 设 `allowFailure: true`**：实测发现它会连「首选和兜底**都**失败」
+一起显示成 success，等于把真故障藏掉。保留红色是有意的：红 = 环境漂移了、卡由兜底发出去了、
+但 `.cnb/npc-models.yml` 该更新了。这是显式提醒，不是误报。
+
+### 端到端实测（2026-11-14）
+
+| 场景 | 首选 stage | fallback stage | 实际生效模型 |
+|---|---|---|---|
+| 正常（prefer 命中 hy4） | success | 未触发 | `model=hy4`（不是 flash ✅） |
+| 首选被组织拒（override 成假模型） | error | success | `model=deepseek-v4.1-flash`（兜底）|
+
+两条都用真流水线跑过，`Master[agent] model=<id>` 日志逐条核实。
 
 ## 六、CLI
 
