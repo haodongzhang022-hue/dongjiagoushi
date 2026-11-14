@@ -150,7 +150,11 @@ class ManagerRole(BaseRole):
         """懒加载经理引擎（绑定角色身份与当前仓库）。"""
         if self._manager_engine is None:
             from manager import ManagerEngine
-            repo = self._current_repo or os.environ.get("CNB_REPO") or ""
+            # 云端注入的是 CNB_REPO_SLUG / CNB_GROUP_SLUG+CNB_REPO_NAME，**没有 CNB_REPO**；
+            # 只读 CNB_REPO 会让经理在云端探测到空 repo → dry_run → 一条 Issue 都不建。
+            # 统一走 ManagerEngine 的探测（环境变量 → git remote → 兜底）。
+            from manager.engine import _detect_repo
+            repo = self._current_repo or _detect_repo()
             if repo and "/" not in repo and self._current_org:
                 repo = f"{self._current_org}/{repo}"
             self._manager_engine = ManagerEngine(

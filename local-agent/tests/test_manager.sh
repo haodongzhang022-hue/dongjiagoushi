@@ -1076,4 +1076,130 @@ print("  ✅ 单条借人记录可按 id 反查（返回值 = 库里实际写入
 print(f"      borrow_id={bid}")
 EOF
 
+echo "===== [manager] 38. repo 探测认对变量：云端没有 CNB_REPO，别把云端悄悄降级成本地 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr38.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+import importlib
+from manager import engine as eng
+
+# 复刻云端真实环境：有 CNB_REPO_SLUG / CNB_GROUP_SLUG + CNB_REPO_NAME，**没有 CNB_REPO**
+saved = {k: os.environ.get(k) for k in
+         ("CNB_REPO", "CNB_REPO_SLUG", "CNB_GROUP_SLUG", "CNB_REPO_NAME")}
+try:
+    for k in saved:
+        os.environ.pop(k, None)
+    os.environ["CNB_GROUP_SLUG"] = "someorg"
+    os.environ["CNB_REPO_NAME"] = "somerepo"
+    assert "CNB_REPO" not in os.environ
+    # ① 探测必须认出仓库（旧的 `os.environ.get("CNB_REPO")` 在这里取到空串）
+    assert eng._detect_repo() == "someorg/somerepo", eng._detect_repo()
+    # ② 不传 repo → 探测到真仓库 → dry_run 不再被静默置 True
+    m = eng.ManagerEngine()
+    assert m.repo == "someorg/somerepo", m.repo
+    print(f"  ✅ 云端只注入 CNB_REPO_SLUG/CNB_GROUP_SLUG 也能探测到仓库：{m.repo}")
+finally:
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+EOF
+
+echo "===== [manager] 39. dry_run 不许冒充「平台已激活」：本地登记 ≠ 已分工 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr39.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+from manager import ManagerEngine
+
+# 病根：`platform_active = bool(issue_no) or self.dry_run` —— dry_run 下"根本没碰平台"
+# 也被算成平台已激活，汇总报「已激活 N 条」。这是拿自己的假设给自己作证。
+m = ManagerEngine(repo="", dry_run=True)
+r = m.activate([{"task_key": "本地任务", "title": "本地任务",
+                 "role": "架构·开发", "domain": "自检", "detail": "x"}])
+rec = r["activated"][0]
+assert rec["issue"] is None, rec
+assert rec["platform_active"] is False, f"dry_run 未碰平台却判 platform_active={rec['platform_active']}"
+assert rec["state"] == "local_only", rec["state"]
+assert r["platform_activated"] == 0, r["platform_activated"]
+assert r["local_only"] == 1, r
+# 口径必须区分「本地登记」与「碰了平台但建不出」
+assert "本地登记" in r["summary"] if isinstance(r.get("summary"), str) else True
+d = m._digest(r, None, None) if hasattr(m, "_digest") else None
+print("  ✅ dry_run：platform_activated=0 / state=local_only（本地登记 ≠ 已分工）")
+print(f"      state={rec['state']} / 结论={r.get('summary', '')}")
+
+# 对照：真拿到 issue 号才算平台激活，不误伤
+class FakeRun:
+    returncode = 0
+    stdout = 'status: 201\ndata:\n  number: "999"\n'
+    stderr = ""
+import dispatch_engine as D
+orig = D.subprocess.run
+D.subprocess.run = lambda *a, **k: FakeRun()
+try:
+    m2 = ManagerEngine(repo="org/repo", dry_run=False)
+    r2 = m2.activate([{"task_key": "真建单", "title": "真建单",
+                       "role": "架构·开发", "domain": "自检", "detail": "x"}])
+    assert r2["platform_activated"] == 1, r2["platform_activated"]
+    assert r2["activated"][0]["state"] == "activated"
+    assert r2["activated"][0]["issue"] == 999
+finally:
+    D.subprocess.run = orig
+print("  ✅ 对照：真建出 Issue 才算 platform_activated=1，不误伤真激活")
+EOF
+
+echo "===== [manager] 40. 云端回执双轨：comment_stream 的 [接单] 必须真被 dispatch_verify 用上 ====="
+$PY - <<'EOF'
+import os, tempfile
+os.environ["DB_PATH"] = tempfile.mktemp(suffix="_mgr40.db")
+from data import admin, schema; admin.init(); schema.init_schema()
+import dispatch_engine as D
+import comment_stream as cs
+
+# 病根：`_cloud_receipt()` 早就写好，但 dispatch_verify 从未调用它 →
+# 云端只认本地 progress 事件，而对端的 [接单] 在**平台评论**里，
+# 那笔永远进不了 progress 表 → 明明回了接单仍被判「未回执」。
+assert "cloud_checked" in D.dispatch_verify([]), "dispatch_verify 必须暴露云轨是否查过"
+
+# 夹具：对端在 Issue 里回了 [接单]
+class FakeTransport:
+    def __init__(self, comments): self.comments = comments
+    def fetch(self, page, page_size):  # pragma: no cover - 仅接口占位
+        return {"items": self.comments, "has_more": False}
+
+orig_read = cs.read_comments
+try:
+    cs.read_comments = lambda **kw: {
+        "comments": [{"body": "@dongdongxiaozu/dongjiagoushi(架构·开发) [接单] 开工",
+                      "created_at": "2026-11-15T00:00:00Z"}],
+        "count": 1, "pages": 1, "page_size": 100,
+        "has_more": False, "complete": True, "truncated": False,
+        "source": "fixture", "kind": "issue", "number": 347,
+    }
+    # ① 本地 progress 表零事件，但云端评论有 [接单] → 必须判「已真实唤醒」
+    v = D.dispatch_verify([{"task_id": "tk40", "agent_id": "ag40", "role": "架构·开发",
+                            "issue_number": "347"}], cloud=True)
+    assert v["cloud_checked"] is True, v
+    assert v["detail"][0]["receipt"] is True, v["detail"]
+    assert v["detail"][0]["receipt_source"] == "cloud", v["detail"]
+    assert v["verified_all_awake"] is True, v
+
+    # ② 评论流没读全 → 不许判「未回执」当结论，须显式 degraded
+    cs.read_comments = lambda **kw: {
+        "comments": [], "count": 0, "pages": 5, "page_size": 100,
+        "has_more": True, "complete": False, "truncated": True,
+        "source": "fixture", "kind": "issue", "number": 347,
+    }
+    v2 = D.dispatch_verify([{"task_id": "tk40b", "agent_id": "ag40b", "role": "架构·开发",
+                             "issue_number": "347"}], cloud=True)
+    assert v2["cloud_degraded"], "读不全必须显式暴露，不能静默判未回执"
+    assert v2["verified_all_awake"] is False
+finally:
+    cs.read_comments = orig_read
+print("  ✅ 云端 [接单] 真进了判据（receipt_source=cloud）；读不全显式 degraded，不静默判未回执")
+EOF
+
 echo "===== [manager] ALL PASS ====="

@@ -546,6 +546,29 @@ def deliver(task_key, agent_id, output, issue_ref="", role="架构·开发"):
 #                         否则接口默认 page_size=10 会静默截断、把「已回执」误判成
 #                         「链悬空」（Issue #166 · PR #161 真实踩坑）。
 # ============================================================
+def _cnb_available():
+    """平台 CLI 是否可用（可用才值得去查云端回执）。"""
+    from shutil import which
+    return bool(which("cnb"))
+
+
+def _detect_repo():
+    """探测当前操作仓库（org/repo）—— **云端没有 `CNB_REPO` 这个变量**。
+
+    实测：云端注入的是 `CNB_REPO_SLUG`（`org/repo`）、`CNB_GROUP_SLUG` + `CNB_REPO_NAME`；
+    `CNB_REPO` 只在旧的本地/其他宿主语境存在。原先只读 `CNB_REPO`，云端取到空串 →
+    回执核验直接抛"repo 必填"进 degraded，或退化成"永远查不到回执"。
+    """
+    try:
+        from handle.resolver import detect_current_org_repo
+        org, repo = detect_current_org_repo()
+        if org and repo:
+            return f"{org}/{repo}"
+    except Exception:  # noqa: BLE001 探测失败留给调用方显式暴露
+        pass
+    return os.environ.get("CNB_REPO") or ""
+
+
 def _has_receipt(task_id, agent_id):
     """检测某任务的对端 agent 是否有真实接单回执（accepted / awake_ack）。
 
@@ -595,7 +618,7 @@ def _cloud_receipt(assignments, since=None, role_keys=None):
             stream = read_comments(
                 kind="pull" if a.get("kind") == "pull" else "issue",
                 number=int(str(number).lstrip("#")),
-                repo=a.get("repo") or os.environ.get("CNB_REPO"))
+                repo=a.get("repo") or _detect_repo())
         except Exception as e:  # noqa: BLE001 - 读取失败显式暴露，绝不静默判"未回执"
             degraded.append({"issue": number, "role": role, "error": str(e)[:200]})
             detail.append({"issue": number, "role": role, "receipt": False,
@@ -632,42 +655,82 @@ def _cloud_receipt(assignments, since=None, role_keys=None):
     }
 
 
-def dispatch_verify(assignments):
+def dispatch_verify(assignments, cloud=False):
     """核验一组已派发任务的真实唤醒状态（L4 闸门）。
 
-    输入：dispatch()/dispatch_assign() 产出的分发记录清单（含 task_id/agent_id/role）
+    输入：
+      assignments: dispatch()/dispatch_assign() 产出的分发记录清单
+                   （含 task_id/agent_id/role，云端语境还需 issue_number/issue）
+      cloud:       是否补查**云端评论流**的 `[接单]` 回执（默认 False = 只认本地）。
+                   **必须由调用方显式声明**，不能靠"有 issue 号就自动查"——
+                   否则任何一个拿假 issue 号当夹具的测试都会去打真网络，
+                   而那个号里的真实评论会反过来污染断言（本轮 feature-verify 真踩到：
+                   夹具写 `issue_number: 109`，109 的评论里恰好有 `[接单]`，
+                   于是"无回执任务"被外部数据判成已回执）。
     输出：
       verified_all_awake : 是否所有任务都已真实接单（True=可放行到 L4）
       awaiting_receipt   : 未获接单回执、待真实唤醒的任务清单（假装分配会在这里现形）
-      detail             : 每个任务的真实唤醒核验明细
+      detail             : 每个任务的真实唤醒核验明细（含 receipt_source）
+      cloud_degraded     : 评论流没读全/读取失败的条目（判据可能假阴性，须显式暴露）
+
+    ## 双轨判据（本轮补漏 · Issue #239 收尾）
+
+    `_cloud_receipt()` 早就写好了，但**从未被 `dispatch_verify` 调用过**——
+    于是云端核回执只看本地 `progress` 事件（`accepted`/`awake_ack`），而云端真实回执
+    是**对端在 Issue 评论里回复 `[接单]`**，那笔永远不会写进本地 progress 表。
+    结果是：对端明明回了 `[接单]`，经理仍判「未回执」→ 转小组长 → 上报"有活停在嘴上"。
+    判据写好了却没接线，等于没有（和「功能写在旁边不接线」是同一个病）。
+
+    现在：本地 progress 事件 **或** 云端评论流 `[接单]` 任一命中即算真实唤醒，
+    `receipt_source` 标明凭据来自哪一轨，不混为一谈。
     """
-    awaiting = []
-    detail = []
+    assignments = list(assignments or [])
+    has_issue = any((a.get("issue_number") or a.get("issue")) for a in assignments)
+    # 显式声明 + 有 Issue 载体 + 平台可用，三者齐备才真去查云（缺一就不打网络）。
+    cloud = bool(cloud) and has_issue and _cnb_available() and bool(_detect_repo())
+
+    cloud_rows, cloud_degraded = {}, []
+    if cloud:
+        try:
+            cres = _cloud_receipt(assignments)
+            cloud_rows = {(str(d.get("issue")), d.get("role")): d
+                          for d in cres.get("detail", [])}
+            cloud_degraded = cres.get("degraded", [])
+        except Exception as e:  # noqa: BLE001 读取侧失败必须显式暴露，不静默判未回执
+            cloud_degraded = [{"reason": f"{type(e).__name__}: {e}"}]
+
+    awaiting, detail = [], []
     for a in assignments:
         task_id = a.get("task_id") or a.get("gid") or ""
         agent_id = a.get("agent_id") or ""
-        ok = _has_receipt(task_id, agent_id)
-        if not ok:
-            awaiting.append({
-                "task_key": a.get("task_key", ""),
-                "task_id": task_id,
-                "agent_id": agent_id,
-                "role": a.get("role", ""),
-                "issue": a.get("issue_number") or a.get("issue", ""),
-            })
-        detail.append({
+        issue = a.get("issue_number") or a.get("issue", "")
+        role = a.get("role", "")
+        local_ok = _has_receipt(task_id, agent_id)
+        crow = cloud_rows.get((str(issue), role)) if issue else None
+        cloud_ok = bool(crow and crow.get("receipt"))
+        ok = local_ok or cloud_ok
+        source = ("local+cloud" if (local_ok and cloud_ok)
+                  else "local" if local_ok
+                  else "cloud" if cloud_ok else "")
+        row = {
             "task_key": a.get("task_key", ""), "task_id": task_id,
-            "agent_id": agent_id, "role": a.get("role", ""),
-            "issue": a.get("issue_number") or a.get("issue", ""),
-            "receipt": ok,
-        })
+            "agent_id": agent_id, "role": role, "issue": issue,
+            "receipt": ok, "receipt_source": source,
+        }
+        if not ok:
+            awaiting.append({k: row[k] for k in
+                             ("task_key", "task_id", "agent_id", "role", "issue")})
+        detail.append(row)
+
     return {
-        "verified_all_awake": len(awaiting) == 0,
+        "verified_all_awake": len(awaiting) == 0 and not cloud_degraded,
         "total": len(assignments),
         "awake_count": len(assignments) - len(awaiting),
         "awaiting_receipt_count": len(awaiting),
         "awaiting_receipt": awaiting,
         "detail": detail,
+        "cloud_checked": cloud,
+        "cloud_degraded": cloud_degraded,
         "note": ("所有任务均已获对端 [接单] 回执，真实唤醒成立，可放行到 L4"
                  if len(awaiting) == 0 else
                  "存在未获 [接单] 回执的任务——仅投了接力卡未真唤醒，"

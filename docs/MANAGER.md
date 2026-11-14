@@ -47,9 +47,25 @@
 ```python
 m = ManagerEngine(repo="org/repo")
 r = m.activate(plan)
-# r["platform_activated"]  真正在平台激活了几条
-# r["blocked_no_issue"]    几条建不出 Issue（等于没激活，必须显式暴露）
+# r["platform_activated"]  真正在平台建出 Issue 的条数（dry_run 下恒为 0）
+# r["local_only"]          只做了本地登记的条数（dry_run 未碰平台，不算已分工）
+# r["blocked_no_issue"]    碰了平台但建不出 Issue（等于没激活，必须显式暴露）
 ```
+
+#### 🔴 两个口径必须分开：本地登记 ≠ 已分工
+
+`repo` 不传时**探测当前仓库**（`_detect_repo()`），探测不到才 `dry_run`。判定三态：
+
+| state | 含义 | 算不算已分工 |
+|---|---|---|
+| `activated` | 平台真建出 Issue | ✅ |
+| `local_only` | dry_run 本地登记，平台零 Issue | ❌ 只是本地链路自检 |
+| `blocked_no_issue` | 碰了平台但建不出 Issue | ❌ 须修通道重试 |
+
+早先的判据是 `platform_active = bool(issue_no) or self.dry_run` —— `dry_run` 下
+"根本没碰平台"也被算成 `platform_active=True`，汇总报「平台已激活 N 条」，实际平台 Issue 数 0。
+**这是拿自己的假设给自己作证**，与本文件 §十「回执不是成果」同一个病。现在 `local_only`
+单列，`platform_activated` 只数真建出 Issue 的。`test_manager.sh` 第 39 组锁死。
 
 #### 🔴 顺手挖出的真实根因（比"嘴上不干活"更硬）
 
@@ -198,7 +214,7 @@ data:
 
 ---
 
-## 七、验收标准（`local-agent/tests/test_manager.sh` 20 组信号灯）
+## 七、验收标准（`local-agent/tests/test_manager.sh` 40 组信号灯）
 
 1. 计划即命令：单路 EXECUTE / 多路取首个 / 空 BLOCKED，无「纠结」出口；
 2. ACTIVATE 闸门：计划 → 逐条激活（任务 gid + 承接角色），空计划显式拒绝；
@@ -223,7 +239,11 @@ data:
     6 类红线（扩容并发/预算/额度/合并/改架构/删数据）仍判 HUMAN，超成本口径单列；
 20. 唤醒失败不是终点：`_fallback_lane()` 按序换通路（fullpath → codebuddy →
     direct_handle），逐条判就绪并记 `missing`，留 `lane_fallback` 痕；仍无人接则交
-    小组长，不空等、不谎报。
+    小组长，不空等、不谎报；
+21-37. 接线闸门 / 证据分级 / 借人台账（见 §九-§十一）；
+38. repo 探测认对变量：云端只有 `CNB_REPO_SLUG` 也探测得到，`dry_run` 不被静默置 True（§12.1）；
+39. `dry_run` 不许冒充「平台已激活」：`local_only` 与 `activated` 两态分离（§12.2）；
+40. 云端 `[接单]` 真进判据（`receipt_source=cloud`），读不全显式 `cloud_degraded`（§12.3）。
 
 ```bash
 cd local-agent && bash tests/test_manager.sh
@@ -666,3 +686,70 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 > 这轮的教训：**"试过了"和"记住了"是两件事。**
 > 只试不记，团队就是个失忆的人——每轮都在同一个坑前重新摔一次，
 > 而且每次都觉得自己很努力。
+
+## 十二、收尾轮三：判据写好了却没接线，等于没有（Issue #239 · 收尾）
+
+这一轮不动功能，只做一件事：**拿真环境去量已合并的成品**。三处全在「平台到底碰没碰过」这条线上。
+
+### 12.1 探测读错变量，云端被悄悄降级成本地
+
+云端注入的是 `CNB_REPO_SLUG` / `CNB_GROUP_SLUG` + `CNB_REPO_NAME`，**没有 `CNB_REPO`**。
+而 `ManagerEngine`、`dispatch_engine`、`roles/manager.py` 一路读的都是 `CNB_REPO`：
+
+```
+云端实测（改前）
+  CNB_REPO_SLUG = 'dongdongxiaozu/dongjiagoushi'
+  CNB_REPO      = None                 ← 读它，取到空串
+  → repo=''  → dry_run=True  → 平台 Issue 一个都不建
+```
+
+链路静默降级成本地，**日志里一切正常**。现在统一走 `_detect_repo()`（复用
+`handle.resolver.detect_current_org_repo()`：环境变量 → git remote → 兜底）。
+
+`repo` 参数语义也收紧了：不传/`None` → 探测；显式 `""` → 视作无仓库（离线单测刻意断网）。
+
+### 12.2 `dry_run` 冒充「平台已激活」
+
+`platform_active = bool(issue_no) or self.dry_run` —— 没碰平台也被算成激活。
+现在三态分离（见 §二），`local_only` 单列，`platform_activated` 只数真建出 Issue 的。
+
+### 12.3 `_cloud_receipt()` 写好了，但 `dispatch_verify()` 从没调过它
+
+这是三处里最硬的一处。`_cloud_receipt()` 早就存在（Issue #166 修的读取侧），
+注释里写着"与 `_has_receipt()` 双轨互补"，**但 `dispatch_verify()` 里一次都没调用**：
+
+```
+云端真实场景：
+  对端在 Issue 评论回 [接单]  → 平台可见 ✅
+  本地 progress 表 accepted 事件 → 云端永远不会写 ❌
+  dispatch_verify → _has_receipt() → False → 判「未回执」
+  → 经理转小组长 → 上报"有活停在嘴上"
+```
+
+**对端明明接了单，判据说没接。** 现在 `dispatch_verify(assignments, cloud=False)`
+两轨任一命中即算真实唤醒，`receipt_source` 标明凭据来自哪一轨（`local` / `cloud` / `local+cloud`），
+评论流读不全则进 `cloud_degraded` 显式暴露，不静默判「未回执」。
+
+`cloud` **必须由调用方显式声明**，不做"有 issue 号就自动查"。原因是本轮真踩到：
+
+> `feature-verify/dispatch/真实唤醒校验闸门.sh` 拿 `issue_number: 109` 当夹具，
+> 而 #109 的评论里恰好有真实 `[接单]`。自动查云一开，**夹具变成了活的**——
+> "无回执任务"被外部真实数据判成已回执，三条断言全红。
+> 假数据打真网络，测的就不再是代码，是别人仓库里恰好写了什么。
+
+### 12.4 验收（`test_manager.sh` 37 → 40 组）
+
+| 组 | 锁什么 |
+|----|--------|
+| 38 | 云端只注入 `CNB_REPO_SLUG` 系列也能探测到仓库；不传 repo 时 `dry_run` 不被静默置 True |
+| 39 | `dry_run` 下 `platform_activated=0` + `state=local_only`；真建出 Issue 才 `activated`/`platform_activated=1` |
+| 40 | 云端 `[接单]` 真进判据（`receipt_source=cloud`）；评论流读不全 → `cloud_degraded`，不静默判未回执 |
+
+新增功能级证据脚本 `scripts/feature-verify/manager/平台真碰过没.sh`（5 条）。
+单测全用 `dry_run=True` 跑，**天然碰不到平台变量与平台回执**——这两处断链只有真环境会现形，
+所以证据脚本专门复刻云端变量环境 + 云端评论回执。
+
+> 这轮的教训：**判据写好了却没接线，等于没有。**
+> `_cloud_receipt()` 是一个做对了的零件，静静躺在那里，注释还写着"双轨互补"。
+> 双轨的另一轨从来没接上过——而这种缺失比写错更难发现：写错会报错，
+> 没接线只会沉默地给出一个**看起来合理的结论**。

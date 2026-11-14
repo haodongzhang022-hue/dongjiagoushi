@@ -176,6 +176,14 @@ L4 不是"多一个开关"，而是把「接单 → 工作」的整条链路跑�
   时单值 `levels_reached` 报 4 有歧义（会让调用方误以为全部到 L4）。summary 增加两层——
   `levels_reached_max`（任一任务最深到达层级）与 `levels_reached_min`（全部任务都已到达的
   保守层级）；`levels_reached` 保留为 min（向后兼容 · 不谎报）。
+- **云端回执双轨（本轮补漏 · Issue #239 收尾）**：`_cloud_receipt()`（读 Issue/PR 评论流的
+  `[接单]`）早就存在，但**从未被 `dispatch_verify()` 调用过**——于是云端核回执只看本地
+  `progress` 事件，而对端真实回执在**平台评论**里，那笔永远不会写进 progress 表。
+  结果：对端明明回了 `[接单]`，仍被判「未回执」→ 转小组长 → 上报"有活停在嘴上"。
+  现在 `dispatch_verify(assignments, cloud=...)` 两轨任一命中即算真实唤醒，
+  `receipt_source` 标明凭据来源（`local`/`cloud`/`local+cloud`）；评论流读不全进
+  `cloud_degraded` 显式暴露。`cloud` **由调用方显式声明**，不做"有 issue 号就自动查"
+  ——否则拿假 issue 号当夹具的测试会去打真网络，被外部真实数据污染断言。
 - **能力全员化**：`dispatch_verify` 已透传到 `DispatchAbility` + `BaseRole`，秘书/经理/产品/
   开发等任意角色都可调用，**不再"列个表就自认完成"**。
 - **上级「对结果负责」纵向俯瞰（`handoff_status`）**：与 `dispatch_verify`（面向"一组派发"在

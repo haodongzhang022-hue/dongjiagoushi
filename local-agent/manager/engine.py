@@ -298,16 +298,19 @@ class ManagerEngine:
         ),
     }
 
-    def __init__(self, repo="", owner="架构·经理", dry_run=None,
+    def __init__(self, repo=None, owner="架构·经理", dry_run=None,
                  devs_per_team=2, simulate=None, transport=None, workers=None,
                  max_rounds=None):
         """
-        repo:      仓库（org/repo），空则取 CNB_REPO 环境变量
+        repo:      仓库（org/repo）。
+                   - 不传/None → **探测当前仓库**（见 _detect_repo，云端/本地都认）；
+                   - 显式 ""    → 视作「没有仓库」（离线/单测刻意断网，不探测）；
+                   - "org/repo" → 用给定值。
         dry_run:   True=只走本地登记不碰平台（默认：无 repo 或非云端时自动 True）
         simulate:  测试/演练注入 —— {role: "accept"|"ignore"|"deliver"} 模拟对端真实行为
         transport: 平台传输层注入（离线可测），缺省用 cnb CLI
         """
-        self.repo = repo or os.environ.get("CNB_REPO") or ""
+        self.repo = _detect_repo() if repo is None else repo
         self.owner = owner
         self.devs_per_team = max(1, int(devs_per_team))
         self.simulate = simulate or {}
@@ -403,12 +406,23 @@ class ManagerEngine:
                 "role": a["role"],
                 "domain": a["domain"],
                 "issue": issue_no,
-                # 判据：真激活 = 平台上有可被对端认领的 issue；dry_run 显式标明未碰平台
-                "platform_active": bool(issue_no) or self.dry_run,
+                # 判据：**真激活 = 平台上真有一个可被对端认领的 issue**。
+                # 早先写成 `bool(issue_no) or self.dry_run`，于是 dry_run 下"没碰平台"
+                # 也被算成 platform_active=True —— 汇总报「平台已激活 N 条」，
+                # 实际平台 Issue 数 0。这是拿自己的假设给自己作证（同 #342 的病）。
+                "platform_active": bool(issue_no),
                 "dry_run": self.dry_run,
-                "state": "activated",
             }
-            if not rec["platform_active"]:
+            if rec["platform_active"]:
+                rec["state"] = "activated"
+            elif self.dry_run:
+                # 显式区分「没碰平台」与「碰了但建不出」——前者不是病，后者才是
+                rec["state"] = "local_only"
+                rec["blocked_reason"] = (
+                    "dry_run=本地登记：未碰平台，平台侧零 Issue；"
+                    "这不是已分工，只是本地链路自检"
+                )
+            else:
                 rec["state"] = "blocked_no_issue"
                 rec["blocked_reason"] = (
                     "计划项未在平台建出 Issue —— 对端 agent 无载体可认领，"
@@ -419,7 +433,8 @@ class ManagerEngine:
         self.activated.extend(activated)
         payload = {
             "count": len(activated),
-            "platform_activated": sum(1 for x in activated if x["platform_active"]),
+            "platform_activated": sum(1 for x in activated if x["state"] == "activated"),
+            "local_only": sum(1 for x in activated if x["state"] == "local_only"),
             "blocked_no_issue": sum(1 for x in activated if x["state"] == "blocked_no_issue"),
             "dry_run": self.dry_run,
             "tasks": activated,
@@ -440,7 +455,10 @@ class ManagerEngine:
             return {"pushed": 0, "awaiting": [], "delegated": []}
 
         import dispatch_engine
-        verify = dispatch_engine.dispatch_verify(activated)
+        # cloud=True：经理核回执**必须**看云端 Issue 评论里的 [接单]。
+        # 只认本地 progress 事件的话，云端对端明明回了 [接单] 也判"未回执"→
+        # 转小组长 → 上报"有活停在嘴上"，判据与实际相反。（dry_run 下引擎内部会跳过云查）
+        verify = dispatch_engine.dispatch_verify(activated, cloud=not self.dry_run)
         receipts = {d["task_id"]: d["receipt"] for d in verify["detail"]}
 
         accepted, awaiting, delegated = [], [], []
@@ -1127,6 +1145,7 @@ class ManagerEngine:
             "activated": activated,
             "count": act["count"],
             "platform_activated": act["platform_activated"],
+            "local_only": act.get("local_only", 0),
             "blocked_no_issue": act["blocked_no_issue"],
             "push": pushed,
             "supervise": supervised,
@@ -1170,6 +1189,30 @@ class ManagerEngine:
 # ------------------------------------------------------------
 # 内部工具
 # ------------------------------------------------------------
+def _detect_repo():
+    """探测当前操作仓库（org/repo）—— **不读 CNB_REPO，那个变量云端根本没有**。
+
+    真实踩坑（本轮实测）：云端注入的是 `CNB_REPO_SLUG`（`org/repo`）/
+    `CNB_GROUP_SLUG`+`CNB_REPO_NAME`，**没有 `CNB_REPO`**。
+    而本引擎、`dispatch_engine`、`roles/manager.py` 一路读的都是 `CNB_REPO`，
+    于是云端取到空串 → `dry_run` 自动置 True → **平台 Issue 一个都不建**，
+    但 `platform_active` 又因为 `dry_run` 判 True → 汇总报「已激活 N 条」。
+    链路静默降级成本地，还拿本地判据给自己作证 —— 和 #342「回执不是成果」是同一个病。
+
+    探测顺序：`handle.resolver.detect_current_org_repo()`（环境变量 → git remote →
+    默认兜底，且已覆盖 CNB_REPO_SLUG / CNB_GROUP_SLUG+CNB_REPO_NAME / CNB_REPO / GIT_*）
+    → 兜底空串（由调用方判 dry_run，绝不静默假装碰过平台）。
+    """
+    try:
+        from handle.resolver import detect_current_org_repo
+        org, repo = detect_current_org_repo()
+        if org and repo:
+            return f"{org}/{repo}"
+    except Exception:  # noqa: BLE001 探测失败不阻断，交给兜底显式暴露
+        pass
+    return os.environ.get("CNB_REPO") or ""
+
+
 def _cnb_available():
     """平台通道是否可用（可用才允许真实建 Issue）。"""
     from shutil import which
@@ -1277,7 +1320,9 @@ def _plan_guess(activated):
 
 def _digest(act, pushed, supervised):
     """一句话结论（先给结论再给依据）。"""
-    parts = [f"激活 {act['platform_activated']}/{act['count']} 条任务"]
+    parts = [f"平台激活 {act['platform_activated']}/{act['count']} 条任务"]
+    if act.get("local_only"):
+        parts.append(f"{act['local_only']} 条只是本地登记（dry_run，平台零 Issue，不算已分工）")
     if act["blocked_no_issue"]:
         parts.append(f"{act['blocked_no_issue']} 条未拿到 Issue（等于没激活）")
     if pushed:
