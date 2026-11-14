@@ -128,7 +128,14 @@ class ExpertiseAbility:
 
     # -- 帕累托 -------------------------------------------------------------
     def pareto_evaluate(self, candidates, preferred=None):
-        """多目标备选的前沿判定与可解释取舍。"""
+        """多目标备选的前沿判定与可解释取舍。
+
+        candidates: [{"name": str, "objectives": {目标: 数值},
+                      "direction": {目标: "max"|"min"}}]
+                    objectives 必填且非空；目标集不同的候选视为跨签名、互不支配。
+        preferred:  可选，指定首选方案名（不在前沿上会被否决并在 explanation 说明）。
+        返回:  {trustworthy, frontier, layers, dominated, choice, scores{name: score}, explanation}
+        """
         return self._require()["pareto"].evaluate(candidates, preferred=preferred)
 
     # -- 能力声明（供 CAPABILITY_INDEX / 自述对齐）--------------------------

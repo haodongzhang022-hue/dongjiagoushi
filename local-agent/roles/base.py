@@ -784,7 +784,11 @@ class BaseRole:
         return self._exa().check_freshness(items)
 
     def pareto_evaluate(self, candidates, preferred=None):
-        """多目标备选的前沿判定与可解释取舍。"""
+        """多目标备选的前沿判定与可解释取舍。
+
+        candidates 形状：[{"name", "objectives": {目标: 数值}, "direction": {目标: "max"|"min"}}]，
+        形状传错会 ValueError；返回的 scores 是 {方案名: 标准化总分}。
+        """
         return self._exa().pareto_evaluate(candidates, preferred=preferred)
 
     def secretary_scale_logs(self, limit=50):

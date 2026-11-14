@@ -148,7 +148,10 @@ def evaluate(candidates, preferred=None):
             continue
         total = 0.0
         for k in keys:
-            vals = [o["objectives"].get(k) for o in prepared if k in o["objectives"]]
+            if k not in c["objectives"]:
+                # 跨签名的候选缺该目标：不参与该目标标准化，也不因此被当成 0（缺维≠差）。
+                continue
+            vals = [o["objectives"][k] for o in prepared if k in o["objectives"]]
             lo, hi = min(vals), max(vals)
             norm = 0.5 if hi - lo < _EPS else (c["objectives"][k] - lo) / (hi - lo)
             total += norm
@@ -176,6 +179,6 @@ def evaluate(candidates, preferred=None):
         "layers": layers(candidates),
         "dominated": dominated,
         "choice": choice,
-        "scores": dict(scored),
+        "scores": {name: score for score, name in scored},
         "explanation": explanation,
     }

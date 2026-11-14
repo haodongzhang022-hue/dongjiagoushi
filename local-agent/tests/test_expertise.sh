@@ -126,6 +126,21 @@ assert minres["frontier"] == ["廉价"], minres["frontier"]
 # 候选不足 → 判不可信
 bad = pareto.evaluate([{"name": "唯一", "objectives": {"x": 1}}])
 assert bad["trustworthy"] is False and bad["choice"] is None
+# 跨签名候选共存：缺维候选不得让标准化循环 KeyError（跨签名不比，都留前沿）
+cross = pareto.evaluate([
+    {"name": "A", "objectives": {"效果": 9}},
+    {"name": "B", "objectives": {"效果": 6, "成本": 8}},
+])
+assert cross["trustworthy"] is True, cross
+assert set(cross["frontier"]) == {"A", "B"}, cross["frontier"]
+# scores 必须是 {name: score} 方向正确，且同分候选不互相覆盖
+assert set(cross["scores"]) == {"A", "B"}, cross["scores"]
+tie = pareto.evaluate([
+    {"name": "A", "objectives": {"效果": 9, "成本": 3}},
+    {"name": "B", "objectives": {"效果": 9, "成本": 3}},
+])
+assert set(tie["scores"]) == {"A", "B"}, tie["scores"]
+assert all(isinstance(v, float) for v in tie["scores"].values()), tie["scores"]
 print("  frontier:", res["frontier"], "| choice:", res["choice"])
 EOF
 then ok "E3 帕累托前沿正确（支配/分层/min方向/候选不足判不可信）"; else bad "E3 帕累托判定失败"; fi
