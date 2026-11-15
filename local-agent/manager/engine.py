@@ -298,16 +298,25 @@ class ManagerEngine:
         ),
     }
 
-    def __init__(self, repo="", owner="架构·经理", dry_run=None,
+    def __init__(self, repo=None, owner="架构·经理", dry_run=None,
                  devs_per_team=2, simulate=None, transport=None, workers=None,
-                 max_rounds=None):
+                 max_rounds=None, live=None):
         """
-        repo:      仓库（org/repo），空则取 CNB_REPO 环境变量
-        dry_run:   True=只走本地登记不碰平台（默认：无 repo 或非云端时自动 True）
+        repo:      仓库（org/repo）。
+                   `None`（默认）= **按平台注入变量探测**当前仓库（`CNB_GROUP_SLUG` +
+                   `CNB_REPO_NAME` / `CNB_REPO_SLUG` / git remote）——不能因为平台不叫
+                   `CNB_REPO` 就当没仓库（那会让经理永远 dry_run、永远不建 Issue）。
+                   `""` = 显式声明"没有仓库"（本地/离线场景），不去探测。
+        dry_run:   True=只走本地登记不碰平台。
+                   默认口径（五轮修正）：**有 repo + cnb 可用 + 显式允许真写入**才 False。
+                   真建 Issue 是**不可逆的外部副作用**（会往仓库里刷任务单），
+                   所以默认不写，必须 `live=True` 或 `CNB_MANAGER_LIVE=1` 显式开启。
+                   但"没写平台"必须如实标 `local_only`，不许算成"平台激活"。
+        live:      True/False 显式指定「允不允许真建 Issue」；None=读环境开关
         simulate:  测试/演练注入 —— {role: "accept"|"ignore"|"deliver"} 模拟对端真实行为
         transport: 平台传输层注入（离线可测），缺省用 cnb CLI
         """
-        self.repo = repo or os.environ.get("CNB_REPO") or ""
+        self.repo = (_detect_repo() if repo is None else str(repo)) or ""
         self.owner = owner
         self.devs_per_team = max(1, int(devs_per_team))
         self.simulate = simulate or {}
@@ -316,8 +325,9 @@ class ManagerEngine:
         # simulate 只是演练，二者互斥使用（有 workers 时忽略 simulate）。
         self.workers = workers
         self.max_rounds = max_rounds
+        self.live_requested = _live_requested() if live is None else bool(live)
         if dry_run is None:
-            dry_run = not (self.repo and _cnb_available())
+            dry_run = not (self.repo and _cnb_available() and self.live_requested)
         self.dry_run = bool(dry_run)
         self.activated = []      # 已激活任务（task_id/issue/role/...）
         self.actions = []        # 本轮全部动作留痕（内存镜像，落库见 manager_actions）
@@ -403,23 +413,36 @@ class ManagerEngine:
                 "role": a["role"],
                 "domain": a["domain"],
                 "issue": issue_no,
-                # 判据：真激活 = 平台上有可被对端认领的 issue；dry_run 显式标明未碰平台
-                "platform_active": bool(issue_no) or self.dry_run,
+                # 判据（五轮修正）：`platform_active` **只认平台上真建出的 Issue**。
+                # 上一版写成 `bool(issue_no) or self.dry_run`——dry_run 下恒 True，
+                # 于是"没碰平台"被算成"平台激活"，`execute_plan` 还顺手输出
+                # 「平台激活 2 条」，summary 读起来像真派了。这就是自己给自己作证的第五处。
+                "platform_active": bool(issue_no),
                 "dry_run": self.dry_run,
                 "state": "activated",
             }
             if not rec["platform_active"]:
-                rec["state"] = "blocked_no_issue"
-                rec["blocked_reason"] = (
-                    "计划项未在平台建出 Issue —— 对端 agent 无载体可认领，"
-                    "等于没激活；须修平台通道后重试，不得当作已分工"
-                )
+                if self.dry_run:
+                    # 本地登记是真做了（task/agent gid 都在），只是没写平台——
+                    # 这一档叫 local_only，**不是** blocked，但更**不是**平台激活。
+                    rec["state"] = "local_only"
+                    rec["blocked_reason"] = (
+                        "只本地登记（dry_run/未开 live）：平台没建 Issue，"
+                        "对端没有可认领载体；这不算平台激活，须开 live 后重跑才算"
+                    )
+                else:
+                    rec["state"] = "blocked_no_issue"
+                    rec["blocked_reason"] = (
+                        "计划项未在平台建出 Issue —— 对端 agent 无载体可认领，"
+                        "等于没激活；须修平台通道后重试，不得当作已分工"
+                    )
             activated.append(rec)
 
         self.activated.extend(activated)
         payload = {
             "count": len(activated),
             "platform_activated": sum(1 for x in activated if x["platform_active"]),
+            "local_only": sum(1 for x in activated if x["state"] == "local_only"),
             "blocked_no_issue": sum(1 for x in activated if x["state"] == "blocked_no_issue"),
             "dry_run": self.dry_run,
             "tasks": activated,
@@ -1127,6 +1150,7 @@ class ManagerEngine:
             "activated": activated,
             "count": act["count"],
             "platform_activated": act["platform_activated"],
+            "local_only": act.get("local_only", 0),
             "blocked_no_issue": act["blocked_no_issue"],
             "push": pushed,
             "supervise": supervised,
@@ -1159,6 +1183,7 @@ class ManagerEngine:
             "role": self.owner,
             "repo": self.repo,
             "dry_run": self.dry_run,
+            "live_requested": self.live_requested,
             "duties": DUTIES,
             "activated": len(self.activated),
             "supervise": sup["summary"] if sup else None,
@@ -1174,6 +1199,47 @@ def _cnb_available():
     """平台通道是否可用（可用才允许真实建 Issue）。"""
     from shutil import which
     return bool(which("cnb"))
+
+
+def _detect_repo():
+    """探测当前操作仓库（org/repo）——**不假设平台只注入 `CNB_REPO`**。
+
+    五轮修正的第三处：上一版写 `os.environ.get("CNB_REPO")`，可 CNB 云端实际注入的是
+    `CNB_GROUP_SLUG` + `CNB_REPO_NAME`（没有 `CNB_REPO`），于是 `repo` 恒为空串 →
+    `dry_run` 恒 True → 经理**在任何真实环境里都不会去建 Issue**。
+    更糟的是它接着报「平台激活 N 条」——因为 `platform_active` 在 dry_run 下被写成 True。
+    一句话：不是不会派，是它压根没碰平台，还说自己碰了。
+
+    探测源复用 `handle.resolver` 的**前两级**（平台注入变量 → git remote），
+    但**不取它的默认约定兜底**：默认值不是"探测到的"，是"假设的"。
+    把假设写成探测结果，就跟"dry_run 算平台激活"是同一个病——都是让口径替自己作证。
+    返回 "" 表示确实探测不到（本地/离线场景，如实降级为不碰平台）。
+    """
+    # ① 已是 org/repo 形态的直接别名（其他宿主常见：CNB_REPO=acme/svc）
+    for key in ("CNB_REPO", "CNB_REPO_SLUG"):
+        val = str(os.environ.get(key, "") or "").strip()
+        if "/" in val:
+            return val
+    try:
+        from handle import resolver as _hr
+        org, repo = _hr._env_org_repo()
+        if not (org and repo):
+            org, repo = _hr._git_remote_org_repo()
+        if org and repo:
+            return f"{org}/{repo}"
+    except Exception:  # noqa: BLE001 探测失败即"没有仓库"，由上层如实降级
+        pass
+    return ""
+
+
+def _live_requested():
+    """允不允许真建 Issue（不可逆外部副作用，默认不许）。
+
+    历史教训（Issue #239 收尾轮）：`activate()` 一跑就往仓库里刷测试 Issue，
+    前后堆了八十来个还开着。真建 Issue 是**写平台**，不能由"我探测到 repo 了"顺手放行。
+    """
+    flag = str(os.environ.get("CNB_MANAGER_LIVE", "") or "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
 
 
 def _task_activity(task_id):
@@ -1276,10 +1342,17 @@ def _plan_guess(activated):
 
 
 def _digest(act, pushed, supervised):
-    """一句话结论（先给结论再给依据）。"""
-    parts = [f"激活 {act['platform_activated']}/{act['count']} 条任务"]
+    """一句话结论（先给结论再给依据）。
+
+    五轮口径：**平台激活 / 本地登记 / 建不出** 三档分开说，不合并成一句"激活 N 条"。
+    上一版把 dry_run 的本地登记也算进 `platform_activated`，summary 于是长这样：
+    「激活 2 条 / 平台激活 2 条」——平台一条 Issue 都没有。措辞即证据，不能糊。
+    """
+    parts = [f"平台真建 Issue {act['platform_activated']}/{act['count']} 条任务"]
+    if act.get("local_only"):
+        parts.append(f"{act['local_only']} 条只本地登记（没碰平台，不算激活）")
     if act["blocked_no_issue"]:
-        parts.append(f"{act['blocked_no_issue']} 条未拿到 Issue（等于没激活）")
+        parts.append(f"{act['blocked_no_issue']} 条该建却没建成（等于没激活）")
     if pushed:
         parts.append(f"真实接单 {len(pushed['accepted'])} 条，"
                      f"转小组长落实 {len(pushed['delegated'])} 条")

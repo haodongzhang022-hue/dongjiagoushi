@@ -33,6 +33,7 @@
 | **调度** | 经理**找通路**（多通路穷举 + 权责内自决）| 找通路/一条路断了/换下一条/CodeBuddy兜底/申请授权/权责内自决/SELF/HUMAN/末端员工 | `local-agent/manager/lanes.py` | docs/MANAGER.md §8.3-8.4 | Issue #239 二轮 · module manager-lane v0.1.0 |
 | **调度** | 经理**证据闸门 + 承接方工作面**（演练不算干活）| 证据分级/simulated/演练不算/真上工/工作面/work_face/承接方/注册表/换主体 | `local-agent/manager/work.py` + `roles/base.py`(work_face) | docs/MANAGER.md §九 | Issue #239 四轮 · module manager-work v0.1.0 |
 | **调度** | 小组长**带证据上交 / 跨岗借角色** | 带证据上交/无人承接/跨岗借角色/lead_escalate/lead_borrow/接单不是终点 | `roles/team_lead.py` | docs/MANAGER.md §8.6 | Issue #239 二轮 |
+| **调度** | 云端回执双轨 + 云轨不依赖 CLI（`_cloud_receipt` 真接线）| 云端接单/双轨/receipt_source/cloud_degraded/判据没接线/接线接错地方/夹具变活的/cnb CLI 无关/CI红本地绿 | `dispatch_engine.dispatch_verify` + `comment_stream` | docs/MANAGER.md §十三 | Issue #239 六轮 · module manager-cloud-receipt v0.1.0 |
 | **调度** | 经理**判据不自证**（回执不是成果 / 演练不污染真任务 / 借人从名册派生）| 回执不是成果/开工不算成果/自证清白/演练污染/借人写死/名册派生/borrow_candidates/trigger=False | `local-agent/manager/engine.py` + `manager/work.py` + `roles/__init__.py`(TEAM_ROSTER) | docs/MANAGER.md §十 | Issue #239 收尾轮 · module manager-judge v0.1.0 |
 | **调度** | 经理**借人台账**（按需借人 + 成败留痕 + 失败换人）| 借人台账/借人按需/失败换人/重复找不到人用/borrow_ledger/failed_roles/borrow_overview/lead不算借到人 | `local-agent/manager/borrow.py` + `manager/engine.py`(borrow_role) + `data/schema.py`(borrow_ledger) | docs/MANAGER.md §十一 | Issue #239 收尾轮二 · module manager-borrow v0.1.0 |
 | **调度** | 分发深度模型 L1-L4 | 派发/派活深度/接单 | AGENTS.md·分发递进深度 | docs/DISPATCH_DEPTH.md | Issue #33 |
@@ -120,6 +121,9 @@
 | 我要把一个需求拆给多个 agent 干活 | 架构·经理 `manager_execute(plan)`（计划→真激活→督促→监督）|
 | 我怎么确认"真有人干了"而不是模拟器绿了 | `manager.work.credential_of()` → 只认 `role`/`external`，`simulated` 判 fake |
 | 经理只出表格、不真建 Issue / 假装分工 | ACTIVATE 闸门 `ManagerEngine.activate()`（建不出 Issue = blocked_no_issue）|
+| 经理说"平台激活 N 条"，平台却没 Issue | 激活口径三档 `platform_active`/`local_only`/`blocked_no_issue`（真写平台要 `live=True`）|
+| 经理在云端永远不碰平台 | 仓库探测认平台真实变量（`CNB_GROUP_SLUG`+`CNB_REPO_NAME`），`repo=None`=探测 |
+| 引擎单测全绿但流水线里的角色不及格 | `orchestrator` 复用角色自身引擎 + 走 `carry`（测位置比测次数重要）|
 | 经理给了计划还纠结要不要做 | `resolve_choice()`：单路必然 EXECUTE，没有"纠结"这个出口 |
 | 没人接单、活掉地上了 | 经理 `manager_push()` → 调配小组长 `LeadEngine.drive()` 带队落地 |
 | 小组长只会拆表不会带队 | `LeadEngine` 派开发→客观验证→整合交付，一个没过不放行 |

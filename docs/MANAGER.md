@@ -198,7 +198,7 @@ data:
 
 ---
 
-## 七、验收标准（`local-agent/tests/test_manager.sh` 20 组信号灯）
+## 七、验收标准（`local-agent/tests/test_manager.sh` 43 组信号灯）
 
 1. 计划即命令：单路 EXECUTE / 多路取首个 / 空 BLOCKED，无「纠结」出口；
 2. ACTIVATE 闸门：计划 → 逐条激活（任务 gid + 承接角色），空计划显式拒绝；
@@ -223,7 +223,14 @@ data:
     6 类红线（扩容并发/预算/额度/合并/改架构/删数据）仍判 HUMAN，超成本口径单列；
 20. 唤醒失败不是终点：`_fallback_lane()` 按序换通路（fullpath → codebuddy →
     direct_handle），逐条判就绪并记 `missing`，留 `lane_fallback` 痕；仍无人接则交
-    小组长，不空等、不谎报。
+    小组长，不空等、不谎报；
+21-37. 接线闸门 / 证据分级 / 借人台账（见 §九-§十一）；
+38. 没写平台 → `local_only` / `platform_activated=0`，summary 说"平台真建 0/N"（§十二）；
+39. 认平台真实注入变量；`repo=""` 才是没仓库；`live` 需显式开（§十二）；
+40. 流水线经理节点带 repo + 带承接方 + 走 carry（§十二）；
+41. 真写平台要显式开：`CNB_MANAGER_LIVE` 未开时，有 repo 也不去写（§十二）；
+42. 云端 `[接单]` 真进判据（`receipt_source=cloud`），读不全 `cloud_degraded`（§十三）；
+43. 云轨不许依赖 `cnb` CLI：藏掉 CLI 仍查得到 `[接单]`（§十三）。
 
 ```bash
 cd local-agent && bash tests/test_manager.sh
@@ -666,3 +673,198 @@ ha = HandleAbility(agent_name=self.owner, repo=self.repo)   # ← 签名对不�
 > 这轮的教训：**"试过了"和"记住了"是两件事。**
 > 只试不记，团队就是个失忆的人——每轮都在同一个坑前重新摔一次，
 > 而且每次都觉得自己很努力。
+
+---
+
+## 十二、五轮：口径不许替自己作证 —— 三档分明 + 真接线（Issue #239 五轮）
+
+> 你说「继续，这几个处理了」。上一轮（#376）已经合进 `main`（`7693828`），
+> `test_manager.sh` 37 组在干净 `main` 上全绿。所以这轮不加新功能——
+> **拿前面几轮自己立的尺子，去量"已经合并、已经全绿"的成品。**
+
+量出三处，全都在同一条缝上：**汇报的和发生的，不是一件事。**
+
+### 12.1 报告「平台激活 N 条」，平台一条 Issue 都没有
+
+```python
+"platform_active": bool(issue_no) or self.dry_run,   # ← dry_run 下恒 True
+```
+
+`dry_run` 是"不碰平台"，却在这里被算成"平台激活"。于是实操长这样：
+
+```
+[经理引擎] 激活 2 条 / 平台激活 2 条 / blocked_no_issue=0
+```
+
+跑到仓库里看：**一条 Issue 都没有。**
+
+这和 #342 的 `work_started` 是同一个病——**判据由自己制造，等于自己给自己开合格证**。
+只是这次造的不是"开工"，是"激活"这个词本身。
+
+现在三档分明，谁也别糊：
+
+| 档 | 判据 | 算不算激活 |
+|----|------|-----------|
+| `platform_active` | 平台真建出 Issue 编号 | ✅ 真激活 |
+| `local_only` | 只本地登记（task/agent gid 都在），没写平台 | ❌ 不算（但也不是失败） |
+| `blocked_no_issue` | 该建却没建成（开了 live 却失败） | ❌ 等于没分工 |
+
+summary 随之改成直白说：`平台真建 Issue 0/2 条任务；2 条只本地登记（没碰平台，不算激活）`。
+
+**顺带加闸**：真建 Issue 是不可逆外部副作用（收尾轮一跑就刷了八十来个测试 Issue 还开着）。
+现在默认**不写平台**，必须 `live=True` 或 `CNB_MANAGER_LIVE=1` 显式开。
+
+### 12.2 仓库探测只认一个变量名，于是经理永远不碰平台
+
+```python
+self.repo = repo or os.environ.get("CNB_REPO") or ""   # ← 平台没这个变量
+```
+
+CNB 云端实际注入的是 `CNB_GROUP_SLUG` + `CNB_REPO_NAME`（还有 `CNB_REPO_SLUG`），
+**没有 `CNB_REPO`**。于是 `repo` 恒空串 → `dry_run` 恒 True →
+**经理在任何真实环境里都不会去建 Issue**，同时按上一条继续报"平台激活 N 条"。
+
+两条错叠在一起，效果是：它看起来很忙，实际一步没走出去，而且每一句汇报都在替它作证。
+
+现在 `repo` 语义收紧：
+
+- `repo=None`（默认）= **去探测**：平台注入变量 → git remote；
+  **不取 `detect_current_org_repo()` 的默认约定兜底**——默认值是"假设"，不是"探测到的"，
+  把假设写成探测结果，跟"演练算干活"是同一个病。
+- `repo=""` = 显式声明"没有仓库"（本地/离线）。
+
+### 12.3 引擎及格 ≠ 流水线里那个经理及格
+
+`orchestrator._run_role_engine` 里现造一个引擎：
+
+```python
+eng = ManagerEngine(devs_per_team=...)   # 没 repo、没 workers、不走 carry
+res = eng.execute_plan(req)
+```
+
+三个后果一次全中：
+
+| 缺什么 | 后果 |
+|--------|------|
+| 没 `repo` | 恒 `dry_run` → 平台一条都不建，还输出"平台激活" |
+| `workers=None` | 启下「调人/借人/加派」全是空动作（九轮前的老病复发） |
+| 走 `execute_plan` | 承上（裁不可执行）与反馈（多轮）根本没跑 |
+
+单测全绿，是因为单测**直接调引擎**，绕开了流水线这条路。
+所以「引擎及格」和「流水线里的经理及格」能长期共存——**测的位置比测的次数重要。**
+
+现在复用角色自己的引擎（带 repo/owner/承接方）+ 走 `carry`，输出改成承上启下口径。
+
+### 12.4 验收（`test_manager.sh` 37 → 41 组）
+
+| 组 | 锁什么 |
+|----|--------|
+| 38 | 没写平台 → `local_only` / `platform_activated=0`；summary 说"平台真建 0/N"；真建成才 `activated` |
+| 39 | 认平台真实注入变量（`GROUP_SLUG`+`REPO_NAME`）；`repo=""` 才是没仓库；`live` 需显式开 |
+| 40 | 流水线经理节点：带 repo + 带承接方（27 个在册）+ 走 carry；输出不含旧措辞 |
+| 41 | 真写平台要显式开：`CNB_MANAGER_LIVE` 未开时，有 repo 也不去写 |
+
+功能级证据脚本新增 2 份（均已登记 `modules.map`）：
+
+- `scripts/feature-verify/manager/平台激活不冒充.sh`——判"口径与事实是否一致"；
+- `scripts/feature-verify/manager/经理节点真接线.sh`——判"真实调用链上那个经理是不是同一个"。
+
+回归：`local-agent/` 全量 67 个脚本，除 `test_hybrid_pipeline.sh` / `test_topology_slim.sh`
+（**干净 `main` 上同样红**，既有问题，未顺手改）外 0 红；根 `tests/` 18 个全绿；
+文档一致性 101/101；`feature-verify --check-map` 🟢；`--module manager` **6/6** 绿。
+
+> 这轮的教训：**"跑通了"要先问"跑的是哪儿"。**
+>
+> 直接调引擎能绿，流水线里的那个可能一次都没碰过平台；
+> `platform_active` 能绿，因为它自己写自己；
+> `repo` 探测能绿，因为它读到的是假设的默认值。
+>
+> 一句话——**能自己制造的绿灯，都不算证据。**
+
+## 十三、六轮：判据写好了，但没接线（Issue #239 · 与五轮合并）
+
+五轮修的是「口径替自己作证」，这轮量出的是另一种形态：**判据做对了，但从来没人调用它。**
+
+### 13.1 `_cloud_receipt()` 写好了，`dispatch_verify()` 一次都没调过
+
+`_cloud_receipt()` 早在 Issue #166 就落地了（读 Issue/PR 评论流判 `[接单]`），
+注释写着"与 `_has_receipt()` 双轨互补"。可 **`dispatch_verify()` 里一次都没调用过它**：
+
+```
+云端真实场景：
+  对端在 Issue 评论回 [接单]      → 平台可见 ✅
+  本地 progress 表 accepted 事件  → 云端永远不会写 ❌
+  dispatch_verify → _has_receipt() → False → 判「未回执」
+  → 经理转小组长 → 上报"有活停在嘴上"
+```
+
+**对端明明接了单，判据说没接。** 双轨写了两条，一条从来没接上。
+
+现在 `dispatch_verify(assignments, cloud=False)`：
+
+| 返回值 | 含义 |
+|--------|------|
+| `receipt` | 本地 progress 事件 **或** 云端评论 `[接单]`，任一命中即真唤醒 |
+| `receipt_source` | `local` / `cloud` / `local+cloud`，标明凭据来自哪一轨 |
+| `cloud_degraded` | 评论流读不全/读取失败，**不静默判未回执** |
+
+`cloud` **由调用方显式声明**，不做"有 issue 号就自动查"。这轮真踩到：
+
+> `feature-verify/dispatch/真实唤醒校验闸门.sh` 拿 `issue_number: 109` 当夹具，
+> 而 #109 的评论里恰好有真实 `[接单]`。自动查云一开，**夹具变成了活的**——
+> "无回执任务"被外部真实数据判成已回执，三条断言全红。
+> 假数据打真网络，测的就不再是代码，是别人仓库里恰好写了什么。
+
+### 13.2 CI 抓到一个本地抓不到的：云轨被我多卡了一道 CLI
+
+第一版给云轨加了 `_cnb_available()` 门槛。CI 直接红，而**本地全绿**：
+
+```
+本地   CLOUD True cloud True   ✓
+云端   CLOUD False  False      ✗
+```
+
+差别只有一个：CI 镜像里**没装 `cnb` CLI**。可读回执走的是 `comment_stream` 的
+HTTP + token，**跟 `cnb` CLI 一点关系都没有**：
+
+```python
+cloud = ... and _cnb_available() and ...   # ← 无关依赖，CI 下恒 False，云轨整条关闭
+```
+
+后果和 13.1 一模一样：明明该查云端 `[接单]`，却判「未回执」。
+**我修了一个"用自己的假设作证"，顺手又写了一个"用自己的环境假设作证"。**
+
+已去掉该门槛，可用性交给 `_cloud_receipt` 自己判（读不到进 `degraded`）。
+
+### 13.3 顺手把仓库刷了 30 条垃圾单（自查）
+
+`_run_role_engine()` 把需求文本/角色 prompt 当计划交给经理引擎，原先靠"探测不到 repo
+就自动 dry_run"兜底。repo 探测一修，演练就变成了真派发：
+
+```
+跑一次全量测试 → 经理把「你是「架构·总师」…走「架构八步」：」当成一条任务，真建 Issue
+→ #408–#437 共 30 条 CHORE:local-agent · role: 架构·总师 / task-xxx / "ok"
+```
+
+垃圾单标题就是证据：`as-a-i-want-so-that`（用户故事那行）、`given-when-then`（验收标准那行）
+—— `parse_plan()` 把 prompt 每一行都切成了"任务"。
+
+> **根因不是"忘了传参数"，是"用环境探测碰巧失败来代替显式声明"。**
+> 这种正确最脆：不是被保证的，是被环境顺手施舍的，环境一变就翻。
+
+五轮的 `live` 显式闸门（`live=True` / `CNB_MANAGER_LIVE=1`）正是这个方向的正解，两者一致。
+30 条已全部留回指评论后关闭，不删除、不改标题。
+
+### 13.4 验收（`test_manager.sh` 41 → 43 组）
+
+| 组 | 锁什么 |
+|----|--------|
+| 42 | 云端 `[接单]` 真进判据（`receipt_source=cloud`）；评论流读不全 → `cloud_degraded` |
+| 43 | 云轨不许依赖 `cnb` CLI（读评走 HTTP+token）；把 CLI 藏起来仍查得到 `[接单]` |
+
+新增功能级证据脚本 `scripts/feature-verify/manager/平台真碰过没.sh`，
+**在"有 cnb CLI"和"无 cnb CLI"两种环境下都必须绿**——只证明本地绿不算证明。
+
+> 教训叠了一层：13.1 是**判据没接线**，13.2 是**接线接错了地方**。
+> 两者都不报错，都只在特定环境现形。
+> 所以"我跑过了"要追问一句：**在哪儿跑的？换成另一个环境还绿吗？**

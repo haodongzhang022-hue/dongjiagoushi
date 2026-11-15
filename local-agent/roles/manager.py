@@ -147,12 +147,19 @@ class ManagerRole(BaseRole):
     # ---------------- 引擎接入 ----------------
     @property
     def manager_engine(self):
-        """懒加载经理引擎（绑定角色身份与当前仓库）。"""
+        """懒加载经理引擎（绑定角色身份与当前仓库）。
+
+        仓库口径（五轮修正）：角色没拿到显式 `current_repo` 时**交给引擎去探测**，
+        不要在这里拼一个 `""` 传下去——传 `""` 的意思是"我确认没有仓库"，
+        引擎于是不再探测，`dry_run` 恒 True，经理在真实环境里永远不建 Issue。
+        显式给了就传 `org/repo`；给了裸仓库名就补上 org；都没有就传 `None`（= 去探测）。
+        """
         if self._manager_engine is None:
             from manager import ManagerEngine
-            repo = self._current_repo or os.environ.get("CNB_REPO") or ""
-            if repo and "/" not in repo and self._current_org:
-                repo = f"{self._current_org}/{repo}"
+            repo = self._current_repo or None
+            if repo and "/" not in repo:
+                repo = (f"{self._current_org}/{repo}" if self._current_org
+                        else None)
             self._manager_engine = ManagerEngine(
                 repo=repo, owner=self.name,
                 devs_per_team=getattr(self, "devs_per_team", 2),

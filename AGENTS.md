@@ -203,6 +203,18 @@
   带引号（`number: "242"`），旧 `_create_issue()` 用 `int(val)` 解析必失败 → 恒返回 `None`
   → 真实环境**永远激活不出 Issue**。已抽 `_parse_issue_number()` 双格式解析，
   `test_manager.sh` 第 11 组锁死。**"他不干活"先怀疑链路，再怀疑态度。**
+- **①b 判据必须真接线（写好了没人调 = 没有）**：`_cloud_receipt()`（读 Issue/PR 评论流
+  `[接单]`）早在 Issue #166 就落地，注释写着"与 `_has_receipt()` 双轨互补"，
+  **但 `dispatch_verify()` 一次都没调用过**——云端只认本地 `progress` 事件，而对端真实
+  回执在**平台评论**里，那笔永远不进 progress 表 → 对端明明回了 `[接单]`，却判「未回执」
+  → 转小组长 → 上报"有活停在嘴上"。现在 `dispatch_verify(..., cloud=False)` 两轨任一命中
+  即算真实唤醒，`receipt_source` 标明来源（`local`/`cloud`/`local+cloud`），读不全进
+  `cloud_degraded`。`cloud` **由调用方显式声明**（不做"有 issue 号就自动查"——假 issue 号
+  夹具会打真网络，被外部数据污染断言）。`test_manager.sh` 42 组锁死。
+- **①c 云轨不许依赖无关工具**：给云轨加 `_cnb_available()` 门槛 → CI 红、本地绿，差别只在
+  CI 镜像没装 `cnb` CLI。**读回执走 `comment_stream` 的 HTTP+token，跟 CLI 毫无关系**，
+  多卡的这一道把云轨整条关掉。规则：**证据脚本必须在"有/无该工具"两种环境都跑**
+  ——"本地绿"只证明本地绿。`test_manager.sh` 43 组用"藏掉 CLI"锁死。
 - **② EXECUTE 闸门（计划即命令，单路无抉择）**：`resolve_choice()` 是纯函数查表——
   单选项必然 `EXECUTE`（**不存在"要不要按计划走"这个分支**）、多选项取首个、
   空才 `BLOCKED`（且要显式说要什么）。「原地纠结」不是合法输出。
@@ -321,8 +333,25 @@
   `lead`/`self` 兜底**不算借到人**（把 self 记成借人＝又给自己作证）。缺这一步结果记录
   = 「重复找不到人用」：每轮都在同一个借不到的人身上重摔一次，且看日志全是"试过了"。
 
+- **⑯ 口径不替自己作证·三档分开说（五轮）**：「激活」不许糊成一句。**平台真建 Issue
+  （`platform_active`，只认 Issue 编号）/ 只本地登记（`local_only`）/ 该建却没建成
+  （`blocked_no_issue`）** 三档必须分明，summary 直说「平台真建 Issue 0/N」。
+  历史病灶：`platform_active = bool(issue_no) or self.dry_run` 让 dry_run 下恒 True，
+  平台一条 Issue 都没有却报「平台激活 N 条」——与 `work_started` 是同一个病：**判据由
+  自己制造，就等于自己给自己开合格证**。真写平台是不可逆外部副作用（会往仓库刷任务单），
+  必须 `live=True` 或 `CNB_MANAGER_LIVE=1` **显式开**，默认不许。
+- **⑰ 仓库探测不假设变量名（五轮）**：平台注入的是 `CNB_GROUP_SLUG` + `CNB_REPO_NAME`
+  （或 `CNB_REPO_SLUG`），**不是** `CNB_REPO`。只认一个名字的代价是：`repo` 恒空 →
+  `dry_run` 恒 True → **经理在任何真实环境里都不会去建 Issue**，而它还会报"平台激活 N 条"。
+  `repo=None`（默认）= 去探测（平台变量 → git remote，**不取默认约定兜底**，那是假设不是探测）；
+  `repo=""` = 显式声明没有仓库。**把假设写成探测结果，跟"演练算干活"是同一个病。**
+- **⑱ 调用链上的那个才是真的（五轮）**：能力及格 ≠ 流水线里的它及格。`orchestrator` 的经理节点
+  曾现造一个 `ManagerEngine(devs_per_team=...)`——没 repo（恒 dry_run）、`workers=None`
+  （启下调人全是空动作）、走 `execute_plan` 绕过承上/反馈。**必须复用角色自己的引擎
+  （带 repo/owner/承接方）+ 走 `carry`**。信号灯要按「真实调用链」写，不能只在引擎层直调自证。
+
 > 判定口径一句话：**功能写在旁边不接线 = 罢工；接线了但证据来自模拟器 = 白干；
-> 判据能被自己制造 = 自证清白。**
+> 判据能被自己制造 = 自证清白；口径与事实不一致 = 换了个体面说法的白干。**
 > 新增能力必须同时交「主链路调用点」+「接线信号灯」，且凭据必须可分级核验——
 > 真正不能自造的只有两样：**别人写下的推进刻度**，和**别人跑出来的交付物**。
 
